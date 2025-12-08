@@ -5,9 +5,8 @@ import {
   BeadCreateArgsSchema,
   EpicCreateArgsSchema,
   EvaluationSchema,
-  CriterionEvaluationSchema,
   TaskDecompositionSchema,
-  SubtaskSchema,
+  DecomposedSubtaskSchema,
   SwarmStatusSchema,
   ValidationResultSchema,
 } from "./index";
@@ -113,34 +112,32 @@ describe("EvaluationSchema", () => {
 describe("TaskDecompositionSchema", () => {
   it("validates a decomposition", () => {
     const decomposition = {
-      epic_title: "Add auth",
-      epic_description: "Implement OAuth",
+      task: "Add OAuth authentication",
+      reasoning: "Breaking into provider setup and integration",
       subtasks: [
         {
           title: "Add OAuth provider",
           description: "Configure Google OAuth",
           files: ["src/auth/google.ts"],
-          priority: 2,
-          estimated_complexity: "medium" as const,
+          estimated_effort: "medium" as const,
         },
       ],
-      parallel_groups: [["subtask-1"]],
-      estimated_total_time: "2 hours",
+      dependencies: [],
+      shared_context: "Using NextAuth.js",
     };
     expect(() => TaskDecompositionSchema.parse(decomposition)).not.toThrow();
   });
 
-  it("validates subtask complexity values", () => {
-    const complexities = ["trivial", "simple", "medium", "complex", "unknown"];
-    for (const complexity of complexities) {
+  it("validates subtask effort levels", () => {
+    const efforts = ["trivial", "small", "medium", "large"];
+    for (const effort of efforts) {
       const subtask = {
         title: "Test",
-        description: "Test",
+        description: "Test description",
         files: [],
-        priority: 2,
-        estimated_complexity: complexity,
+        estimated_effort: effort,
       };
-      expect(() => SubtaskSchema.parse(subtask)).not.toThrow();
+      expect(() => DecomposedSubtaskSchema.parse(subtask)).not.toThrow();
     }
   });
 });
@@ -149,16 +146,32 @@ describe("SwarmStatusSchema", () => {
   it("validates swarm status", () => {
     const status = {
       epic_id: "bd-epic123",
-      total: 3,
+      total_agents: 3,
+      running: 1,
       completed: 1,
-      in_progress: 1,
-      pending: 1,
       failed: 0,
-      subtasks: [
-        { id: "bd-1", title: "Task 1", status: "completed" as const },
-        { id: "bd-2", title: "Task 2", status: "in_progress" as const },
-        { id: "bd-3", title: "Task 3", status: "pending" as const },
+      blocked: 1,
+      agents: [
+        {
+          bead_id: "bd-1",
+          agent_name: "BlueLake",
+          status: "completed" as const,
+          files: ["src/a.ts"],
+        },
+        {
+          bead_id: "bd-2",
+          agent_name: "RedStone",
+          status: "running" as const,
+          files: ["src/b.ts"],
+        },
+        {
+          bead_id: "bd-3",
+          agent_name: "GreenCastle",
+          status: "pending" as const,
+          files: ["src/c.ts"],
+        },
       ],
+      last_update: "2025-01-01T00:00:00Z",
     };
     expect(() => SwarmStatusSchema.parse(status)).not.toThrow();
   });
