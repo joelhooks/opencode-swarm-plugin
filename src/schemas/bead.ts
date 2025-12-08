@@ -36,11 +36,13 @@ export type BeadDependency = z.infer<typeof BeadDependencySchema>;
  * Core bead schema - validates bd CLI JSON output
  *
  * ID format:
- * - Epic: `bd-{hash}` (e.g., `bd-a1b2c3`)
- * - Subtask: `bd-{hash}.{index}` (e.g., `bd-a1b2c3.1`)
+ * - Standard: `{project}-{hash}` (e.g., `opencode-swarm-plugin-1i8`)
+ * - Subtask: `{project}-{hash}.{index}` (e.g., `opencode-swarm-plugin-1i8.1`)
  */
 export const BeadSchema = z.object({
-  id: z.string().regex(/^[a-z]+-[a-z0-9]+(\.\d+)?$/, "Invalid bead ID format"),
+  id: z
+    .string()
+    .regex(/^[a-z0-9-]+-[a-z0-9]+(\.\d+)?$/, "Invalid bead ID format"),
   title: z.string().min(1, "Title required"),
   description: z.string().optional().default(""),
   status: BeadStatusSchema.default("open"),

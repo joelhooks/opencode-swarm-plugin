@@ -7,7 +7,7 @@
  * These tests don't require external services - they test the learning
  * algorithms and their integration with swarm tools.
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 
 // Learning module
 import {
@@ -1100,5 +1100,328 @@ describe("InMemoryMaturityStorage", () => {
 
     const proven = await storage.getByState("proven");
     expect(proven).toHaveLength(1);
+  });
+});
+
+// ============================================================================
+// Storage Module Tests
+// ============================================================================
+
+import {
+  createStorage,
+  createStorageWithFallback,
+  getStorage,
+  setStorage,
+  resetStorage,
+  InMemoryStorage,
+  SemanticMemoryStorage,
+  isSemanticMemoryAvailable,
+  type LearningStorage,
+} from "./storage";
+
+describe("Storage Module", () => {
+  describe("createStorage", () => {
+    it("creates InMemoryStorage when backend is memory", () => {
+      const storage = createStorage({ backend: "memory" });
+      expect(storage).toBeInstanceOf(InMemoryStorage);
+    });
+
+    it("creates SemanticMemoryStorage when backend is semantic-memory", () => {
+      const storage = createStorage({ backend: "semantic-memory" });
+      expect(storage).toBeInstanceOf(SemanticMemoryStorage);
+    });
+
+    it("uses semantic-memory as default backend", () => {
+      const storage = createStorage();
+      expect(storage).toBeInstanceOf(SemanticMemoryStorage);
+    });
+
+    it("throws on unknown backend", () => {
+      expect(() => createStorage({ backend: "unknown" as any })).toThrow(
+        "Unknown storage backend",
+      );
+    });
+  });
+
+  describe("InMemoryStorage", () => {
+    let storage: InMemoryStorage;
+
+    beforeEach(() => {
+      storage = new InMemoryStorage();
+    });
+
+    it("stores and retrieves feedback", async () => {
+      const event = createFeedbackEvent("type_safe", "helpful");
+      await storage.storeFeedback(event);
+
+      const all = await storage.getAllFeedback();
+      expect(all).toHaveLength(1);
+      expect(all[0].id).toBe(event.id);
+    });
+
+    it("retrieves feedback by criterion", async () => {
+      await storage.storeFeedback(createFeedbackEvent("type_safe", "helpful"));
+      await storage.storeFeedback(createFeedbackEvent("no_bugs", "harmful"));
+
+      const typeSafe = await storage.getFeedbackByCriterion("type_safe");
+      expect(typeSafe).toHaveLength(1);
+      expect(typeSafe[0].criterion).toBe("type_safe");
+    });
+
+    it("retrieves feedback by bead ID", async () => {
+      const event1 = {
+        ...createFeedbackEvent("type_safe", "helpful"),
+        bead_id: "bead-1",
+      };
+      const event2 = {
+        ...createFeedbackEvent("no_bugs", "harmful"),
+        bead_id: "bead-2",
+      };
+
+      await storage.storeFeedback(event1);
+      await storage.storeFeedback(event2);
+
+      const bead1Events = await storage.getFeedbackByBead("bead-1");
+      expect(bead1Events).toHaveLength(1);
+      expect(bead1Events[0].bead_id).toBe("bead-1");
+    });
+
+    it("finds similar feedback (returns all in memory)", async () => {
+      await storage.storeFeedback(createFeedbackEvent("type_safe", "helpful"));
+      await storage.storeFeedback(createFeedbackEvent("no_bugs", "harmful"));
+
+      const similar = await storage.findSimilarFeedback("type", 10);
+      expect(similar.length).toBeGreaterThan(0);
+    });
+
+    it("stores and retrieves patterns", async () => {
+      const pattern = createPattern("Test pattern");
+      await storage.storePattern(pattern);
+
+      const retrieved = await storage.getPattern(pattern.id);
+      expect(retrieved).not.toBeNull();
+      expect(retrieved!.content).toBe("Test pattern");
+    });
+
+    it("retrieves all patterns", async () => {
+      await storage.storePattern(createPattern("Pattern 1"));
+      await storage.storePattern(createPattern("Pattern 2"));
+
+      const all = await storage.getAllPatterns();
+      expect(all).toHaveLength(2);
+    });
+
+    it("filters anti-patterns", async () => {
+      const pattern = createPattern("Good pattern");
+      const antiPattern = {
+        ...createPattern("Bad pattern"),
+        kind: "anti_pattern" as const,
+        is_negative: true,
+      };
+
+      await storage.storePattern(pattern);
+      await storage.storePattern(antiPattern);
+
+      const antiPatterns = await storage.getAntiPatterns();
+      expect(antiPatterns).toHaveLength(1);
+      expect(antiPatterns[0].kind).toBe("anti_pattern");
+    });
+
+    it("retrieves patterns by tag", async () => {
+      const pattern1 = {
+        ...createPattern("Pattern 1"),
+        tags: ["decomposition"],
+      };
+      const pattern2 = { ...createPattern("Pattern 2"), tags: ["testing"] };
+
+      await storage.storePattern(pattern1);
+      await storage.storePattern(pattern2);
+
+      const decompositionPatterns =
+        await storage.getPatternsByTag("decomposition");
+      expect(decompositionPatterns).toHaveLength(1);
+    });
+
+    it("finds similar patterns by content", async () => {
+      await storage.storePattern(createPattern("Split by file type"));
+      await storage.storePattern(createPattern("Split by component"));
+
+      const similar = await storage.findSimilarPatterns("split");
+      expect(similar.length).toBeGreaterThan(0);
+    });
+
+    it("stores and retrieves maturity", async () => {
+      const maturity = createPatternMaturity("pattern-1");
+      await storage.storeMaturity(maturity);
+
+      const retrieved = await storage.getMaturity("pattern-1");
+      expect(retrieved).not.toBeNull();
+      expect(retrieved!.pattern_id).toBe("pattern-1");
+    });
+
+    it("retrieves all maturity records", async () => {
+      await storage.storeMaturity(createPatternMaturity("p1"));
+      await storage.storeMaturity(createPatternMaturity("p2"));
+
+      const all = await storage.getAllMaturity();
+      expect(all).toHaveLength(2);
+    });
+
+    it("filters maturity by state", async () => {
+      const candidate = createPatternMaturity("p1");
+      const proven: PatternMaturity = {
+        pattern_id: "p2",
+        state: "proven",
+        helpful_count: 10,
+        harmful_count: 0,
+        last_validated: new Date().toISOString(),
+      };
+
+      await storage.storeMaturity(candidate);
+      await storage.storeMaturity(proven);
+
+      const candidates = await storage.getMaturityByState("candidate");
+      expect(candidates).toHaveLength(1);
+    });
+
+    it("stores and retrieves maturity feedback", async () => {
+      const feedback = createMaturityFeedback("pattern-1", "helpful");
+      await storage.storeMaturityFeedback(feedback);
+
+      const retrieved = await storage.getMaturityFeedback("pattern-1");
+      expect(retrieved).toHaveLength(1);
+      expect(retrieved[0].type).toBe("helpful");
+    });
+
+    it("closes without error", async () => {
+      await expect(storage.close()).resolves.toBeUndefined();
+    });
+  });
+
+  describe("SemanticMemoryStorage", () => {
+    let storage: SemanticMemoryStorage;
+    let isAvailable: boolean;
+
+    beforeEach(async () => {
+      isAvailable = await isSemanticMemoryAvailable();
+      if (isAvailable) {
+        storage = new SemanticMemoryStorage({
+          collections: {
+            feedback: "test-feedback",
+            patterns: "test-patterns",
+            maturity: "test-maturity",
+          },
+        });
+      }
+    });
+
+    it("skips tests if semantic-memory not available", async () => {
+      if (!isAvailable) {
+        expect(isAvailable).toBe(false);
+        return;
+      }
+      expect(isAvailable).toBe(true);
+    });
+
+    it("stores and retrieves feedback", async () => {
+      if (!isAvailable) return;
+
+      const event = createFeedbackEvent("type_safe", "helpful");
+      await storage.storeFeedback(event);
+
+      // Give semantic-memory time to index
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      const retrieved = await storage.getFeedbackByCriterion("type_safe");
+      expect(retrieved.length).toBeGreaterThan(0);
+    });
+
+    it("stores and retrieves patterns", async () => {
+      if (!isAvailable) return;
+
+      const pattern = createPattern("Test pattern for semantic search");
+      await storage.storePattern(pattern);
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      const retrieved = await storage.getPattern(pattern.id);
+      expect(retrieved).not.toBeNull();
+    });
+
+    it("closes without error", async () => {
+      if (!isAvailable) return;
+
+      await expect(storage.close()).resolves.toBeUndefined();
+    });
+  });
+
+  describe("createStorageWithFallback", () => {
+    it("returns InMemoryStorage when backend is memory", async () => {
+      const storage = await createStorageWithFallback({ backend: "memory" });
+      expect(storage).toBeInstanceOf(InMemoryStorage);
+    });
+
+    it("returns appropriate backend based on availability", async () => {
+      const storage = await createStorageWithFallback();
+      const isAvailable = await isSemanticMemoryAvailable();
+
+      if (isAvailable) {
+        expect(storage).toBeInstanceOf(SemanticMemoryStorage);
+      } else {
+        expect(storage).toBeInstanceOf(InMemoryStorage);
+      }
+    });
+  });
+
+  describe("Global Storage Management", () => {
+    beforeEach(async () => {
+      await resetStorage();
+    });
+
+    it("getStorage returns a storage instance", async () => {
+      const storage = await getStorage();
+      expect(storage).toBeDefined();
+      expect(storage).toHaveProperty("storeFeedback");
+      expect(storage).toHaveProperty("storePattern");
+      expect(storage).toHaveProperty("storeMaturity");
+    });
+
+    it("getStorage returns same instance on multiple calls", async () => {
+      const storage1 = await getStorage();
+      const storage2 = await getStorage();
+      expect(storage1).toBe(storage2);
+    });
+
+    it("setStorage replaces global instance", async () => {
+      const customStorage = new InMemoryStorage();
+      setStorage(customStorage);
+
+      const retrieved = await getStorage();
+      expect(retrieved).toBe(customStorage);
+    });
+
+    it("resetStorage clears global instance", async () => {
+      const storage1 = await getStorage();
+      await resetStorage();
+      const storage2 = await getStorage();
+
+      expect(storage1).not.toBe(storage2);
+    });
+
+    it("resetStorage calls close on existing instance", async () => {
+      const storage = await getStorage();
+      const closeSpy = vi.spyOn(storage, "close");
+
+      await resetStorage();
+
+      expect(closeSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe("isSemanticMemoryAvailable", () => {
+    it("returns boolean", async () => {
+      const available = await isSemanticMemoryAvailable();
+      expect(typeof available).toBe("boolean");
+    });
   });
 });

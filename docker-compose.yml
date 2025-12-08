@@ -1,0 +1,45 @@
+# Docker Compose for opencode-swarm-plugin integration tests
+# Services: agent-mail (FastAPI) + test-runner (Bun)
+
+services:
+  agent-mail:
+    build:
+      context: ./docker/agent-mail
+      dockerfile: Dockerfile
+    ports:
+      - "8765:8765"
+    environment:
+      - AGENT_MAIL_HOST=0.0.0.0
+      - AGENT_MAIL_PORT=8765
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/health/liveness"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - test-network
+
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      agent-mail:
+        condition: service_healthy
+    environment:
+      - AGENT_MAIL_URL=http://agent-mail:8765
+      - GIT_AUTHOR_NAME=Test Runner
+      - GIT_AUTHOR_EMAIL=test@example.com
+      - GIT_COMMITTER_NAME=Test Runner
+      - GIT_COMMITTER_EMAIL=test@example.com
+    volumes:
+      # Mount source for faster iteration (optional - comment out for clean builds)
+      - ./src:/app/src:ro
+      - ./tests:/app/tests:ro
+    networks:
+      - test-network
+
+networks:
+  test-network:
+    driver: bridge

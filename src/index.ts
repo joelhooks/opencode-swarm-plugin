@@ -265,3 +265,33 @@ export {
   formatSubtaskPrompt,
   formatEvaluationPrompt,
 } from "./swarm";
+
+/**
+ * Re-export storage module
+ *
+ * Includes:
+ * - createStorage, createStorageWithFallback - Factory functions
+ * - getStorage, setStorage, resetStorage - Global instance management
+ * - InMemoryStorage, SemanticMemoryStorage - Storage implementations
+ * - isSemanticMemoryAvailable - Availability check
+ * - DEFAULT_STORAGE_CONFIG - Default configuration
+ *
+ * Types:
+ * - LearningStorage - Unified storage interface
+ * - StorageConfig, StorageBackend, StorageCollections - Configuration types
+ */
+export {
+  createStorage,
+  createStorageWithFallback,
+  getStorage,
+  setStorage,
+  resetStorage,
+  InMemoryStorage,
+  SemanticMemoryStorage,
+  isSemanticMemoryAvailable,
+  DEFAULT_STORAGE_CONFIG,
+  type LearningStorage,
+  type StorageConfig,
+  type StorageBackend,
+  type StorageCollections,
+} from "./storage";

@@ -156,8 +156,18 @@ export class FileReservationConflictError extends Error {
 // MCP Client
 // ============================================================================
 
+/** MCP tool result with content wrapper (real Agent Mail format) */
+interface MCPToolResult<T = unknown> {
+  content?: Array<{ type: string; text: string }>;
+  structuredContent?: T;
+  isError?: boolean;
+}
+
 /**
  * Call an Agent Mail MCP tool
+ *
+ * Handles both direct results (mock server) and wrapped results (real server).
+ * Real Agent Mail returns: { content: [...], structuredContent: {...} }
  */
 async function mcpCall<T>(
   toolName: string,
@@ -181,18 +191,38 @@ async function mcpCall<T>(
     );
   }
 
-  const result = (await response.json()) as MCPResponse<T>;
+  const json = (await response.json()) as MCPResponse<MCPToolResult<T> | T>;
 
-  if (result.error) {
+  if (json.error) {
     throw new AgentMailError(
-      result.error.message,
+      json.error.message,
       toolName,
-      result.error.code,
-      result.error.data,
+      json.error.code,
+      json.error.data,
     );
   }
 
-  return result.result as T;
+  const result = json.result;
+
+  // Handle wrapped response format (real Agent Mail server)
+  // Check for isError first (error responses don't have structuredContent)
+  if (result && typeof result === "object") {
+    const wrapped = result as MCPToolResult<T>;
+
+    // Check for error response (has isError: true but no structuredContent)
+    if (wrapped.isError) {
+      const errorText = wrapped.content?.[0]?.text || "Unknown error";
+      throw new AgentMailError(errorText, toolName);
+    }
+
+    // Check for success response with structuredContent
+    if ("structuredContent" in wrapped) {
+      return wrapped.structuredContent as T;
+    }
+  }
+
+  // Handle direct response format (mock server)
+  return result as T;
 }
 
 /**
