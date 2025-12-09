@@ -347,11 +347,22 @@ const DEPENDENCIES: Dependency[] = [
   },
   {
     name: "Agent Mail",
-    command: "agent-mail",
-    checkArgs: ["--help"],
+    command: "curl",
+    checkArgs: [
+      "-s",
+      "-X",
+      "POST",
+      "http://localhost:8765/mcp",
+      "-H",
+      "Content-Type: application/json",
+      "-d",
+      "{}",
+      "-o",
+      "/dev/null",
+    ],
     required: false,
-    install: "go install github.com/joelhooks/agent-mail/cmd/agent-mail@latest",
-    installType: "go",
+    install: "https://github.com/Dicklesworthstone/mcp_agent_mail",
+    installType: "manual",
     description: "Multi-agent coordination & file reservations",
   },
   {
@@ -374,8 +385,8 @@ const DEPENDENCIES: Dependency[] = [
   },
   {
     name: "semantic-memory",
-    command: "semantic-memory",
-    checkArgs: ["--help"],
+    command: "which",
+    checkArgs: ["semantic-memory"],
     required: false,
     install: "npm install -g semantic-memory",
     installType: "npm",
@@ -622,6 +633,104 @@ async function setup() {
 
   p.intro("opencode-swarm-plugin v" + VERSION);
 
+  // Check if already configured FIRST
+  const configDir = join(homedir(), ".config", "opencode");
+  const pluginsDir = join(configDir, "plugins");
+  const commandsDir = join(configDir, "commands");
+  const agentsDir = join(configDir, "agents");
+
+  const pluginPath = join(pluginsDir, "swarm.ts");
+  const commandPath = join(commandsDir, "swarm.md");
+  const plannerAgentPath = join(agentsDir, "swarm-planner.md");
+  const workerAgentPath = join(agentsDir, "swarm-worker.md");
+
+  const existingFiles = [
+    pluginPath,
+    commandPath,
+    plannerAgentPath,
+    workerAgentPath,
+  ].filter((f) => existsSync(f));
+
+  if (existingFiles.length > 0) {
+    p.log.success("Swarm is already configured!");
+    p.log.message(dim("  Found " + existingFiles.length + "/4 config files"));
+
+    const action = await p.select({
+      message: "What would you like to do?",
+      options: [
+        {
+          value: "skip",
+          label: "Keep existing config",
+          hint: "Exit without changes",
+        },
+        {
+          value: "models",
+          label: "Update agent models",
+          hint: "Keep customizations, just change models",
+        },
+        {
+          value: "reinstall",
+          label: "Reinstall everything",
+          hint: "Check deps and regenerate all config files",
+        },
+      ],
+    });
+
+    if (p.isCancel(action) || action === "skip") {
+      p.outro("Config unchanged. Run 'swarm config' to see file locations.");
+      return;
+    }
+
+    if (action === "models") {
+      // Quick model update flow
+      const coordinatorModel = await p.select({
+        message: "Select coordinator model:",
+        options: COORDINATOR_MODELS,
+        initialValue: "anthropic/claude-sonnet-4-5",
+      });
+
+      if (p.isCancel(coordinatorModel)) {
+        p.cancel("Setup cancelled");
+        process.exit(0);
+      }
+
+      const workerModel = await p.select({
+        message: "Select worker model:",
+        options: WORKER_MODELS,
+        initialValue: "anthropic/claude-haiku-4-5",
+      });
+
+      if (p.isCancel(workerModel)) {
+        p.cancel("Setup cancelled");
+        process.exit(0);
+      }
+
+      // Update model lines in agent files
+      if (existsSync(plannerAgentPath)) {
+        const content = readFileSync(plannerAgentPath, "utf-8");
+        const updated = content.replace(
+          /^model: .+$/m,
+          `model: ${coordinatorModel}`,
+        );
+        writeFileSync(plannerAgentPath, updated);
+        p.log.success("Planner: " + coordinatorModel);
+      }
+      if (existsSync(workerAgentPath)) {
+        const content = readFileSync(workerAgentPath, "utf-8");
+        const updated = content.replace(
+          /^model: .+$/m,
+          `model: ${workerModel}`,
+        );
+        writeFileSync(workerAgentPath, updated);
+        p.log.success("Worker: " + workerModel);
+      }
+      p.outro("Models updated! Your customizations are preserved.");
+      return;
+    }
+    // action === "reinstall" - fall through to full setup
+  }
+
+  // Full setup flow
   const s = p.spinner();
   s.start("Checking dependencies...");
 
@@ -676,6 +785,7 @@ async function setup() {
     }
   }
 
+  // Only prompt for optional deps if there are missing ones
   if (optionalMissing.length > 0) {
     const installable = optionalMissing.filter(
       (r) => r.dep.installType !== "manual",
@@ -844,21 +954,12 @@ async function setup() {
 
   p.log.step("Setting up OpenCode integration...");
 
-  const configDir = join(homedir(), ".config", "opencode");
-  const pluginsDir = join(configDir, "plugins");
-  const commandsDir = join(configDir, "commands");
-  const agentsDir = join(configDir, "agents");
-
+  // Create directories if needed
   for (const dir of [pluginsDir, commandsDir, agentsDir]) {
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
   }
-
-  const pluginPath = join(pluginsDir, "swarm.ts");
-  const commandPath = join(commandsDir, "swarm.md");
-  const plannerAgentPath = join(agentsDir, "swarm-planner.md");
-  const workerAgentPath = join(agentsDir, "swarm-worker.md");
 
   writeFileSync(pluginPath, PLUGIN_WRAPPER);
   p.log.success("Plugin: " + pluginPath);
