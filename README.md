@@ -18,127 +18,105 @@ Break complex tasks into parallel subtasks, spawn agents to work on them, and co
 ## Quick Start
 
 ```bash
-# 1. Install required dependencies
-brew install sst/tap/opencode
-curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash
-
-# 2. Install the plugin globally
+# 1. Install the plugin globally
 npm install -g opencode-swarm-plugin
 
-# 3. Run setup (creates plugin wrapper, /swarm command, @swarm-planner agent)
+# 2. Run interactive setup
 swarm setup
+```
 
-# 4. Check all dependencies
-swarm doctor
+The setup wizard will:
 
-# 5. Initialize beads in your project
+- Check for required dependencies (OpenCode, Beads)
+- Offer to install missing dependencies
+- Let you select optional dependencies (Agent Mail, Redis, etc.)
+- Create the plugin wrapper, /swarm command, and @swarm-planner agent
+
+Then initialize your project:
+
+```bash
 cd your-project
-bd init
+swarm init
 ```
 
 That's it! Now use `/swarm "your task"` in OpenCode.
 
-### 2. Install Plugin
+## CLI Commands
 
-```bash
-npm install -g opencode-swarm-plugin
+```
+swarm setup    Interactive installer - checks and installs dependencies
+swarm doctor   Health check - shows status of all dependencies
+swarm init     Initialize beads in current project
+swarm version  Show version
+swarm help     Show this help
 ```
 
-### 3. Create Plugin Wrapper
+### swarm setup
 
-Create `~/.config/opencode/plugins/swarm.ts`:
+Interactive installer that guides you through the complete setup:
 
-```ts
-import { SwarmPlugin } from "opencode-swarm-plugin";
-export default SwarmPlugin;
+```
+┌  opencode-swarm-plugin v0.9.0
+│
+◇  Checking dependencies...
+│
+◆  OpenCode
+◆  Beads
+◆  Go
+▲  Agent Mail (optional)
+▲  Redis (optional)
+│
+◆  Install optional dependencies?
+│  ◻ Agent Mail - Multi-agent coordination
+│  ◻ Redis - Rate limiting
+│
+◇  Setting up OpenCode integration...
+│
+◆  Plugin: ~/.config/opencode/plugins/swarm.ts
+◆  Command: ~/.config/opencode/commands/swarm.md
+◆  Agent: ~/.config/opencode/agents/swarm-planner.md
+│
+└  Setup complete!
 ```
 
-### 4. Add the /swarm Command
+### swarm doctor
 
-Create `~/.config/opencode/commands/swarm.md`:
+Check the health of all dependencies:
 
-```markdown
----
-description: Decompose task into parallel subtasks and coordinate agents
----
-
-You are a swarm coordinator. Take a complex task, break it into beads, and unleash parallel agents.
-
-## Usage
-
-/swarm <task description or bead-id>
-
-## Workflow
-
-1. **Initialize**: `agentmail_init` with project_path and task_description
-2. **Decompose**: Use `swarm_select_strategy` then `swarm_plan_prompt` to break down the task
-3. **Create beads**: `beads_create_epic` with subtasks and file assignments
-4. **Reserve files**: `agentmail_reserve` for each subtask's files
-5. **Spawn agents**: Use Task tool with `swarm_spawn_subtask` prompts - spawn ALL in parallel
-6. **Monitor**: Check `agentmail_inbox` for progress, use `agentmail_summarize_thread` for overview
-7. **Complete**: `swarm_complete` when done, then `beads_sync` to push
-
-## Strategy Selection
-
-The plugin auto-selects decomposition strategy based on task keywords:
-
-| Strategy      | Best For                | Keywords                               |
-| ------------- | ----------------------- | -------------------------------------- |
-| file-based    | Refactoring, migrations | refactor, migrate, rename, update all  |
-| feature-based | New features            | add, implement, build, create, feature |
-| risk-based    | Bug fixes, security     | fix, bug, security, critical, urgent   |
-
-Begin decomposition now.
+```
+┌  swarm doctor v0.9.0
+│
+◇  Required dependencies:
+│
+◆  OpenCode v1.0.134
+◆  Beads v0.29.0
+│
+◇  Optional dependencies:
+│
+◆  Go v1.25.2 - Required for Agent Mail
+▲  Agent Mail - not found
+◆  Redis - Rate limiting
+│
+└  All required dependencies installed. 1 optional missing.
 ```
 
-### 5. Add the @swarm-planner Agent
+### swarm init
 
-Create `~/.config/opencode/agents/swarm-planner.md`:
+Initialize beads in your project with an interactive wizard:
 
-```markdown
----
-name: swarm-planner
-description: Strategic task decomposition for swarm coordination
-model: claude-sonnet-4-5
----
-
-You are a swarm planner. Decompose tasks into optimal parallel subtasks.
-
-## Workflow
-
-1. Call `swarm_select_strategy` to analyze the task
-2. Call `swarm_plan_prompt` to get strategy-specific guidance
-3. Create a BeadTree following the guidelines
-4. Return ONLY valid JSON - no markdown, no explanation
-
-## Output Format
-
-{
-"epic": { "title": "...", "description": "..." },
-"subtasks": [
-{
-"title": "...",
-"description": "...",
-"files": ["src/..."],
-"dependencies": [],
-"estimated_complexity": 2
-}
-]
-}
-
-## Rules
-
-- 2-7 subtasks (too few = not parallel, too many = overhead)
-- No file overlap between subtasks
-- Include tests with the code they test
-- Order by dependency (if B needs A, A comes first)
 ```
-
-### 6. Initialize Beads in Your Project
-
-```bash
-cd your-project
-bd init
+┌  swarm init v0.9.0
+│
+◇  Initializing beads...
+◆  Created .beads/ directory
+│
+◆  Create your first bead?
+│  ● Yes / ○ No
+│
+◇  Bead title: Implement user authentication
+◇  Type: Feature
+│
+└  Project initialized!
 ```
 
 ## Usage
