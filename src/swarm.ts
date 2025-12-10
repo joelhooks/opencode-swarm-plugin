@@ -901,9 +901,10 @@ async function queryEpicSubtasks(epicId: string): Promise<Bead[]> {
     .nothrow();
 
   if (result.exitCode !== 0) {
-    // Don't throw - just return empty and warn
-    console.warn(
-      `[swarm] Failed to query subtasks: ${result.stderr.toString()}`,
+    // Don't throw - just return empty and log error prominently
+    console.error(
+      `[swarm] ERROR: Failed to query subtasks for epic ${epicId}:`,
+      result.stderr.toString(),
     );
     return [];
   }
@@ -913,9 +914,16 @@ async function queryEpicSubtasks(epicId: string): Promise<Bead[]> {
     return z.array(BeadSchema).parse(parsed);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      console.warn(`[swarm] Invalid bead data: ${error.message}`);
+      console.error(
+        `[swarm] ERROR: Invalid bead data for epic ${epicId}:`,
+        error.message,
+      );
       return [];
     }
+    console.error(
+      `[swarm] ERROR: Failed to parse beads for epic ${epicId}:`,
+      error,
+    );
     throw error;
   }
 }
@@ -944,8 +952,12 @@ async function querySwarmMessages(
       llm_mode: false, // Just need the count
     });
     return summary.summary.total_messages;
-  } catch {
-    // Thread might not exist yet
+  } catch (error) {
+    // Thread might not exist yet, or query failed
+    console.warn(
+      `[swarm] Failed to query swarm messages for thread ${threadId}:`,
+      error,
+    );
     return 0;
   }
 }
@@ -990,21 +1002,30 @@ interface CassSearchResult {
 }
 
 /**
+ * CASS query result with status
+ */
+type CassQueryResult =
+  | { status: "unavailable" }
+  | { status: "failed"; error?: string }
+  | { status: "empty"; query: string }
+  | { status: "success"; data: CassSearchResult };
+
+/**
  * Query CASS for similar past tasks
  *
  * @param task - Task description to search for
  * @param limit - Maximum results to return
- * @returns Search results or null if CASS unavailable
+ * @returns Structured result with status indicator
  */
 async function queryCassHistory(
   task: string,
   limit: number = 3,
-): Promise<CassSearchResult | null> {
+): Promise<CassQueryResult> {
   // Check if CASS is available first
   const cassAvailable = await isToolAvailable("cass");
   if (!cassAvailable) {
     warnMissingTool("cass");
-    return null;
+    return { status: "unavailable" };
   }
 
   try {
@@ -1013,25 +1034,38 @@ async function queryCassHistory(
       .nothrow();
 
     if (result.exitCode !== 0) {
-      return null;
+      const error = result.stderr.toString();
+      console.warn(
+        `[swarm] CASS search failed (exit ${result.exitCode}):`,
+        error,
+      );
+      return { status: "failed", error };
     }
 
     const output = result.stdout.toString();
     if (!output.trim()) {
-      return { query: task, results: [] };
+      return { status: "empty", query: task };
     }
 
     try {
       const parsed = JSON.parse(output);
-      return {
+      const searchResult: CassSearchResult = {
         query: task,
         results: Array.isArray(parsed) ? parsed : parsed.results || [],
       };
-    } catch {
-      return { query: task, results: [] };
+
+      if (searchResult.results.length === 0) {
+        return { status: "empty", query: task };
+      }
+
+      return { status: "success", data: searchResult };
+    } catch (error) {
+      console.warn(`[swarm] Failed to parse CASS output:`, error);
+      return { status: "failed", error: String(error) };
     }
-  } catch {
-    return null;
+  } catch (error) {
+    console.error(`[swarm] CASS query error:`, error);
+    return { status: "failed", error: String(error) };
   }
 }
 
@@ -1223,13 +1257,35 @@ export const swarm_plan_prompt = tool({
 
     // Query CASS for similar past tasks
     let cassContext = "";
-    let cassResult: CassSearchResult | null = null;
+    let cassResultInfo: {
+      queried: boolean;
+      results_found?: number;
+      included_in_context?: boolean;
+      reason?: string;
+    };
 
     if (args.query_cass !== false) {
-      cassResult = await queryCassHistory(args.task, args.cass_limit ?? 3);
-      if (cassResult && cassResult.results.length > 0) {
-        cassContext = formatCassHistoryForPrompt(cassResult);
+      const cassResult = await queryCassHistory(
+        args.task,
+        args.cass_limit ?? 3,
+      );
+      if (cassResult.status === "success") {
+        cassContext = formatCassHistoryForPrompt(cassResult.data);
+        cassResultInfo = {
+          queried: true,
+          results_found: cassResult.data.results.length,
+          included_in_context: true,
+        };
+      } else {
+        cassResultInfo = {
+          queried: true,
+          results_found: 0,
+          included_in_context: false,
+          reason: cassResult.status,
+        };
       }
+    } else {
+      cassResultInfo = { queried: false, reason: "disabled" };
     }
 
     // Format strategy guidelines
@@ -1271,13 +1327,7 @@ export const swarm_plan_prompt = tool({
         },
         validation_note:
           "Parse agent response as JSON and validate with swarm_validate_decomposition",
-        cass_history: cassResult
-          ? {
-              queried: true,
-              results_found: cassResult.results.length,
-              included_in_context: cassResult.results.length > 0,
-            }
-          : { queried: false, reason: "disabled or unavailable" },
+        cass_history: cassResultInfo,
       },
       null,
       2,
@@ -1324,13 +1374,35 @@ export const swarm_decompose = tool({
   async execute(args) {
     // Query CASS for similar past tasks
     let cassContext = "";
-    let cassResult: CassSearchResult | null = null;
+    let cassResultInfo: {
+      queried: boolean;
+      results_found?: number;
+      included_in_context?: boolean;
+      reason?: string;
+    };
 
     if (args.query_cass !== false) {
-      cassResult = await queryCassHistory(args.task, args.cass_limit ?? 3);
-      if (cassResult && cassResult.results.length > 0) {
-        cassContext = formatCassHistoryForPrompt(cassResult);
+      const cassResult = await queryCassHistory(
+        args.task,
+        args.cass_limit ?? 3,
+      );
+      if (cassResult.status === "success") {
+        cassContext = formatCassHistoryForPrompt(cassResult.data);
+        cassResultInfo = {
+          queried: true,
+          results_found: cassResult.data.results.length,
+          included_in_context: true,
+        };
+      } else {
+        cassResultInfo = {
+          queried: true,
+          results_found: 0,
+          included_in_context: false,
+          reason: cassResult.status,
+        };
       }
+    } else {
+      cassResultInfo = { queried: false, reason: "disabled" };
     }
 
     // Combine user context with CASS history
@@ -1363,13 +1435,7 @@ export const swarm_decompose = tool({
         },
         validation_note:
           "Parse agent response as JSON and validate with BeadTreeSchema from schemas/bead.ts",
-        cass_history: cassResult
-          ? {
-              queried: true,
-              results_found: cassResult.results.length,
-              included_in_context: cassResult.results.length > 0,
-            }
-          : { queried: false, reason: "disabled or unavailable" },
+        cass_history: cassResultInfo,
       },
       null,
       2,
@@ -1726,9 +1792,21 @@ async function runUbsScan(files: string[]): Promise<UbsScanResult | null> {
 
     try {
       const parsed = JSON.parse(output);
+
+      // Basic validation of structure
+      if (typeof parsed !== "object" || parsed === null) {
+        throw new Error("UBS output is not an object");
+      }
+      if (!Array.isArray(parsed.bugs)) {
+        console.warn("[swarm] UBS output missing bugs array, using empty");
+      }
+      if (typeof parsed.summary !== "object" || parsed.summary === null) {
+        console.warn("[swarm] UBS output missing summary object, using empty");
+      }
+
       return {
         exitCode: result.exitCode,
-        bugs: parsed.bugs || [],
+        bugs: Array.isArray(parsed.bugs) ? parsed.bugs : [],
         summary: parsed.summary || {
           total: 0,
           critical: 0,
@@ -1737,8 +1815,13 @@ async function runUbsScan(files: string[]): Promise<UbsScanResult | null> {
           low: 0,
         },
       };
-    } catch {
-      // UBS output wasn't JSON, return basic result
+    } catch (error) {
+      // UBS output wasn't JSON - this is an error condition
+      console.error(
+        `[swarm] CRITICAL: UBS scan failed to parse JSON output:`,
+        error,
+      );
+      console.error(`[swarm] Raw output:`, output);
       return {
         exitCode: result.exitCode,
         bugs: [],
@@ -1937,10 +2020,17 @@ export const swarm_complete = tool({
     }
 
     // Release file reservations for this agent
-    await mcpCall("release_file_reservations", {
-      project_key: args.project_key,
-      agent_name: args.agent_name,
-    });
+    try {
+      await mcpCall("release_file_reservations", {
+        project_key: args.project_key,
+        agent_name: args.agent_name,
+      });
+    } catch (error) {
+      console.warn(
+        `[swarm] Failed to release file reservations for ${args.agent_name}:`,
+        error,
+      );
+    }
 
     // Extract epic ID
     const epicId = args.bead_id.includes(".")

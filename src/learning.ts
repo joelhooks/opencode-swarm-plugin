@@ -231,11 +231,14 @@ export function calculateDecayedValue(
   now: Date = new Date(),
   halfLifeDays: number = 90,
 ): number {
+  // Prevent division by zero
+  const safeHalfLife = halfLifeDays <= 0 ? 1 : halfLifeDays;
+
   const eventTime = new Date(timestamp).getTime();
   const nowTime = now.getTime();
   const ageDays = Math.max(0, (nowTime - eventTime) / (24 * 60 * 60 * 1000));
 
-  return Math.pow(0.5, ageDays / halfLifeDays);
+  return Math.pow(0.5, ageDays / safeHalfLife);
 }
 
 /**
@@ -252,6 +255,18 @@ export function calculateCriterionWeight(
   events: FeedbackEvent[],
   config: LearningConfig = DEFAULT_LEARNING_CONFIG,
 ): CriterionWeight {
+  // Return early with default weight if events array is empty
+  if (events.length === 0) {
+    return {
+      criterion: "unknown",
+      weight: 1.0,
+      helpful_count: 0,
+      harmful_count: 0,
+      last_validated: undefined,
+      half_life_days: config.halfLifeDays,
+    };
+  }
+
   const now = new Date();
   let helpfulSum = 0;
   let harmfulSum = 0;
@@ -284,7 +299,7 @@ export function calculateCriterionWeight(
   const weight = total > 0 ? Math.max(0.1, helpfulSum / total) : 1.0;
 
   return {
-    criterion: events[0]?.criterion ?? "unknown",
+    criterion: events[0].criterion,
     weight,
     helpful_count: helpfulCount,
     harmful_count: harmfulCount,
@@ -476,12 +491,24 @@ export interface FeedbackStorage {
 
 /**
  * In-memory feedback storage (for testing and short-lived sessions)
+ *
+ * Uses LRU eviction to prevent unbounded memory growth.
  */
 export class InMemoryFeedbackStorage implements FeedbackStorage {
   private events: FeedbackEvent[] = [];
+  private readonly maxSize: number;
+
+  constructor(maxSize: number = 10000) {
+    this.maxSize = maxSize;
+  }
 
   async store(event: FeedbackEvent): Promise<void> {
     this.events.push(event);
+
+    // Evict oldest events if we exceed max size (LRU)
+    if (this.events.length > this.maxSize) {
+      this.events = this.events.slice(this.events.length - this.maxSize);
+    }
   }
 
   async getByCriterion(criterion: string): Promise<FeedbackEvent[]> {

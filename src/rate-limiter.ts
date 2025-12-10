@@ -387,7 +387,17 @@ export class SqliteRateLimiter implements RateLimiter {
       )
       .get(agentName, endpoint, window, windowStart);
 
-    const count = result?.count || 0;
+    // Validate result before accessing properties
+    if (!result || typeof result.count !== "number") {
+      // Query failed or returned invalid data, assume no usage
+      return {
+        allowed: true,
+        remaining: limit,
+        resetAt: now + windowDuration,
+      };
+    }
+
+    const count = result.count;
     const remaining = Math.max(0, limit - count);
     const allowed = count < limit;
 
@@ -401,7 +411,8 @@ export class SqliteRateLimiter implements RateLimiter {
         )
         .get(agentName, endpoint, window, windowStart);
 
-      if (oldest?.timestamp) {
+      // Validate oldest result before accessing properties
+      if (oldest && typeof oldest.timestamp === "number") {
         resetAt = oldest.timestamp + windowDuration;
       }
     }
@@ -590,31 +601,46 @@ export async function createRateLimiter(options?: {
     return new RedisRateLimiter(redis);
   }
 
-  // Auto-select: try Redis first, fall back to SQLite
-  try {
-    const redis = new Redis(redisUrl, {
-      connectTimeout: 2000,
-      maxRetriesPerRequest: 1,
-      retryStrategy: () => null, // Don't retry on failure
-      lazyConnect: true,
-    });
+  // Auto-select: try Redis first with retry, fall back to SQLite
+  const maxRetries = 3;
+  const retryDelays = [100, 500, 1000]; // exponential backoff
 
-    // Test connection
-    await redis.connect();
-    await redis.ping();
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const redis = new Redis(redisUrl, {
+        connectTimeout: 2000,
+        maxRetriesPerRequest: 1,
+        retryStrategy: () => null, // Don't retry on failure
+        lazyConnect: true,
+      });
 
-    return new RedisRateLimiter(redis);
-  } catch (error) {
-    // Redis connection failed, fall back to SQLite
-    if (!hasWarnedAboutFallback) {
-      console.warn(
-        `[rate-limiter] Redis connection failed (${redisUrl}), falling back to SQLite at ${sqlitePath}`,
-      );
-      hasWarnedAboutFallback = true;
+      // Test connection
+      await redis.connect();
+      await redis.ping();
+
+      return new RedisRateLimiter(redis);
+    } catch (error) {
+      const isLastAttempt = attempt === maxRetries - 1;
+
+      if (isLastAttempt) {
+        // All retries exhausted, fall back to SQLite
+        if (!hasWarnedAboutFallback) {
+          console.warn(
+            `[rate-limiter] Redis connection failed after ${maxRetries} attempts (${redisUrl}), falling back to SQLite at ${sqlitePath}`,
+          );
+          hasWarnedAboutFallback = true;
+        }
+
+        return new SqliteRateLimiter(sqlitePath);
+      }
+
+      // Wait before retrying (exponential backoff)
+      await new Promise((resolve) => setTimeout(resolve, retryDelays[attempt]));
     }
-
-    return new SqliteRateLimiter(sqlitePath);
   }
+
+  // Fallback (should never reach here due to return in last attempt)
+  return new SqliteRateLimiter(sqlitePath);
 }
 
 /**
