@@ -28,10 +28,39 @@
  */
 
 import Redis from "ioredis";
-import { Database } from "bun:sqlite";
 import { mkdirSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
+
+// SQLite is optional - only available in Bun runtime
+// We use dynamic import to avoid breaking Node.js environments
+interface BunDatabase {
+  run(sql: string, params?: unknown[]): void;
+  query<T>(sql: string): {
+    get(...params: unknown[]): T | null;
+  };
+  prepare(sql: string): {
+    run(...params: unknown[]): void;
+  };
+  close(): void;
+}
+
+let sqliteAvailable = false;
+let createDatabase: ((path: string) => BunDatabase) | null = null;
+
+// Try to load bun:sqlite at module load time
+try {
+  if (typeof globalThis.Bun !== "undefined") {
+    // We're in Bun runtime - dynamic import will work
+    const bunSqlite = await import("bun:sqlite");
+    createDatabase = (path: string) =>
+      new bunSqlite.Database(path) as unknown as BunDatabase;
+    sqliteAvailable = true;
+  }
+} catch {
+  // Not in Bun runtime, SQLite fallback unavailable
+  sqliteAvailable = false;
+}
 
 // ============================================================================
 // Types
@@ -290,16 +319,20 @@ export class RedisRateLimiter implements RateLimiter {
  * Uses sliding window via COUNT query with timestamp filter.
  */
 export class SqliteRateLimiter implements RateLimiter {
-  private db: Database;
+  private db: BunDatabase;
 
   constructor(dbPath: string) {
+    if (!sqliteAvailable || !createDatabase) {
+      throw new Error("SQLite is not available in this runtime (requires Bun)");
+    }
+
     // Ensure directory exists
     const dir = dirname(dbPath);
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
 
-    this.db = new Database(dbPath);
+    this.db = createDatabase(dbPath);
     this.initialize();
   }
 
@@ -381,7 +414,7 @@ export class SqliteRateLimiter implements RateLimiter {
 
     // Count requests in window
     const result = this.db
-      .query<{ count: number }, [string, string, string, number]>(
+      .query<{ count: number }>(
         `SELECT COUNT(*) as count FROM rate_limits 
          WHERE agent_name = ? AND endpoint = ? AND window = ? AND timestamp > ?`,
       )
@@ -405,7 +438,7 @@ export class SqliteRateLimiter implements RateLimiter {
     let resetAt = now + windowDuration;
     if (!allowed) {
       const oldest = this.db
-        .query<{ timestamp: number }, [string, string, string, number]>(
+        .query<{ timestamp: number }>(
           `SELECT MIN(timestamp) as timestamp FROM rate_limits 
            WHERE agent_name = ? AND endpoint = ? AND window = ? AND timestamp > ?`,
         )
@@ -593,6 +626,11 @@ export async function createRateLimiter(options?: {
   }
 
   if (backend === "sqlite") {
+    if (!sqliteAvailable) {
+      throw new Error(
+        "SQLite backend requested but not available (requires Bun runtime)",
+      );
+    }
     return new SqliteRateLimiter(sqlitePath);
   }
 
@@ -623,15 +661,21 @@ export async function createRateLimiter(options?: {
       const isLastAttempt = attempt === maxRetries - 1;
 
       if (isLastAttempt) {
-        // All retries exhausted, fall back to SQLite
+        // All retries exhausted, fall back to SQLite or in-memory
         if (!hasWarnedAboutFallback) {
+          const fallbackType = sqliteAvailable ? "SQLite" : "in-memory";
+          const fallbackLocation = sqliteAvailable ? ` at ${sqlitePath}` : "";
           console.warn(
-            `[rate-limiter] Redis connection failed after ${maxRetries} attempts (${redisUrl}), falling back to SQLite at ${sqlitePath}`,
+            `[rate-limiter] Redis connection failed after ${maxRetries} attempts (${redisUrl}), falling back to ${fallbackType}${fallbackLocation}`,
           );
           hasWarnedAboutFallback = true;
         }
 
-        return new SqliteRateLimiter(sqlitePath);
+        // Use SQLite if available, otherwise fall back to in-memory
+        if (sqliteAvailable) {
+          return new SqliteRateLimiter(sqlitePath);
+        }
+        return new InMemoryRateLimiter();
       }
 
       // Wait before retrying (exponential backoff)
@@ -640,7 +684,10 @@ export async function createRateLimiter(options?: {
   }
 
   // Fallback (should never reach here due to return in last attempt)
-  return new SqliteRateLimiter(sqlitePath);
+  if (sqliteAvailable) {
+    return new SqliteRateLimiter(sqlitePath);
+  }
+  return new InMemoryRateLimiter();
 }
 
 /**

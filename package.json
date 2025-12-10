@@ -1,6 +1,6 @@
 {
   "name": "opencode-swarm-plugin",
-  "version": "0.12.13",
+  "version": "0.12.14",
   "description": "Multi-agent swarm coordination for OpenCode with learning capabilities, beads integration, and Agent Mail",
   "type": "module",
   "main": "dist/index.js",
@@ -15,7 +15,7 @@
     }
   },
   "scripts": {
-    "build": "bun build ./src/index.ts --outdir ./dist --target bun && bun build ./src/plugin.ts --outfile ./dist/plugin.js --target bun",
+    "build": "bun build ./src/index.ts --outdir ./dist --target node && bun build ./src/plugin.ts --outfile ./dist/plugin.js --target node",
     "dev": "bun --watch src/index.ts",
     "test": "bun test src/schemas/",
     "test:watch": "bun test --watch",
