@@ -686,6 +686,7 @@ export async function getStorage(): Promise<LearningStorage> {
  */
 export function setStorage(storage: LearningStorage): void {
   globalStorage = storage;
+  globalStoragePromise = Promise.resolve(storage);
 }
 
 /**
