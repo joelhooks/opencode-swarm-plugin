@@ -192,7 +192,7 @@ Edit these files to customize behavior. Run `swarm setup` to regenerate defaults
 | [OpenCode](https://opencode.ai) | Plugin host | Yes |
 | [Beads](https://github.com/steveyegge/beads) | Git-backed issue tracking | Yes |
 | [Go](https://go.dev) | Required for Agent Mail | No |
-| [Agent Mail](https://github.com/joelhooks/agent-mail) | Multi-agent coordination, file reservations | No |
+| [MCP Agent Mail](https://github.com/Dicklesworthstone/mcp_agent_mail) | Multi-agent coordination, file reservations | No |
 | [CASS (Coding Agent Session Search)](https://github.com/Dicklesworthstone/coding_agent_session_search) | Historical context from past sessions | No |
 | [UBS (Ultimate Bug Scanner)](https://github.com/Dicklesworthstone/ultimate_bug_scanner) | Pre-completion bug scanning using AI-powered static analysis | No |
 | [semantic-memory](https://github.com/joelhooks/semantic-memory) | Learning persistence | No |
@@ -210,6 +210,11 @@ curl -fsSL "https://raw.githubusercontent.com/Dicklesworthstone/ultimate_bug_sca
 **CASS (Coding Agent Session Search)** - Indexes and searches AI coding agent history:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Dicklesworthstone/coding_agent_session_search/main/install.sh | bash -s -- --easy-mode
+```
+
+**MCP Agent Mail** - Multi-agent coordination and file reservations:
+```bash
+curl -fsSL "https://raw.githubusercontent.com/Dicklesworthstone/mcp_agent_mail/main/scripts/install.sh" | bash -s -- --yes
 ```
 
 ## Tools Reference

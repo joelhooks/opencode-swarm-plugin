@@ -346,7 +346,7 @@ const DEPENDENCIES: Dependency[] = [
     description: "Required for Agent Mail",
   },
   {
-    name: "Agent Mail",
+    name: "MCP Agent Mail",
     command: "curl",
     checkArgs: [
       "-s",
@@ -363,7 +363,7 @@ const DEPENDENCIES: Dependency[] = [
     required: false,
     install: "https://github.com/Dicklesworthstone/mcp_agent_mail",
     installType: "manual",
-    description: "Multi-agent coordination & file reservations",
+    description: "Multi-agent coordination & file reservations (like Gmail for coding agents)",
   },
   {
     name: "CASS (Coding Agent Session Search)",
