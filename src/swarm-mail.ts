@@ -27,6 +27,7 @@ import {
   acknowledgeSwarmMessage,
   checkSwarmHealth,
 } from "./streams/swarm-mail";
+import { getActiveReservations } from "./streams/projections";
 import {
   existsSync,
   mkdirSync,
@@ -75,7 +76,6 @@ interface SendArgs {
 interface InboxArgs {
   limit?: number;
   urgent_only?: boolean;
-  since_ts?: string;
 }
 
 /** Read message tool arguments */
@@ -130,7 +130,7 @@ export function setSwarmMailProjectDirectory(directory: string): void {
  * Returns undefined if not set - let getDatabasePath use global fallback
  */
 export function getSwarmMailProjectDirectory(): string | undefined {
-  return swarmMailProjectDirectory;
+  return swarmMailProjectDirectory ?? undefined;
 }
 
 // ============================================================================
@@ -351,10 +351,6 @@ export const swarmmail_inbox = tool({
       .boolean()
       .optional()
       .describe("Only fetch urgent messages"),
-    since_ts: tool.schema
-      .string()
-      .optional()
-      .describe("Only fetch messages since this timestamp"),
   },
   async execute(args: InboxArgs, ctx: ToolContext): Promise<string> {
     const sessionID = ctx.sessionID || "default";
@@ -578,6 +574,13 @@ export const swarmmail_release = tool({
     }
 
     try {
+      // Get current reservations to find which IDs correspond to paths
+      const currentReservations = await getActiveReservations(
+        state.projectKey,
+        state.projectKey,
+        state.agentName,
+      );
+
       const result = await releaseSwarmFiles({
         projectPath: state.projectKey,
         agentName: state.agentName,
@@ -591,6 +594,16 @@ export const swarmmail_release = tool({
       } else if (args.reservation_ids) {
         state.reservations = state.reservations.filter(
           (id) => !args.reservation_ids!.includes(id),
+        );
+      } else if (args.paths) {
+        // When releasing by paths, find the reservation IDs that match those paths
+        const releasedIds = currentReservations
+          .filter((r: { path_pattern: string }) =>
+            args.paths!.includes(r.path_pattern),
+          )
+          .map((r: { id: number }) => r.id);
+        state.reservations = state.reservations.filter(
+          (id: number) => !releasedIds.includes(id),
         );
       }
       saveSessionState(sessionID, state);

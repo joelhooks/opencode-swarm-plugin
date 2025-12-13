@@ -1904,6 +1904,12 @@ export const swarm_broadcast = tool({
   description:
     "Broadcast context update to all agents working on the same epic",
   args: {
+    project_path: tool.schema
+      .string()
+      .describe("Absolute path to project root"),
+    agent_name: tool.schema
+      .string()
+      .describe("Name of the agent broadcasting the message"),
     epic_id: tool.schema.string().describe("Epic ID (e.g., bd-abc123)"),
     message: tool.schema
       .string()
@@ -1918,16 +1924,6 @@ export const swarm_broadcast = tool({
       .describe("Files this context relates to"),
   },
   async execute(args, ctx) {
-    // Note: This tool currently requires prior agentmail_init to have session state
-    // In the future, we could make this work standalone with a projectPath parameter
-    throw new SwarmError(
-      "swarm_broadcast requires session state - use swarmmail_init first or pass explicit projectPath/agentName",
-      "broadcast",
-    );
-
-    // Original implementation commented out - needs refactoring to use embedded swarm-mail
-    // without relying on requireState from MCP-based agent-mail
-    /*
     // Extract bead_id from context if available (for traceability)
     const beadId = (ctx as { beadId?: string }).beadId || "unknown";
 
@@ -1980,7 +1976,6 @@ export const swarm_broadcast = tool({
       null,
       2,
     );
-    */
   },
 });
 

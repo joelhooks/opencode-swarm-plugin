@@ -37,15 +37,19 @@ Beads is a local-first issue tracking system designed for AI agents. This skill 
 
 ### Good Bead Titles
 
+```text
 - "Fix null pointer exception in UserService.getProfile()"
 - "Add dark mode toggle to settings page"
 - "Migrate auth tokens from localStorage to httpOnly cookies"
+```
 
 ### Bad Bead Titles
 
+```text
 - "Fix bug" (too vague)
 - "Make it better" (not actionable)
 - "stuff" (meaningless)
+```
 
 ### Bead Body Structure
 
@@ -86,7 +90,7 @@ open → in_progress → closed
 
 ### State Transitions
 
-**Open → In Progress**
+### Open → In Progress
 
 ```typescript
 beads_update(id: "abc123", state: "in_progress")
@@ -94,7 +98,7 @@ beads_update(id: "abc123", state: "in_progress")
 
 Use when you start working on a bead.
 
-**In Progress → Closed**
+### In Progress → Closed
 
 ```typescript
 beads_close(id: "abc123", resolution: "Fixed in commit abc1234")
@@ -102,7 +106,7 @@ beads_close(id: "abc123", resolution: "Fixed in commit abc1234")
 
 Use when work is complete.
 
-**In Progress → Blocked**
+### In Progress → Blocked
 
 ```typescript
 beads_update(id: "abc123", state: "blocked", body: "Blocked by #xyz789")
@@ -168,25 +172,27 @@ beads_create(type: "task", title: "Implement OAuth2", parent: "epic-id")
 
 ## Best Practices
 
+```text
 1. **One bead per logical unit of work** - Don't combine unrelated fixes
 2. **Update state promptly** - Keep beads reflecting reality
 3. **Add context in body** - Future you will thank present you
 4. **Link related beads** - Use `#bead-id` references
 5. **Close with resolution** - Explain how it was resolved
 6. **Use labels** - `priority:high`, `area:frontend`, etc.
+```
 
 ## Sync and Collaboration
 
-Beads sync automatically with the central server:
+Beads sync with git:
 
-- Changes push on close
-- Conflicts merge automatically
-- Use `beads_sync()` to force sync
+- Changes tracked locally
+- Use `beads_sync()` to commit and push to remote
 
 ## Integration with Swarm
 
 When working in a swarm:
 
+```text
 1. Load `swarm-coordination` skill with `skills_use(name="swarm-coordination")`
 2. Create epic with `beads_create_epic()` (atomic operation)
 3. Coordinator assigns beads to worker agents
@@ -194,10 +200,13 @@ When working in a swarm:
 5. Close beads as subtasks complete
 6. Close epic when all subtasks done
 7. Sync with `beads_sync()` (MANDATORY at session end)
+```
 
-**Skill recommendations for common bead types:**
+### Skill Recommendations for Common Bead Types
 
+```text
 - `type: "bug"` → Load `testing-patterns` for regression tests
 - `type: "feature"` → Load `system-design` for architecture
 - `type: "chore"` → Load `testing-patterns` if refactoring
 - `type: "epic"` → Load `swarm-coordination` for decomposition
+```

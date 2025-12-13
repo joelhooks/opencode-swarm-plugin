@@ -205,6 +205,10 @@ const toolCheckers: Record<ToolName, () => Promise<ToolStatus>> = {
 
   "swarm-mail": async () => {
     try {
+      // Note: checkSwarmHealth() accepts optional projectPath parameter.
+      // For tool availability checking, we call it without args to check global health.
+      // This is intentional - we're verifying the embedded Swarm Mail system is functional,
+      // not checking health for a specific project.
       const healthResult = await checkSwarmHealth();
       return {
         available: healthResult.healthy,

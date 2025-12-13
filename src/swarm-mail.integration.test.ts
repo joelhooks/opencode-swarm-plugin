@@ -7,8 +7,9 @@
  * Run with: pnpm test:integration
  */
 
+import { randomUUID } from "node:crypto";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { resetDatabase, closeDatabase } from "./streams/index";
+import { resetDatabase, closeDatabase, getDatabase } from "./streams/index";
 import {
   swarmmail_init,
   swarmmail_send,
@@ -25,7 +26,20 @@ import {
 // Test Configuration
 // ============================================================================
 
-const TEST_DB_PATH = "/tmp/swarm-mail-test";
+/** Generate unique test database path per test run */
+function testDbPath(prefix = "swarm-mail"): string {
+  return `/tmp/${prefix}-${randomUUID()}`;
+}
+
+/** Track paths created during test for cleanup */
+let testPaths: string[] = [];
+
+function trackPath(path: string): string {
+  testPaths.push(path);
+  return path;
+}
+
+let TEST_DB_PATH: string;
 
 /**
  * Generate a unique test context to avoid state collisions between tests
@@ -61,11 +75,33 @@ async function executeTool<T>(
 // ============================================================================
 
 beforeEach(async () => {
+  testPaths = [];
+  TEST_DB_PATH = trackPath(testDbPath());
   await resetDatabase(TEST_DB_PATH);
 });
 
 afterEach(async () => {
-  await closeDatabase(TEST_DB_PATH);
+  // Clean up all test databases
+  for (const path of testPaths) {
+    try {
+      // Wipe all data before closing
+      const db = await getDatabase(path);
+      await db.exec(`
+        DELETE FROM message_recipients;
+        DELETE FROM messages;
+        DELETE FROM reservations;
+        DELETE FROM agents;
+        DELETE FROM events;
+        DELETE FROM locks;
+        DELETE FROM cursors;
+        DELETE FROM deferred;
+      `);
+    } catch {
+      // Ignore errors during cleanup
+    }
+    await closeDatabase(path);
+  }
+  testPaths = [];
 });
 
 // ============================================================================
