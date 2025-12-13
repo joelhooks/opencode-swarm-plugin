@@ -49,36 +49,117 @@ export function getDatabasePath(projectPath?: string): string {
 /** Singleton database instances keyed by path */
 const instances = new Map<string, PGlite>();
 
+/** Pending database initialization promises to prevent race conditions */
+const pendingInstances = new Map<string, Promise<PGlite>>();
+
 /** Whether schema has been initialized for each instance */
 const schemaInitialized = new Map<string, boolean>();
 
 /** Track degraded instances (path -> error) */
 const degradedInstances = new Map<string, Error>();
 
+/** LRU tracking: path -> last access timestamp */
+const lastAccess = new Map<string, number>();
+
+/** Maximum number of cached database instances */
+const MAX_CACHE_SIZE = 10;
+
+/**
+ * Evict least recently used instance if cache is full
+ */
+function evictLRU(): void {
+  if (instances.size < MAX_CACHE_SIZE) {
+    return;
+  }
+
+  let oldestPath: string | null = null;
+  let oldestTime = Number.POSITIVE_INFINITY;
+
+  for (const [path, time] of lastAccess) {
+    if (time < oldestTime) {
+      oldestTime = time;
+      oldestPath = path;
+    }
+  }
+
+  if (oldestPath) {
+    const db = instances.get(oldestPath);
+    if (db) {
+      db.close().catch((err) => {
+        console.error(
+          `[swarm-mail] Failed to close evicted database: ${err.message}`,
+        );
+      });
+    }
+    instances.delete(oldestPath);
+    pendingInstances.delete(oldestPath);
+    schemaInitialized.delete(oldestPath);
+    degradedInstances.delete(oldestPath);
+    lastAccess.delete(oldestPath);
+  }
+}
+
 /**
  * Get or create a PGLite instance for the given path
  *
  * If initialization fails, falls back to in-memory database and marks instance as degraded.
+ *
+ * Uses Promise-based caching to prevent race conditions when multiple concurrent
+ * calls occur before the first one completes.
  */
 export async function getDatabase(projectPath?: string): Promise<PGlite> {
   const dbPath = getDatabasePath(projectPath);
 
   // Return existing instance if available
-  let db = instances.get(dbPath);
-  if (db) {
-    return db;
+  const existingDb = instances.get(dbPath);
+  if (existingDb) {
+    lastAccess.set(dbPath, Date.now());
+    return existingDb;
   }
+
+  // Return pending promise if initialization is in progress (fixes race condition)
+  const pendingPromise = pendingInstances.get(dbPath);
+  if (pendingPromise) {
+    return pendingPromise;
+  }
+
+  // Create new initialization promise
+  const initPromise = createDatabaseInstance(dbPath);
+  pendingInstances.set(dbPath, initPromise);
+
+  try {
+    const db = await initPromise;
+    instances.set(dbPath, db);
+    lastAccess.set(dbPath, Date.now());
+    return db;
+  } finally {
+    // Clean up pending promise once resolved/rejected
+    pendingInstances.delete(dbPath);
+  }
+}
+
+/**
+ * Create and initialize a database instance
+ *
+ * Separated from getDatabase for cleaner Promise-based caching logic
+ */
+async function createDatabaseInstance(dbPath: string): Promise<PGlite> {
+  // Evict LRU if cache is full
+  evictLRU();
+
+  let db: PGlite;
 
   // Try to create new instance
   try {
     db = new PGlite(dbPath);
-    instances.set(dbPath, db);
 
     // Initialize schema if needed
     if (!schemaInitialized.get(dbPath)) {
       await initializeSchema(db);
       schemaInitialized.set(dbPath, true);
     }
+
+    return db;
   } catch (error) {
     const err = error as Error;
     console.error(
@@ -94,11 +175,12 @@ export async function getDatabase(projectPath?: string): Promise<PGlite> {
 
     try {
       db = new PGlite(); // in-memory mode
-      instances.set(dbPath, db);
 
       // Initialize schema for in-memory instance
       await initializeSchema(db);
       schemaInitialized.set(dbPath, true);
+
+      return db;
     } catch (fallbackError) {
       const fallbackErr = fallbackError as Error;
       console.error(
@@ -110,8 +192,6 @@ export async function getDatabase(projectPath?: string): Promise<PGlite> {
       );
     }
   }
-
-  return db;
 }
 
 /**
@@ -123,8 +203,10 @@ export async function closeDatabase(projectPath?: string): Promise<void> {
   if (db) {
     await db.close();
     instances.delete(dbPath);
+    pendingInstances.delete(dbPath);
     schemaInitialized.delete(dbPath);
     degradedInstances.delete(dbPath);
+    lastAccess.delete(dbPath);
   }
 }
 
@@ -137,7 +219,9 @@ export async function closeAllDatabases(): Promise<void> {
     instances.delete(path);
     schemaInitialized.delete(path);
   }
+  pendingInstances.clear();
   degradedInstances.clear();
+  lastAccess.clear();
 }
 
 /**
@@ -265,8 +349,9 @@ export async function isDatabaseHealthy(
 
   // Check if instance is degraded
   if (degradedInstances.has(dbPath)) {
-    console.warn(
-      `[swarm-mail] Database is in degraded mode (using in-memory fallback)`,
+    const err = degradedInstances.get(dbPath);
+    console.error(
+      `[swarm-mail] Database is in degraded mode (using in-memory fallback). Original error: ${err?.message}`,
     );
     return false;
   }
@@ -275,7 +360,9 @@ export async function isDatabaseHealthy(
     const db = await getDatabase(projectPath);
     const result = await db.query("SELECT 1 as ok");
     return result.rows.length > 0;
-  } catch {
+  } catch (error) {
+    const err = error as Error;
+    console.error(`[swarm-mail] Health check failed: ${err.message}`);
     return false;
   }
 }
@@ -307,6 +394,39 @@ export async function getDatabaseStats(projectPath?: string): Promise<{
     reservations: parseInt(reservations.rows[0]?.count || "0"),
   };
 }
+
+// ============================================================================
+// Process Exit Handlers
+// ============================================================================
+
+/**
+ * Close all databases on process exit
+ */
+function handleExit() {
+  // Use sync version if available, otherwise fire-and-forget
+  const dbsToClose = Array.from(instances.values());
+  for (const db of dbsToClose) {
+    try {
+      // PGlite doesn't have a sync close, so we just attempt async
+      db.close().catch(() => {
+        // Ignore errors during shutdown
+      });
+    } catch {
+      // Ignore errors
+    }
+  }
+}
+
+// Register exit handlers
+process.on("exit", handleExit);
+process.on("SIGINT", () => {
+  handleExit();
+  process.exit(0);
+});
+process.on("SIGTERM", () => {
+  handleExit();
+  process.exit(0);
+});
 
 // ============================================================================
 // Exports
