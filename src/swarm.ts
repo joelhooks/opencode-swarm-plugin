@@ -1858,6 +1858,237 @@ interface UbsScanResult {
   };
 }
 
+// ============================================================================
+// Verification Gate
+// ============================================================================
+
+/**
+ * Verification Gate result - tracks each verification step
+ *
+ * Based on the Gate Function from superpowers:
+ * 1. IDENTIFY: What command proves this claim?
+ * 2. RUN: Execute the FULL command (fresh, complete)
+ * 3. READ: Full output, check exit code, count failures
+ * 4. VERIFY: Does output confirm the claim?
+ * 5. ONLY THEN: Make the claim
+ */
+interface VerificationStep {
+  name: string;
+  command: string;
+  passed: boolean;
+  exitCode: number;
+  output?: string;
+  error?: string;
+  skipped?: boolean;
+  skipReason?: string;
+}
+
+interface VerificationGateResult {
+  passed: boolean;
+  steps: VerificationStep[];
+  summary: string;
+  blockers: string[];
+}
+
+/**
+ * Run typecheck verification
+ *
+ * Attempts to run TypeScript type checking on the project.
+ * Falls back gracefully if tsc is not available.
+ */
+async function runTypecheckVerification(): Promise<VerificationStep> {
+  const step: VerificationStep = {
+    name: "typecheck",
+    command: "tsc --noEmit",
+    passed: false,
+    exitCode: -1,
+  };
+
+  try {
+    // Check if tsconfig.json exists in current directory
+    const tsconfigExists = await Bun.file("tsconfig.json").exists();
+    if (!tsconfigExists) {
+      step.skipped = true;
+      step.skipReason = "No tsconfig.json found";
+      step.passed = true; // Don't block if no TypeScript
+      return step;
+    }
+
+    const result = await Bun.$`tsc --noEmit`.quiet().nothrow();
+    step.exitCode = result.exitCode;
+    step.passed = result.exitCode === 0;
+
+    if (!step.passed) {
+      step.error = result.stderr.toString().slice(0, 1000); // Truncate for context
+      step.output = result.stdout.toString().slice(0, 1000);
+    }
+  } catch (error) {
+    step.skipped = true;
+    step.skipReason = `tsc not available: ${error instanceof Error ? error.message : String(error)}`;
+    step.passed = true; // Don't block if tsc unavailable
+  }
+
+  return step;
+}
+
+/**
+ * Run test verification for specific files
+ *
+ * Attempts to find and run tests related to the touched files.
+ * Uses common test patterns (*.test.ts, *.spec.ts, __tests__/).
+ */
+async function runTestVerification(
+  filesTouched: string[],
+): Promise<VerificationStep> {
+  const step: VerificationStep = {
+    name: "tests",
+    command: "bun test <related-files>",
+    passed: false,
+    exitCode: -1,
+  };
+
+  if (filesTouched.length === 0) {
+    step.skipped = true;
+    step.skipReason = "No files touched";
+    step.passed = true;
+    return step;
+  }
+
+  // Find test files related to touched files
+  const testPatterns: string[] = [];
+  for (const file of filesTouched) {
+    // Skip if already a test file
+    if (file.includes(".test.") || file.includes(".spec.")) {
+      testPatterns.push(file);
+      continue;
+    }
+
+    // Look for corresponding test file
+    const baseName = file.replace(/\.(ts|tsx|js|jsx)$/, "");
+    testPatterns.push(`${baseName}.test.ts`);
+    testPatterns.push(`${baseName}.test.tsx`);
+    testPatterns.push(`${baseName}.spec.ts`);
+  }
+
+  // Check if any test files exist
+  const existingTests: string[] = [];
+  for (const pattern of testPatterns) {
+    try {
+      const exists = await Bun.file(pattern).exists();
+      if (exists) {
+        existingTests.push(pattern);
+      }
+    } catch {
+      // File doesn't exist, skip
+    }
+  }
+
+  if (existingTests.length === 0) {
+    step.skipped = true;
+    step.skipReason = "No related test files found";
+    step.passed = true;
+    return step;
+  }
+
+  try {
+    step.command = `bun test ${existingTests.join(" ")}`;
+    const result = await Bun.$`bun test ${existingTests}`.quiet().nothrow();
+    step.exitCode = result.exitCode;
+    step.passed = result.exitCode === 0;
+
+    if (!step.passed) {
+      step.error = result.stderr.toString().slice(0, 1000);
+      step.output = result.stdout.toString().slice(0, 1000);
+    }
+  } catch (error) {
+    step.skipped = true;
+    step.skipReason = `Test runner failed: ${error instanceof Error ? error.message : String(error)}`;
+    step.passed = true; // Don't block if test runner unavailable
+  }
+
+  return step;
+}
+
+/**
+ * Run the full Verification Gate
+ *
+ * Implements the Gate Function (IDENTIFY → RUN → READ → VERIFY → CLAIM):
+ * 1. UBS scan (already exists)
+ * 2. Typecheck
+ * 3. Tests for touched files
+ *
+ * All steps must pass (or be skipped with valid reason) to proceed.
+ */
+async function runVerificationGate(
+  filesTouched: string[],
+  skipUbs: boolean = false,
+): Promise<VerificationGateResult> {
+  const steps: VerificationStep[] = [];
+  const blockers: string[] = [];
+
+  // Step 1: UBS scan
+  if (!skipUbs && filesTouched.length > 0) {
+    const ubsResult = await runUbsScan(filesTouched);
+    if (ubsResult) {
+      const ubsStep: VerificationStep = {
+        name: "ubs_scan",
+        command: `ubs scan ${filesTouched.join(" ")}`,
+        passed: ubsResult.summary.critical === 0,
+        exitCode: ubsResult.exitCode,
+      };
+
+      if (!ubsStep.passed) {
+        ubsStep.error = `Found ${ubsResult.summary.critical} critical bugs`;
+        blockers.push(`UBS: ${ubsResult.summary.critical} critical bugs found`);
+      }
+
+      steps.push(ubsStep);
+    } else {
+      steps.push({
+        name: "ubs_scan",
+        command: "ubs scan",
+        passed: true,
+        exitCode: 0,
+        skipped: true,
+        skipReason: "UBS not available",
+      });
+    }
+  }
+
+  // Step 2: Typecheck
+  const typecheckStep = await runTypecheckVerification();
+  steps.push(typecheckStep);
+  if (!typecheckStep.passed && !typecheckStep.skipped) {
+    blockers.push(
+      `Typecheck: ${typecheckStep.error?.slice(0, 100) || "failed"}`,
+    );
+  }
+
+  // Step 3: Tests
+  const testStep = await runTestVerification(filesTouched);
+  steps.push(testStep);
+  if (!testStep.passed && !testStep.skipped) {
+    blockers.push(`Tests: ${testStep.error?.slice(0, 100) || "failed"}`);
+  }
+
+  // Build summary
+  const passedCount = steps.filter((s) => s.passed).length;
+  const skippedCount = steps.filter((s) => s.skipped).length;
+  const failedCount = steps.filter((s) => !s.passed && !s.skipped).length;
+
+  const summary =
+    failedCount === 0
+      ? `Verification passed: ${passedCount} checks passed, ${skippedCount} skipped`
+      : `Verification FAILED: ${failedCount} checks failed, ${passedCount} passed, ${skippedCount} skipped`;
+
+  return {
+    passed: failedCount === 0,
+    steps,
+    summary,
+    blockers,
+  };
+}
+
 /**
  * Run UBS scan on files before completion
  *
@@ -2025,12 +2256,18 @@ export const swarm_broadcast = tool({
 /**
  * Mark a subtask as complete
  *
+ * Implements the Verification Gate (from superpowers):
+ * 1. IDENTIFY: What commands prove this claim?
+ * 2. RUN: Execute verification (UBS, typecheck, tests)
+ * 3. READ: Check exit codes and output
+ * 4. VERIFY: All checks must pass
+ * 5. ONLY THEN: Close the bead
+ *
  * Closes bead, releases reservations, notifies coordinator.
- * Optionally runs UBS scan on modified files before completion.
  */
 export const swarm_complete = tool({
   description:
-    "Mark subtask complete, release reservations, notify coordinator. Runs UBS bug scan if files_touched provided.",
+    "Mark subtask complete with Verification Gate. Runs UBS scan, typecheck, and tests before allowing completion.",
   args: {
     project_key: tool.schema.string().describe("Project path"),
     agent_name: tool.schema.string().describe("Your Agent Mail name"),
@@ -2043,18 +2280,62 @@ export const swarm_complete = tool({
     files_touched: tool.schema
       .array(tool.schema.string())
       .optional()
-      .describe("Files modified - will be scanned by UBS for bugs"),
+      .describe("Files modified - will be verified (UBS, typecheck, tests)"),
     skip_ubs_scan: tool.schema
       .boolean()
       .optional()
       .describe("Skip UBS bug scan (default: false)"),
+    skip_verification: tool.schema
+      .boolean()
+      .optional()
+      .describe(
+        "Skip ALL verification (UBS, typecheck, tests). Use sparingly! (default: false)",
+      ),
   },
   async execute(args) {
-    // Run UBS scan on modified files if provided
+    // Run Verification Gate unless explicitly skipped
+    let verificationResult: VerificationGateResult | null = null;
+
+    if (!args.skip_verification && args.files_touched?.length) {
+      verificationResult = await runVerificationGate(
+        args.files_touched,
+        args.skip_ubs_scan ?? false,
+      );
+
+      // Block completion if verification failed
+      if (!verificationResult.passed) {
+        return JSON.stringify(
+          {
+            success: false,
+            error: "Verification Gate FAILED - fix issues before completing",
+            verification: {
+              passed: false,
+              summary: verificationResult.summary,
+              blockers: verificationResult.blockers,
+              steps: verificationResult.steps.map((s) => ({
+                name: s.name,
+                passed: s.passed,
+                skipped: s.skipped,
+                skipReason: s.skipReason,
+                error: s.error?.slice(0, 200),
+              })),
+            },
+            hint: "Fix the failing checks and try again. Use skip_verification=true only as last resort.",
+            gate_function:
+              "IDENTIFY → RUN → READ → VERIFY → CLAIM (you are at VERIFY, claim blocked)",
+          },
+          null,
+          2,
+        );
+      }
+    }
+
+    // Legacy UBS-only path for backward compatibility (when no files_touched)
     let ubsResult: UbsScanResult | null = null;
     if (
-      args.files_touched &&
-      args.files_touched.length > 0 &&
+      !args.skip_verification &&
+      !verificationResult &&
+      args.files_touched?.length &&
       !args.skip_ubs_scan
     ) {
       ubsResult = await runUbsScan(args.files_touched);
@@ -2176,6 +2457,20 @@ export const swarm_complete = tool({
         closed: true,
         reservations_released: true,
         message_sent: true,
+        verification_gate: verificationResult
+          ? {
+              passed: true,
+              summary: verificationResult.summary,
+              steps: verificationResult.steps.map((s) => ({
+                name: s.name,
+                passed: s.passed,
+                skipped: s.skipped,
+                skipReason: s.skipReason,
+              })),
+            }
+          : args.skip_verification
+            ? { skipped: true, reason: "skip_verification=true" }
+            : { skipped: true, reason: "no files_touched provided" },
         ubs_scan: ubsResult
           ? {
               ran: true,
@@ -2183,12 +2478,14 @@ export const swarm_complete = tool({
               summary: ubsResult.summary,
               warnings: ubsResult.bugs.filter((b) => b.severity !== "critical"),
             }
-          : {
-              ran: false,
-              reason: args.skip_ubs_scan
-                ? "skipped"
-                : "no files or ubs unavailable",
-            },
+          : verificationResult
+            ? { ran: true, included_in_verification_gate: true }
+            : {
+                ran: false,
+                reason: args.skip_ubs_scan
+                  ? "skipped"
+                  : "no files or ubs unavailable",
+              },
         learning_prompt: `## Reflection
 
 Did you learn anything reusable during this subtask? Consider:

@@ -371,6 +371,19 @@ curl -fsSL "https://raw.githubusercontent.com/Dicklesworthstone/mcp_agent_mail/m
 >
 > Thank you to the MCP Agent Mail team for open-sourcing such a well-designed system.
 
+> **🎯 Quality Patterns from Superpowers**
+>
+> Several verification and debugging patterns in this plugin are inspired by [**Superpowers**](https://github.com/obra/superpowers) by [@obra](https://github.com/obra) (Jesse Vincent). Superpowers is a complete software development workflow for coding agents built on composable "skills".
+>
+> **Key patterns adopted:**
+>
+> - **Verification Gate** - The Gate Function (IDENTIFY → RUN → READ → VERIFY → CLAIM) ensures no completion claims without fresh verification evidence
+> - **3-Strike Architecture Rule** - After 3 failed fixes, question the architecture, not the bug
+> - **CSO (Claude Search Optimization)** - Skill descriptions that answer "Should I read this right now?"
+> - **Defense-in-Depth** - Validate at every layer data passes through
+>
+> Thank you Jesse for open-sourcing such a thoughtfully designed system.
+
 The plugin includes an embedded event-sourced Swarm Mail implementation as an alternative to the external MCP server. This provides the same multi-agent coordination capabilities without requiring a separate server process.
 
 ### Architecture Comparison
