@@ -26,7 +26,9 @@ import {
 // Test Fixtures
 // ============================================================================
 
-const TEST_DIR = join(process.cwd(), ".test-skills");
+// Use unique temp dir per test run to avoid collisions
+const TEST_RUN_ID = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const TEST_DIR = join(process.cwd(), `.test-skills-${TEST_RUN_ID}`);
 const SKILLS_DIR = join(TEST_DIR, ".opencode", "skills");
 
 const VALID_SKILL_MD = `---
@@ -343,7 +345,9 @@ describe("ES module compatibility", () => {
   it("import.meta.url is available", () => {
     // This test verifies we're running in an ES module context
     expect(import.meta.url).toBeDefined();
-    expect(import.meta.url).toContain("skills.test.ts");
+    // Check for file protocol and skills.test in path (works across runners)
+    expect(import.meta.url).toMatch(/skills\.test/);
+    expect(import.meta.url).toMatch(/^file:|^bun:|^\//); // file://, bun://, or absolute path
   });
 
   it("can construct path from import.meta.url", () => {

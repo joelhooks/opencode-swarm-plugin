@@ -26,7 +26,15 @@
 
 import { tool } from "@opencode-ai/plugin";
 import { readdir, readFile, stat, mkdir, writeFile, rm } from "fs/promises";
-import { join, basename, dirname, resolve, relative } from "path";
+import {
+  join,
+  basename,
+  dirname,
+  resolve,
+  relative,
+  isAbsolute,
+  sep,
+} from "path";
 import matter from "gray-matter";
 
 // =============================================================================
@@ -506,7 +514,8 @@ Scripts run in the skill's directory with the project directory as an argument.`
     const scriptArgs = args.args || [];
 
     try {
-      // Execute script using Bun.spawn for better compatibility
+      // Execute script using Bun.spawn with timeout
+      const TIMEOUT_MS = 60_000; // 60 second timeout
       const proc = Bun.spawn(
         [scriptPath, skillsProjectDirectory, ...scriptArgs],
         {
@@ -516,17 +525,32 @@ Scripts run in the skill's directory with the project directory as an argument.`
         },
       );
 
-      const [stdout, stderr] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-      ]);
-      const exitCode = await proc.exited;
+      // Race between script completion and timeout
+      const timeoutPromise = new Promise<{ timedOut: true }>((resolve) => {
+        setTimeout(() => resolve({ timedOut: true }), TIMEOUT_MS);
+      });
 
-      const output = stdout + stderr;
-      if (exitCode === 0) {
+      const resultPromise = (async () => {
+        const [stdout, stderr] = await Promise.all([
+          new Response(proc.stdout).text(),
+          new Response(proc.stderr).text(),
+        ]);
+        const exitCode = await proc.exited;
+        return { timedOut: false as const, stdout, stderr, exitCode };
+      })();
+
+      const result = await Promise.race([resultPromise, timeoutPromise]);
+
+      if (result.timedOut) {
+        proc.kill();
+        return `Script timed out after ${TIMEOUT_MS / 1000} seconds.`;
+      }
+
+      const output = result.stdout + result.stderr;
+      if (result.exitCode === 0) {
         return output || "Script executed successfully.";
       } else {
-        return `Script exited with code ${exitCode}:\n${output}`;
+        return `Script exited with code ${result.exitCode}:\n${output}`;
       }
     } catch (error) {
       return `Failed to execute script: ${error instanceof Error ? error.message : String(error)}`;
@@ -561,17 +585,29 @@ Use this to access supplementary skill resources.`,
       return `Skill '${args.skill}' not found.`;
     }
 
-    // Security: prevent path traversal with robust check
-    if (args.file.includes("..") || args.file.startsWith("/")) {
-      return "Invalid file path. Use relative paths without '..'";
+    // Security: prevent path traversal (cross-platform)
+    // Block absolute paths (Unix / and Windows C:\ or \\)
+    if (isAbsolute(args.file)) {
+      return "Invalid file path. Use a relative path.";
+    }
+
+    // Block path traversal attempts
+    if (args.file.includes("..")) {
+      return "Invalid file path. Path traversal not allowed.";
     }
 
     const filePath = resolve(skill.directory, args.file);
     const relativePath = relative(skill.directory, filePath);
 
     // Verify resolved path stays within skill directory
-    if (relativePath.startsWith("..") || relativePath.startsWith("/")) {
-      return "Invalid file path. Path escapes skill directory.";
+    // Check for ".." at start or after separator (handles both Unix and Windows)
+    if (
+      relativePath === ".." ||
+      relativePath.startsWith(".." + sep) ||
+      relativePath.startsWith(".." + "/") ||
+      relativePath.startsWith(".." + "\\")
+    ) {
+      return "Invalid file path. Must stay within the skill directory.";
     }
 
     try {
@@ -593,6 +629,34 @@ Use this to access supplementary skill resources.`,
 const DEFAULT_SKILLS_DIR = ".opencode/skills";
 
 /**
+ * Quote a YAML scalar if it contains special characters
+ * Uses double quotes and escapes internal quotes/newlines
+ */
+function quoteYamlScalar(value: string): string {
+  // Check if quoting is needed (contains :, #, newlines, quotes, or starts with special chars)
+  const needsQuoting =
+    /[:\n\r#"'`\[\]{}|>&*!?@]/.test(value) ||
+    value.startsWith(" ") ||
+    value.endsWith(" ") ||
+    value === "" ||
+    /^[0-9]/.test(value) ||
+    ["true", "false", "null", "yes", "no", "on", "off"].includes(
+      value.toLowerCase(),
+    );
+
+  if (!needsQuoting) {
+    return value;
+  }
+
+  // Escape backslashes and double quotes, then wrap in double quotes
+  const escaped = value
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, "\\n");
+  return `"${escaped}"`;
+}
+
+/**
  * Generate SKILL.md content from metadata and body
  */
 function generateSkillContent(
@@ -603,21 +667,21 @@ function generateSkillContent(
 ): string {
   const frontmatter: string[] = [
     "---",
-    `name: ${name}`,
-    `description: ${description}`,
+    `name: ${quoteYamlScalar(name)}`,
+    `description: ${quoteYamlScalar(description)}`,
   ];
 
   if (options?.tags && options.tags.length > 0) {
     frontmatter.push("tags:");
     for (const tag of options.tags) {
-      frontmatter.push(`  - ${tag}`);
+      frontmatter.push(`  - ${quoteYamlScalar(tag)}`);
     }
   }
 
   if (options?.tools && options.tools.length > 0) {
     frontmatter.push("tools:");
     for (const t of options.tools) {
-      frontmatter.push(`  - ${t}`);
+      frontmatter.push(`  - ${quoteYamlScalar(t)}`);
     }
   }
 
@@ -921,8 +985,15 @@ executed with skills_execute. Use for:
       return `Skill '${args.skill}' not found.`;
     }
 
-    // Security: validate script name
-    if (args.script_name.includes("..") || args.script_name.includes("/")) {
+    // Security: validate script name (cross-platform)
+    // Block absolute paths, path separators, and traversal
+    if (
+      isAbsolute(args.script_name) ||
+      args.script_name.includes("..") ||
+      args.script_name.includes("/") ||
+      args.script_name.includes("\\") ||
+      basename(args.script_name) !== args.script_name
+    ) {
       return "Invalid script name. Use simple filenames without paths.";
     }
 
