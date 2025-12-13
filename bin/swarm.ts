@@ -670,6 +670,34 @@ If you discover a reusable pattern worth preserving:
 // Commands
 // ============================================================================
 
+/**
+ * Get the fix command for a dependency
+ * Returns null for manual installs (those show a link instead)
+ */
+function getFixCommand(dep: Dependency): string | null {
+  switch (dep.name) {
+    case "OpenCode":
+      return "brew install sst/tap/opencode";
+    case "Beads":
+      return "curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash";
+    case "Go":
+      return "brew install go (or visit https://go.dev/dl/)";
+    case "semantic-memory":
+      return "npm install -g semantic-memory";
+    case "Redis":
+      return "brew install redis && brew services start redis";
+    case "MCP Agent Mail":
+      return "See: https://github.com/Dicklesworthstone/mcp_agent_mail";
+    case "CASS (Coding Agent Session Search)":
+      return "See: https://github.com/Dicklesworthstone/coding_agent_session_search";
+    case "UBS (Ultimate Bug Scanner)":
+      return "See: https://github.com/Dicklesworthstone/ultimate_bug_scanner";
+    default:
+      // Fallback to generic install command if available
+      return dep.installType !== "manual" ? dep.install : null;
+  }
+}
+
 async function doctor() {
   p.intro("swarm doctor v" + VERSION);
 
@@ -689,7 +717,10 @@ async function doctor() {
       p.log.success(dep.name + (version ? " v" + version : ""));
     } else {
       p.log.error(dep.name + " - not found");
-      p.log.message("  Install: " + dep.install);
+      const fixCmd = getFixCommand(dep);
+      if (fixCmd) {
+        p.log.message(dim("   └─ Fix: " + fixCmd));
+      }
     }
   }
 
@@ -701,10 +732,9 @@ async function doctor() {
       );
     } else {
       p.log.warn(dep.name + " - not found (" + dep.description + ")");
-      if (dep.installType !== "manual") {
-        p.log.message("  Install: " + dep.install);
-      } else {
-        p.log.message("  See: " + dep.install);
+      const fixCmd = getFixCommand(dep);
+      if (fixCmd) {
+        p.log.message(dim("   └─ Fix: " + fixCmd));
       }
     }
   }

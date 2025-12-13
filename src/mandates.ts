@@ -177,7 +177,7 @@ export const mandate_vote = tool({
     const mandate = await storage.get(validated.mandate_id);
     if (!mandate) {
       throw new MandateError(
-        `Mandate ${validated.mandate_id} not found`,
+        `Mandate '${validated.mandate_id}' not found. Use mandate_list() to see available mandates, or check the ID is correct.`,
         "mandate_vote",
       );
     }
@@ -189,7 +189,7 @@ export const mandate_vote = tool({
     );
     if (hasVoted) {
       throw new MandateError(
-        `Agent ${args.agent_name} has already voted on mandate ${validated.mandate_id}`,
+        `Agent '${args.agent_name}' has already voted on mandate '${validated.mandate_id}'. Each agent can vote once per mandate. This is expected behavior to prevent vote manipulation.`,
         "mandate_vote",
       );
     }
@@ -447,7 +447,7 @@ export const mandate_stats = tool({
         const mandate = await storage.get(args.mandate_id);
         if (!mandate) {
           throw new MandateError(
-            `Mandate ${args.mandate_id} not found`,
+            `Mandate '${args.mandate_id}' not found. Use mandate_list() to see available mandates, or check the ID is correct.`,
             "mandate_stats",
           );
         }

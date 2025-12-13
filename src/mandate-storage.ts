@@ -383,7 +383,9 @@ export class SemanticMemoryMandateStorage implements MandateStorage {
   async update(id: string, updates: Partial<MandateEntry>): Promise<void> {
     const existing = await this.get(id);
     if (!existing) {
-      throw new Error(`Mandate ${id} not found`);
+      throw new Error(
+        `Mandate '${id}' not found. Use list() to see available mandates.`,
+      );
     }
 
     const updated = { ...existing, ...updates };
@@ -399,7 +401,7 @@ export class SemanticMemoryMandateStorage implements MandateStorage {
     const existing = await this.hasVoted(vote.mandate_id, vote.agent_name);
     if (existing) {
       throw new Error(
-        `Agent ${vote.agent_name} has already voted on mandate ${vote.mandate_id}`,
+        `Agent '${vote.agent_name}' has already voted on mandate '${vote.mandate_id}'. Each agent can vote once per mandate to ensure fair consensus.`,
       );
     }
 
@@ -540,7 +542,9 @@ export class InMemoryMandateStorage implements MandateStorage {
   async update(id: string, updates: Partial<MandateEntry>): Promise<void> {
     const existing = await this.get(id);
     if (!existing) {
-      throw new Error(`Mandate ${id} not found`);
+      throw new Error(
+        `Mandate '${id}' not found. Use list() to see available mandates.`,
+      );
     }
 
     const updated = { ...existing, ...updates };
@@ -553,7 +557,7 @@ export class InMemoryMandateStorage implements MandateStorage {
     const existing = await this.hasVoted(vote.mandate_id, vote.agent_name);
     if (existing) {
       throw new Error(
-        `Agent ${vote.agent_name} has already voted on mandate ${vote.mandate_id}`,
+        `Agent '${vote.agent_name}' has already voted on mandate '${vote.mandate_id}'. Each agent can vote once per mandate to ensure fair consensus.`,
       );
     }
 
@@ -662,7 +666,9 @@ export function createMandateStorage(
     case "memory":
       return new InMemoryMandateStorage(fullConfig);
     default:
-      throw new Error(`Unknown storage backend: ${fullConfig.backend}`);
+      throw new Error(
+        `Unknown storage backend: '${fullConfig.backend}'. Valid backends are 'semantic-memory' or 'memory'.`,
+      );
   }
 }
 
@@ -689,7 +695,9 @@ export async function updateMandateStatus(
 ): Promise<ScoreCalculationResult> {
   const entry = await storage.get(mandateId);
   if (!entry) {
-    throw new Error(`Mandate ${mandateId} not found`);
+    throw new Error(
+      `Mandate '${mandateId}' not found when calculating score. Use storage.list() to verify the mandate exists.`,
+    );
   }
 
   const score = await storage.calculateScore(mandateId);

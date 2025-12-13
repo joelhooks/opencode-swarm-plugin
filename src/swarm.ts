@@ -2039,7 +2039,9 @@ async function runVerificationGate(
 
       if (!ubsStep.passed) {
         ubsStep.error = `Found ${ubsResult.summary.critical} critical bugs`;
-        blockers.push(`UBS: ${ubsResult.summary.critical} critical bugs found`);
+        blockers.push(
+          `UBS found ${ubsResult.summary.critical} critical bug(s). Try: Run 'ubs scan ${filesTouched.join(" ")}' to see details, fix critical bugs in reported files, or use skip_ubs_scan=true to bypass (not recommended).`,
+        );
       }
 
       steps.push(ubsStep);
@@ -2060,7 +2062,7 @@ async function runVerificationGate(
   steps.push(typecheckStep);
   if (!typecheckStep.passed && !typecheckStep.skipped) {
     blockers.push(
-      `Typecheck: ${typecheckStep.error?.slice(0, 100) || "failed"}`,
+      `Typecheck failed: ${typecheckStep.error?.slice(0, 100) || "type errors found"}. Try: Run 'tsc --noEmit' to see full errors, check tsconfig.json configuration, or fix reported type errors in modified files.`,
     );
   }
 
@@ -2068,7 +2070,9 @@ async function runVerificationGate(
   const testStep = await runTestVerification(filesTouched);
   steps.push(testStep);
   if (!testStep.passed && !testStep.skipped) {
-    blockers.push(`Tests: ${testStep.error?.slice(0, 100) || "failed"}`);
+    blockers.push(
+      `Tests failed: ${testStep.error?.slice(0, 100) || "test failures"}. Try: Run 'bun test ${testStep.command.split(" ").slice(2).join(" ")}' to see full output, check test assertions, or fix failing tests in modified files.`,
+    );
   }
 
   // Build summary
@@ -2150,10 +2154,12 @@ async function runUbsScan(files: string[]): Promise<UbsScanResult | null> {
     } catch (error) {
       // UBS output wasn't JSON - this is an error condition
       console.error(
-        `[swarm] CRITICAL: UBS scan failed to parse JSON output:`,
+        `[swarm] CRITICAL: UBS scan failed to parse JSON output because output is malformed:`,
         error,
       );
-      console.error(`[swarm] Raw output:`, output);
+      console.error(
+        `[swarm] Raw output: ${output}. Try: Run 'ubs doctor' to check installation, verify UBS version with 'ubs --version' (need v1.0.0+), or check if UBS supports --json flag.`,
+      );
       return {
         exitCode: result.exitCode,
         bugs: [],
@@ -2320,7 +2326,10 @@ export const swarm_complete = tool({
                 error: s.error?.slice(0, 200),
               })),
             },
-            hint: "Fix the failing checks and try again. Use skip_verification=true only as last resort.",
+            hint:
+              verificationResult.blockers.length > 0
+                ? `Fix these issues: ${verificationResult.blockers.map((b, i) => `${i + 1}. ${b}`).join(", ")}. Use skip_verification=true only as last resort.`
+                : "Fix the failing checks and try again. Use skip_verification=true only as last resort.",
             gate_function:
               "IDENTIFY → RUN → READ → VERIFY → CLAIM (you are at VERIFY, claim blocked)",
           },
@@ -2345,12 +2354,18 @@ export const swarm_complete = tool({
         return JSON.stringify(
           {
             success: false,
-            error: "UBS found critical bugs - fix before completing",
+            error: `UBS found ${ubsResult.summary.critical} critical bug(s) that must be fixed before completing`,
             ubs_scan: {
               critical_count: ubsResult.summary.critical,
               bugs: ubsResult.bugs.filter((b) => b.severity === "critical"),
             },
-            hint: "Fix the critical bugs and try again, or use skip_ubs_scan=true to bypass",
+            hint: `Fix these critical bugs: ${ubsResult.bugs
+              .filter((b) => b.severity === "critical")
+              .map((b) => `${b.file}:${b.line} - ${b.message}`)
+              .slice(0, 3)
+              .join(
+                "; ",
+              )}. Try: Run 'ubs scan ${args.files_touched?.join(" ") || "."} --json' for full report, fix reported issues, or use skip_ubs_scan=true to bypass (not recommended).`,
           },
           null,
           2,
@@ -2398,7 +2413,7 @@ export const swarm_complete = tool({
 
     if (closeResult.exitCode !== 0) {
       throw new SwarmError(
-        `Failed to close bead: ${closeResult.stderr.toString()}`,
+        `Failed to close bead because bd close command failed: ${closeResult.stderr.toString()}. Try: Verify bead exists and is not already closed with 'bd show ${args.bead_id}', check if bead ID is correct with 'beads_query()', or use beads_close tool directly.`,
         "complete",
       );
     }

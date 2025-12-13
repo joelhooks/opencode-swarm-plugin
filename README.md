@@ -29,19 +29,15 @@ swarm setup
 The setup wizard handles everything:
 
 ```
-┌  opencode-swarm-plugin v0.10.0
+┌  opencode-swarm-plugin v0.16.0
 │
 ◇  Checking dependencies...
 │
 ◆  OpenCode
 ◆  Beads
-◆  Go
-▲  Swarm Mail (optional)
-▲  Redis (optional)
-│
-◆  Install optional dependencies?
-│  ◻ Swarm Mail - Multi-agent coordination
-│  ◻ Redis - Rate limiting
+▲  CASS (optional)
+▲  UBS (optional)
+▲  semantic-memory (optional)
 │
 ◇  Setting up OpenCode integration...
 │
@@ -271,16 +267,14 @@ What NOT to do...
 
 ## Dependencies
 
-| Dependency                                                                                             | Purpose                                                                                                | Required |
-| ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ | -------- |
-| [OpenCode](https://opencode.ai)                                                                        | Plugin host                                                                                            | Yes      |
-| [Beads](https://github.com/steveyegge/beads)                                                           | Git-backed issue tracking                                                                              | Yes      |
-| [Go](https://go.dev)                                                                                   | Required for Swarm Mail                                                                                | No       |
-| [MCP Agent Mail](https://github.com/Dicklesworthstone/mcp_agent_mail) ⭐                               | **The original** - Multi-agent coordination, file reservations. Swarm Mail is built on these patterns. | No       |
-| [CASS (Coding Agent Session Search)](https://github.com/Dicklesworthstone/coding_agent_session_search) | Historical context from past sessions                                                                  | No       |
-| [UBS (Ultimate Bug Scanner)](https://github.com/Dicklesworthstone/ultimate_bug_scanner)                | Pre-completion bug scanning using AI-powered static analysis                                           | No       |
-| [semantic-memory](https://github.com/joelhooks/semantic-memory)                                        | Learning persistence                                                                                   | No       |
-| [Redis](https://redis.io)                                                                              | Rate limiting (SQLite fallback available)                                                              | No       |
+| Dependency                                                                                             | Purpose                                                      | Required |
+| ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------ | -------- |
+| [OpenCode](https://opencode.ai)                                                                        | Plugin host                                                  | Yes      |
+| [Beads](https://github.com/steveyegge/beads)                                                           | Git-backed issue tracking                                    | Yes      |
+| [CASS (Coding Agent Session Search)](https://github.com/Dicklesworthstone/coding_agent_session_search) | Historical context from past sessions                        | No       |
+| [UBS (Ultimate Bug Scanner)](https://github.com/Dicklesworthstone/ultimate_bug_scanner)                | Pre-completion bug scanning using AI-powered static analysis | No       |
+| [semantic-memory](https://github.com/joelhooks/semantic-memory)                                        | Learning persistence                                         | No       |
+| [Redis](https://redis.io)                                                                              | Rate limiting (SQLite fallback available)                    | No       |
 
 All dependencies are checked and can be installed via `swarm setup`.
 
@@ -298,13 +292,7 @@ curl -fsSL "https://raw.githubusercontent.com/Dicklesworthstone/ultimate_bug_sca
 curl -fsSL https://raw.githubusercontent.com/Dicklesworthstone/coding_agent_session_search/main/install.sh | bash -s -- --easy-mode
 ```
 
-**MCP Agent Mail** ⭐ - The original multi-agent coordination system. Swarm Mail's embedded implementation is inspired by and compatible with MCP Agent Mail's protocol:
-
-```bash
-curl -fsSL "https://raw.githubusercontent.com/Dicklesworthstone/mcp_agent_mail/main/scripts/install.sh" | bash -s -- --yes
-```
-
-> **Note:** The embedded Swarm Mail (PGLite in-process) is now the primary option and works out of the box with no external dependencies. MCP Agent Mail (external Go server) is still supported for advanced use cases requiring a separate server process.
+> **Note:** Swarm Mail is now embedded (PGLite in-process) and works out of the box with no external dependencies. No Go or external servers required.
 
 ## Tools Reference
 
@@ -583,6 +571,34 @@ bun run typecheck
 bun test
 bun run build
 ```
+
+## Troubleshooting
+
+### 1. First Step: Run Doctor
+
+```bash
+swarm doctor
+```
+
+This checks all dependencies and shows their installation status.
+
+### 2. Common Issues
+
+| Issue                       | Cause                              | Solution                                          |
+| --------------------------- | ---------------------------------- | ------------------------------------------------- |
+| `beads: command not found`  | Beads CLI not installed            | `npm install -g @joelhooks/beads`                 |
+| `bd: command not found`     | Same as above                      | `npm install -g @joelhooks/beads`                 |
+| Verification Gate fails     | TypeScript errors or test failures | Fix errors shown, or use `skip_verification=true` |
+| File reservation conflict   | Another agent has the file         | Wait for release, or check `swarmmail_inbox`      |
+| `Mandate not found`         | ID doesn't exist                   | Use `mandate_list` to see available mandates      |
+| Swarm Mail connection error | Database not initialized           | Run `swarm setup` again                           |
+| `Agent not registered`      | Session not initialized            | Call `swarmmail_init` first                       |
+
+### 3. Getting Help
+
+- Run `swarm doctor` for dependency status
+- Check `swarmmail_health` for database status
+- File issues at: https://github.com/joelhooks/opencode-swarm-plugin/issues
 
 ## License
 

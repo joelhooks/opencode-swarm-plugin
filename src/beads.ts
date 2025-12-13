@@ -178,7 +178,10 @@ function parseBead(output: string): Bead {
     // CLI commands like `bd close`, `bd update` return arrays even for single items
     const data = Array.isArray(parsed) ? parsed[0] : parsed;
     if (!data) {
-      throw new BeadError("No bead data in response", "parse");
+      throw new BeadError(
+        "No bead data in response. The bd CLI may not be installed or returned unexpected output. Try: Run 'bd --version' to verify installation, or check if .beads/ directory exists in project.",
+        "parse",
+      );
     }
     return BeadSchema.parse(data);
   } catch (error) {
@@ -191,7 +194,10 @@ function parseBead(output: string): Bead {
     if (error instanceof BeadError) {
       throw error;
     }
-    throw new BeadError(`Failed to parse bead JSON: ${output}`, "parse");
+    throw new BeadError(
+      `Failed to parse bead JSON because output is malformed. Try: Check if bd CLI is up to date with 'bd --version' (need v1.0.0+), or inspect output: ${output.slice(0, 100)}`,
+      "parse",
+    );
   }
 }
 
@@ -209,7 +215,10 @@ function parseBeads(output: string): Bead[] {
         error,
       );
     }
-    throw new BeadError(`Failed to parse beads JSON: ${output}`, "parse");
+    throw new BeadError(
+      `Failed to parse beads JSON because output is malformed. Try: Check if bd CLI is up to date with 'bd --version' (need v1.0.0+), or inspect output: ${output.slice(0, 100)}`,
+      "parse",
+    );
   }
 }
 
@@ -249,7 +258,7 @@ export const beads_create = tool({
 
     if (result.exitCode !== 0) {
       throw new BeadError(
-        `Failed to create bead: ${result.stderr}`,
+        `Failed to create bead because bd command exited with code ${result.exitCode}. Error: ${result.stderr}. Try: Check if beads initialized with 'bd init' in project root, or verify .beads/ directory exists.`,
         cmdParts.join(" "),
         result.exitCode,
         result.stderr,
@@ -260,7 +269,7 @@ export const beads_create = tool({
     const stdout = result.stdout.trim();
     if (!stdout) {
       throw new BeadError(
-        "bd create returned empty output",
+        "bd create returned empty output because command produced no response. Try: Check if bd is properly installed with 'bd --version', or run 'bd list' to test basic functionality.",
         cmdParts.join(" "),
         0,
         "Empty stdout",
@@ -270,7 +279,7 @@ export const beads_create = tool({
     // Check for error messages in stdout (bd sometimes outputs errors to stdout)
     if (stdout.startsWith("error:") || stdout.startsWith("Error:")) {
       throw new BeadError(
-        `bd create failed: ${stdout}`,
+        `bd create failed because command returned error in stdout: ${stdout}. Try: Check error message above, verify beads initialized with 'bd init', or check .beads/issues.jsonl for corruption.`,
         cmdParts.join(" "),
         0,
         stdout,
@@ -331,7 +340,7 @@ export const beads_create_epic = tool({
 
       if (epicResult.exitCode !== 0) {
         throw new BeadError(
-          `Failed to create epic: ${epicResult.stderr}`,
+          `Failed to create epic because bd command failed: ${epicResult.stderr}. Try: Verify beads initialized with 'bd init', check if .beads/ directory is writable, or run 'bd list' to test basic functionality.`,
           epicCmd.join(" "),
           epicResult.exitCode,
         );
@@ -361,7 +370,7 @@ export const beads_create_epic = tool({
 
         if (subtaskResult.exitCode !== 0) {
           throw new BeadError(
-            `Failed to create subtask: ${subtaskResult.stderr}`,
+            `Failed to create subtask because bd command failed: ${subtaskResult.stderr}. Try: Check if parent epic exists with 'bd show ${epic.id}', verify .beads/issues.jsonl is not corrupted, or check for invalid characters in title.`,
             subtaskCmd.join(" "),
             subtaskResult.exitCode,
           );
@@ -430,7 +439,7 @@ export const beads_create_epic = tool({
       }
 
       throw new BeadError(
-        `Epic creation failed: ${errorMsg}${rollbackInfo}`,
+        `Epic creation failed: ${errorMsg}${rollbackInfo}. Try: If rollback failed, manually close beads with 'bd close <id> --reason "Rollback"', check .beads/issues.jsonl for partial state, or re-run beads_create_epic with corrected parameters.`,
         "beads_create_epic",
         1,
       );
@@ -482,7 +491,7 @@ export const beads_query = tool({
 
     if (result.exitCode !== 0) {
       throw new BeadError(
-        `Failed to query beads: ${result.stderr}`,
+        `Failed to query beads because bd command failed: ${result.stderr}. Try: Check if beads initialized with 'bd init', verify .beads/ directory exists, or run 'bd --version' to check CLI version.`,
         cmd.join(" "),
         result.exitCode,
       );
@@ -534,7 +543,7 @@ export const beads_update = tool({
 
     if (result.exitCode !== 0) {
       throw new BeadError(
-        `Failed to update bead: ${result.stderr}`,
+        `Failed to update bead because bd command failed: ${result.stderr}. Try: Verify bead exists with 'bd show ${validated.id}', check for invalid status values, or inspect .beads/issues.jsonl for corruption.`,
         cmd.join(" "),
         result.exitCode,
       );
@@ -570,7 +579,7 @@ export const beads_close = tool({
 
     if (result.exitCode !== 0) {
       throw new BeadError(
-        `Failed to close bead: ${result.stderr}`,
+        `Failed to close bead because bd command failed: ${result.stderr}. Try: Verify bead exists and is not already closed with 'beads_query(status="closed")' or 'bd show ${validated.id}', check if bead ID is correct.`,
         cmd.join(" "),
         result.exitCode,
       );
@@ -601,7 +610,7 @@ export const beads_start = tool({
 
     if (result.exitCode !== 0) {
       throw new BeadError(
-        `Failed to start bead: ${result.stderr}`,
+        `Failed to start bead because bd update command failed: ${result.stderr}. Try: Verify bead exists with 'bd show ${args.id}', check if already in_progress with 'beads_query(status="in_progress")', or use beads_update directly.`,
         `bd update ${args.id} --status in_progress --json`,
         result.exitCode,
       );
@@ -623,7 +632,7 @@ export const beads_ready = tool({
 
     if (result.exitCode !== 0) {
       throw new BeadError(
-        `Failed to get ready beads: ${result.stderr}`,
+        `Failed to get ready beads because bd ready command failed: ${result.stderr}. Try: Check if beads initialized with 'bd init', verify .beads/ directory is readable, or run 'bd list --json' to test basic query.`,
         "bd ready --json",
         result.exitCode,
       );
@@ -696,7 +705,7 @@ export const beads_sync = tool({
     );
     if (flushResult.exitCode !== 0) {
       throw new BeadError(
-        `Failed to flush beads: ${flushResult.stderr}`,
+        `Failed to flush beads because bd sync failed: ${flushResult.stderr}. Try: Check if .beads/ directory is writable, verify no corrupted JSONL files, or run 'bd list' to test basic beads functionality.`,
         "bd sync --flush-only",
         flushResult.exitCode,
       );
@@ -715,7 +724,7 @@ export const beads_sync = tool({
       const addResult = await runGitCommand(["add", ".beads/"]);
       if (addResult.exitCode !== 0) {
         throw new BeadError(
-          `Failed to stage beads: ${addResult.stderr}`,
+          `Failed to stage beads because git add failed: ${addResult.stderr}. Try: Check if .beads/ directory exists, verify git is initialized with 'git status', or check for .gitignore patterns blocking .beads/.`,
           "git add .beads/",
           addResult.exitCode,
         );
@@ -732,7 +741,7 @@ export const beads_sync = tool({
         !commitResult.stdout.includes("nothing to commit")
       ) {
         throw new BeadError(
-          `Failed to commit beads: ${commitResult.stderr}`,
+          `Failed to commit beads because git commit failed: ${commitResult.stderr}. Try: Check git config (user.name, user.email) with 'git config --list', verify working tree is clean, or check for pre-commit hooks blocking commit.`,
           "git commit",
           commitResult.exitCode,
         );
@@ -798,7 +807,7 @@ export const beads_sync = tool({
 
       if (pullResult.exitCode !== 0) {
         throw new BeadError(
-          `Failed to pull: ${pullResult.stderr}`,
+          `Failed to pull because git pull --rebase failed: ${pullResult.stderr}. Try: Resolve merge conflicts manually with 'git status', check if remote is accessible with 'git remote -v', or use skip_verification to bypass automatic pull.`,
           "git pull --rebase",
           pullResult.exitCode,
         );
@@ -824,7 +833,7 @@ export const beads_sync = tool({
     );
     if (pushResult.exitCode !== 0) {
       throw new BeadError(
-        `Failed to push: ${pushResult.stderr}`,
+        `Failed to push because git push failed: ${pushResult.stderr}. Try: Check if remote branch is up to date with 'git pull --rebase', verify push permissions, check remote URL with 'git remote -v', or force push with 'git push --force-with-lease' if safe.`,
         "git push",
         pushResult.exitCode,
       );
@@ -858,7 +867,7 @@ export const beads_link_thread = tool({
 
     if (queryResult.exitCode !== 0) {
       throw new BeadError(
-        `Failed to get bead: ${queryResult.stderr}`,
+        `Failed to get bead because bd show command failed: ${queryResult.stderr}. Try: Verify bead ID is correct with 'beads_query()', check if bead exists with 'bd list --json', or check .beads/issues.jsonl for valid entries.`,
         `bd show ${args.bead_id} --json`,
         queryResult.exitCode,
       );
@@ -887,7 +896,7 @@ export const beads_link_thread = tool({
 
     if (updateResult.exitCode !== 0) {
       throw new BeadError(
-        `Failed to update bead: ${updateResult.stderr}`,
+        `Failed to update bead because bd update command failed: ${updateResult.stderr}. Try: Verify bead exists with 'bd show ${args.bead_id}', check for invalid characters in description, or inspect .beads/issues.jsonl for corruption.`,
         `bd update ${args.bead_id} -d ...`,
         updateResult.exitCode,
       );
