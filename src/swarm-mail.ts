@@ -710,13 +710,13 @@ export const swarmmail_health = tool({
 // Exports
 // ============================================================================
 
-export const swarmMailTools = [
-  swarmmail_init,
-  swarmmail_send,
-  swarmmail_inbox,
-  swarmmail_read_message,
-  swarmmail_reserve,
-  swarmmail_release,
-  swarmmail_ack,
-  swarmmail_health,
-];
+export const swarmMailTools = {
+  swarmmail_init: swarmmail_init,
+  swarmmail_send: swarmmail_send,
+  swarmmail_inbox: swarmmail_inbox,
+  swarmmail_read_message: swarmmail_read_message,
+  swarmmail_reserve: swarmmail_reserve,
+  swarmmail_release: swarmmail_release,
+  swarmmail_ack: swarmmail_ack,
+  swarmmail_health: swarmmail_health,
+};
