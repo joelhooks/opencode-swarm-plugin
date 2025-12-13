@@ -25,6 +25,7 @@ import type { Plugin, PluginInput, Hooks } from "@opencode-ai/plugin";
 import { beadsTools, setBeadsWorkingDirectory } from "./beads";
 import {
   agentMailTools,
+  setAgentMailProjectDirectory,
   type AgentMailState,
   AGENT_MAIL_URL,
 } from "./agent-mail";
@@ -59,6 +60,11 @@ export const SwarmPlugin: Plugin = async (
   // Set the project directory for skills discovery
   // Skills are discovered from .opencode/skills/, .claude/skills/, or skills/
   setSkillsProjectDirectory(directory);
+
+  // Set the project directory for Agent Mail
+  // This ensures agentmail_init uses the correct project path by default
+  // (prevents using plugin directory when working in a different project)
+  setAgentMailProjectDirectory(directory);
 
   /** Track active sessions for cleanup */
   let activeAgentMailState: AgentMailState | null = null;
@@ -246,6 +252,11 @@ export {
   AgentMailNotInitializedError,
   FileReservationConflictError,
   createAgentMailError,
+  setAgentMailProjectDirectory,
+  getAgentMailProjectDirectory,
+  mcpCallWithAutoInit,
+  isProjectNotFoundError,
+  isAgentNotFoundError,
   type AgentMailState,
 } from "./agent-mail";
 

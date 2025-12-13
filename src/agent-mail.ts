@@ -27,6 +27,35 @@ const AGENT_MAIL_URL = "http://127.0.0.1:8765";
 const DEFAULT_TTL_SECONDS = 3600; // 1 hour
 const MAX_INBOX_LIMIT = 5; // HARD CAP - never exceed this
 
+/**
+ * Default project directory for Agent Mail operations
+ *
+ * This is set by the plugin init to the actual working directory (from OpenCode).
+ * Without this, tools might use the plugin's directory instead of the project's.
+ *
+ * Set this via setAgentMailProjectDirectory() before using tools.
+ */
+let agentMailProjectDirectory: string | null = null;
+
+/**
+ * Set the default project directory for Agent Mail operations
+ *
+ * Called during plugin initialization with the actual project directory.
+ * This ensures agentmail_init uses the correct project path by default.
+ */
+export function setAgentMailProjectDirectory(directory: string): void {
+  agentMailProjectDirectory = directory;
+}
+
+/**
+ * Get the default project directory
+ *
+ * Returns the configured directory, or falls back to cwd if not set.
+ */
+export function getAgentMailProjectDirectory(): string {
+  return agentMailProjectDirectory || process.cwd();
+}
+
 // Retry configuration
 const RETRY_CONFIG = {
   maxRetries: parseInt(process.env.OPENCODE_AGENT_MAIL_MAX_RETRIES || "3"),
@@ -1077,7 +1106,10 @@ export const agentmail_init = tool({
   args: {
     project_path: tool.schema
       .string()
-      .describe("Absolute path to the project/repo"),
+      .optional()
+      .describe(
+        "Absolute path to the project/repo (defaults to current working directory)",
+      ),
     agent_name: tool.schema
       .string()
       .optional()
@@ -1088,6 +1120,10 @@ export const agentmail_init = tool({
       .describe("Description of current task"),
   },
   async execute(args, ctx) {
+    // Use provided path or fall back to configured project directory
+    // This prevents using the plugin's directory when working in a different project
+    const projectPath = args.project_path || getAgentMailProjectDirectory();
+
     // Check if Agent Mail is available
     const available = await checkAgentMailAvailable();
     if (!available) {
@@ -1113,12 +1149,12 @@ export const agentmail_init = tool({
       try {
         // 1. Ensure project exists
         const project = await mcpCall<ProjectInfo>("ensure_project", {
-          human_key: args.project_path,
+          human_key: projectPath,
         });
 
         // 2. Register agent
         const agent = await mcpCall<AgentInfo>("register_agent", {
-          project_key: args.project_path,
+          project_key: projectPath,
           program: "opencode",
           model: "claude-opus-4",
           name: args.agent_name, // undefined = auto-generate
@@ -1127,7 +1163,7 @@ export const agentmail_init = tool({
 
         // 3. Store state using sessionID
         const state: AgentMailState = {
-          projectKey: args.project_path,
+          projectKey: projectPath,
           agentName: agent.name,
           reservations: [],
           startedAt: new Date().toISOString(),

@@ -180,7 +180,7 @@ export function parseFrontmatter(content: string): {
  */
 function validateSkillMetadata(
   raw: Record<string, unknown>,
-  filePath: string
+  filePath: string,
 ): SkillMetadata {
   const name = raw.name;
   const description = raw.description;
@@ -191,15 +191,13 @@ function validateSkillMetadata(
 
   if (typeof description !== "string" || !description) {
     throw new Error(
-      `Skill at ${filePath} missing required 'description' field`
+      `Skill at ${filePath} missing required 'description' field`,
     );
   }
 
   // Validate name format
   if (!/^[a-z0-9-]+$/.test(name)) {
-    throw new Error(
-      `Skill name '${name}' must be lowercase with hyphens only`
-    );
+    throw new Error(`Skill name '${name}' must be lowercase with hyphens only`);
   }
 
   if (name.length > 64) {
@@ -208,7 +206,7 @@ function validateSkillMetadata(
 
   if (description.length > 1024) {
     throw new Error(
-      `Skill description for '${name}' exceeds 1024 character limit`
+      `Skill description for '${name}' exceeds 1024 character limit`,
     );
   }
 
@@ -342,7 +340,7 @@ async function loadSkill(skillPath: string): Promise<Skill> {
  * 5. Global: ~/.claude/skills/
  */
 export async function discoverSkills(
-  projectDir?: string
+  projectDir?: string,
 ): Promise<Map<string, Skill>> {
   const dir = projectDir || skillsProjectDirectory;
 
@@ -372,7 +370,7 @@ export async function discoverSkills(
       } catch (error) {
         // Log but don't fail on individual skill parse errors
         console.warn(
-          `[skills] Failed to load ${skillPath}: ${error instanceof Error ? error.message : String(error)}`
+          `[skills] Failed to load ${skillPath}: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     }
@@ -458,9 +456,7 @@ Returns skill names, descriptions, and whether they have executable scripts.`,
 
     // Filter by tag if provided
     if (args.tag) {
-      refs = refs.filter(
-        (s) => s.metadata.tags?.includes(args.tag as string)
-      );
+      refs = refs.filter((s) => s.metadata.tags?.includes(args.tag as string));
     }
 
     if (refs.length === 0) {
@@ -542,9 +538,7 @@ Use skills_use first to see available scripts, then execute them here.
 Scripts run in the skill's directory with the project directory as an argument.`,
   args: {
     skill: tool.schema.string().describe("Name of the skill"),
-    script: tool.schema
-      .string()
-      .describe("Name of the script file to execute"),
+    script: tool.schema.string().describe("Name of the script file to execute"),
     args: tool.schema
       .array(tool.schema.string())
       .optional()
@@ -565,35 +559,27 @@ Scripts run in the skill's directory with the project directory as an argument.`
     const scriptArgs = args.args || [];
 
     try {
-      // Use Bun shell from context if available, otherwise exec directly
-      const $ = ctx?.$;
-      if ($) {
-        const result =
-          await $`${scriptPath} ${skillsProjectDirectory} ${scriptArgs}`.quiet();
-        return result.text();
-      } else {
-        // Fallback to direct execution
-        const { spawn } = await import("child_process");
-        return new Promise((resolve) => {
-          const proc = spawn(scriptPath, [skillsProjectDirectory, ...scriptArgs], {
-            cwd: skill.directory,
-            stdio: ["pipe", "pipe", "pipe"],
-          });
+      // Execute script using Bun.spawn for better compatibility
+      const proc = Bun.spawn(
+        [scriptPath, skillsProjectDirectory, ...scriptArgs],
+        {
+          cwd: skill.directory,
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
 
-          let output = "";
-          proc.stdout?.on("data", (d) => (output += d.toString()));
-          proc.stderr?.on("data", (d) => (output += d.toString()));
-          proc.on("close", (code) => {
-            if (code === 0) {
-              resolve(output || "Script executed successfully.");
-            } else {
-              resolve(`Script exited with code ${code}:\n${output}`);
-            }
-          });
-          proc.on("error", (err) => {
-            resolve(`Failed to execute script: ${err.message}`);
-          });
-        });
+      const [stdout, stderr] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ]);
+      const exitCode = await proc.exited;
+
+      const output = stdout + stderr;
+      if (exitCode === 0) {
+        return output || "Script executed successfully.";
+      } else {
+        return `Script exited with code ${exitCode}:\n${output}`;
       }
     } catch (error) {
       return `Failed to execute script: ${error instanceof Error ? error.message : String(error)}`;
@@ -666,7 +652,7 @@ function generateSkillContent(
   name: string,
   description: string,
   body: string,
-  options?: { tags?: string[]; tools?: string[] }
+  options?: { tags?: string[]; tools?: string[] },
 ): string {
   const frontmatter: string[] = [
     "---",
@@ -733,9 +719,17 @@ Good skills have:
       .optional()
       .describe("Tools this skill commonly uses"),
     directory: tool.schema
-      .enum([".opencode/skills", ".claude/skills", "skills", "global", "global-claude"])
+      .enum([
+        ".opencode/skills",
+        ".claude/skills",
+        "skills",
+        "global",
+        "global-claude",
+      ])
       .optional()
-      .describe("Where to create the skill (default: .opencode/skills). Use 'global' for ~/.config/opencode/skills/, 'global-claude' for ~/.claude/skills/"),
+      .describe(
+        "Where to create the skill (default: .opencode/skills). Use 'global' for ~/.config/opencode/skills/, 'global-claude' for ~/.claude/skills/",
+      ),
   },
   async execute(args) {
     // Check if skill already exists
@@ -765,7 +759,7 @@ Good skills have:
         args.name,
         args.description,
         args.body,
-        { tags: args.tags, tools: args.tools }
+        { tags: args.tags, tools: args.tools },
       );
 
       await writeFile(skillPath, content, "utf-8");
@@ -786,7 +780,7 @@ Good skills have:
           ],
         },
         null,
-        2
+        2,
       );
     } catch (error) {
       return `Failed to create skill: ${error instanceof Error ? error.message : String(error)}`;
@@ -869,12 +863,10 @@ Use this to refine skills based on experience:
 
     try {
       // Generate and write updated SKILL.md
-      const content = generateSkillContent(
-        args.name,
-        newDescription,
-        newBody,
-        { tags: newTags, tools: newTools }
-      );
+      const content = generateSkillContent(args.name, newDescription, newBody, {
+        tags: newTags,
+        tools: newTools,
+      });
 
       await writeFile(skill.path, content, "utf-8");
 
@@ -895,7 +887,7 @@ Use this to refine skills based on experience:
           message: `Updated skill '${args.name}'.`,
         },
         null,
-        2
+        2,
       );
     } catch (error) {
       return `Failed to update skill: ${error instanceof Error ? error.message : String(error)}`;
@@ -917,9 +909,7 @@ Use sparingly - only delete skills that are:
 Consider updating instead of deleting when possible.`,
   args: {
     name: tool.schema.string().describe("Name of the skill to delete"),
-    confirm: tool.schema
-      .boolean()
-      .describe("Must be true to confirm deletion"),
+    confirm: tool.schema.boolean().describe("Must be true to confirm deletion"),
   },
   async execute(args) {
     if (!args.confirm) {
@@ -946,7 +936,7 @@ Consider updating instead of deleting when possible.`,
           message: `Deleted skill '${args.name}' and its directory.`,
         },
         null,
-        2
+        2,
       );
     } catch (error) {
       return `Failed to delete skill: ${error instanceof Error ? error.message : String(error)}`;
@@ -997,7 +987,9 @@ executed with skills_execute. Use for:
       await mkdir(scriptsDir, { recursive: true });
 
       // Write script
-      await writeFile(scriptPath, args.content, { mode: args.executable ? 0o755 : 0o644 });
+      await writeFile(scriptPath, args.content, {
+        mode: args.executable ? 0o755 : 0o644,
+      });
 
       // Invalidate cache to update hasScripts
       invalidateSkillsCache();
@@ -1013,7 +1005,7 @@ executed with skills_execute. Use for:
           usage: `Run with: skills_execute(skill: "${args.skill}", script: "${args.script_name}")`,
         },
         null,
-        2
+        2,
       );
     } catch (error) {
       return `Failed to add script: ${error instanceof Error ? error.message : String(error)}`;
@@ -1323,7 +1315,7 @@ Consider which skills may be helpful for each subtask.`;
  * Returns skill names that may be relevant.
  */
 export async function findRelevantSkills(
-  taskDescription: string
+  taskDescription: string,
 ): Promise<string[]> {
   const skills = await discoverSkills();
   const relevant: string[] = [];
@@ -1338,7 +1330,7 @@ export async function findRelevantSkills(
     const taskWords = taskLower.split(/\s+/);
 
     const matches = keywords.filter((k) =>
-      taskWords.some((w) => w.includes(k) || k.includes(w))
+      taskWords.some((w) => w.includes(k) || k.includes(w)),
     );
 
     // Also check tags
