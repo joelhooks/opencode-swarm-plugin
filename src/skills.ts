@@ -255,8 +255,9 @@ function getClaudeGlobalSkillsDir(): string {
  * Bundled skills from the package (lowest priority)
  */
 function getPackageSkillsDir(): string {
-  // __dirname equivalent in ES modules - resolve relative to this file
-  return join(__dirname, "..", "global-skills");
+  // ES module equivalent of __dirname - resolve relative to this file
+  const currentDir = new URL(".", import.meta.url).pathname;
+  return join(currentDir, "..", "global-skills");
 }
 
 /**

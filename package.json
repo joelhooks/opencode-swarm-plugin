@@ -20,7 +20,7 @@
   "scripts": {
     "build": "bun build ./src/index.ts --outdir ./dist --target node && bun build ./src/plugin.ts --outfile ./dist/plugin.js --target node",
     "dev": "bun --watch src/index.ts",
-    "test": "bun test src/schemas/",
+    "test": "bun test src/schemas/ src/skills.test.ts",
     "test:watch": "bun test --watch",
     "test:integration": "bun test src/*.integration.test.ts",
     "test:all": "bun test",
