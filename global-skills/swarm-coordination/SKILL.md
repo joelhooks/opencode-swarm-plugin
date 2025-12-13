@@ -443,3 +443,73 @@ beads_sync();
 ```
 
 See `references/coordinator-patterns.md` for detailed patterns.
+
+## ASCII Art, Whimsy & Diagrams (MANDATORY)
+
+**We fucking LOVE visual flair.** Every swarm session should include:
+
+### Session Summaries
+
+When completing a swarm, output a beautiful summary with:
+
+- ASCII art banner (figlet-style or custom)
+- Box-drawing characters for structure
+- Architecture diagrams showing what was built
+- Stats (files modified, subtasks completed, etc.)
+- A memorable quote or cow saying "ship it"
+
+### During Coordination
+
+- Use tables for status updates
+- Draw dependency trees with box characters
+- Show progress with visual indicators
+
+### Examples
+
+**Session Complete Banner:**
+
+```
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃         🐝 SWARM COMPLETE 🐝                 ┃
+┃                                              ┃
+┃   Epic: Add Authentication                   ┃
+┃   Subtasks: 4/4 ✓                            ┃
+┃   Files: 12 modified                         ┃
+┃                                              ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+```
+
+**Architecture Diagram:**
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   INPUT     │────▶│  PROCESS    │────▶│   OUTPUT    │
+└─────────────┘     └─────────────┘     └─────────────┘
+```
+
+**Dependency Tree:**
+
+```
+epic-123
+├── epic-123.1 ✓ Auth service
+├── epic-123.2 ✓ Database schema
+├── epic-123.3 ◐ API routes (in progress)
+└── epic-123.4 ○ Tests (pending)
+```
+
+**Ship It:**
+
+```
+    \   ^__^
+     \  (oo)\_______
+        (__)\       )\/\
+            ||----w |
+            ||     ||
+
+    moo. ship it.
+```
+
+**This is not optional.** PRs get shared on Twitter. Session summaries get screenshot. Make them memorable. Make them beautiful. Make them fun.
+
+Box-drawing characters: `─ │ ┌ ┐ └ ┘ ├ ┤ ┬ ┴ ┼ ━ ┃ ┏ ┓ ┗ ┛`
+Progress indicators: `✓ ✗ ◐ ○ ● ▶ ▷ ★ ☆ 🐝`

@@ -342,5 +342,64 @@ Not: Do Everything Inline → Run Out of Context → Fail
 - [ ] Workers spawned in parallel
 - [ ] Progress monitored via **swarmmail_inbox** (limit=5, no bodies)
 - [ ] PR created (or pushed to main)
+- [ ] **ASCII art session summary** (MANDATORY - see below)
+
+## ASCII Art & Visual Flair (MANDATORY)
+
+**We fucking LOVE visual output.** Every swarm completion MUST include:
+
+### Required Elements
+
+1. **ASCII banner** - Big text for the epic title or "SWARM COMPLETE"
+2. **Architecture diagram** - Show what was built with box-drawing chars
+3. **Stats summary** - Files, subtasks, releases in a nice box
+4. **Ship-it flourish** - Cow, bee, or memorable closer
+
+### Box-Drawing Reference
+
+```
+─ │ ┌ ┐ └ ┘ ├ ┤ ┬ ┴ ┼    (light)
+━ ┃ ┏ ┓ ┗ ┛ ┣ ┫ ┳ ┻ ╋    (heavy)
+═ ║ ╔ ╗ ╚ ╝ ╠ ╣ ╦ ╩ ╬    (double)
+```
+
+### Example Session Summary
+
+```
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃                    🐝 SWARM COMPLETE 🐝                     ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+    EPIC: Add User Authentication
+    ══════════════════════════════
+
+    ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+    │   OAuth     │────▶│   Session   │────▶│  Protected  │
+    │   Provider  │     │   Manager   │     │   Routes    │
+    └─────────────┘     └─────────────┘     └─────────────┘
+
+    SUBTASKS
+    ────────
+    ├── auth-123.1 ✓ OAuth provider setup
+    ├── auth-123.2 ✓ Session management
+    ├── auth-123.3 ✓ Protected route middleware
+    └── auth-123.4 ✓ Integration tests
+
+    STATS
+    ─────
+    Files Modified:  12
+    Tests Added:     24
+    Time:            ~45 min
+
+        \   ^__^
+         \  (oo)\_______
+            (__)\       )\/\
+                ||----w |
+                ||     ||
+
+    moo. ship it.
+```
+
+**This is not optional.** Make it beautiful. Make it memorable. PRs get shared.
 
 Begin with swarmmail_init and knowledge gathering now.
