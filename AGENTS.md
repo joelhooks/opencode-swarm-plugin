@@ -221,6 +221,8 @@ OpenCode plugin providing:
 
 This repo uses **Changesets** for versioning and **npm Trusted Publishers** (OIDC) for publishing - no npm tokens needed.
 
+**📚 Full guide:** `skills_use(name="publish-package-cicd")` - covers workflow, gotchas, and troubleshooting.
+
 ### Release Flow
 
 **IMPORTANT: Publishing happens via GitHub Actions, NOT locally. Do NOT run `bunx changeset version` or `bunx changeset publish` locally - it will fail without GITHUB_TOKEN and break the automated flow.**
