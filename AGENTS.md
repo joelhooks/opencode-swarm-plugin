@@ -223,16 +223,28 @@ This repo uses **Changesets** for versioning and **npm Trusted Publishers** (OID
 
 ### Release Flow
 
+**IMPORTANT: Publishing happens via GitHub Actions, NOT locally. Do NOT run `bunx changeset version` or `bunx changeset publish` locally - it will fail without GITHUB_TOKEN and break the automated flow.**
+
 1. Make changes to packages
-2. Create a changeset describing the change:
+2. Create a changeset file manually (don't use interactive `bunx changeset`):
    ```bash
-   bunx changeset
-   # Select packages, bump type (patch/minor/major), write summary
+   cat > .changeset/your-change-name.md << 'EOF'
+   ---
+   "package-name": patch
+   ---
+
+   Description of the change
+   EOF
    ```
 3. Commit the changeset file (`.changeset/*.md`) with your changes
 4. Push to main
 5. Changesets action creates a "chore: release packages" PR with version bumps
 6. Merge that PR → automatically publishes to npm via OIDC
+
+### Ignored Packages
+
+The following packages are excluded from changesets (won't be published):
+- `@swarmtools/web` - docs site, not an npm package
 
 ### Commands
 
