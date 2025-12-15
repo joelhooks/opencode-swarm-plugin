@@ -1,0 +1,179 @@
+---
+title: "ADR-001: Monorepo Structure"
+description: Turborepo + Bun monorepo with swarm-mail extracted as standalone package
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+# ADR-001: Monorepo Structure with Turborepo and Bun
+
+<Callout type="info">
+**Status:** Accepted  
+**Date:** December 2024
+</Callout>
+
+## Context
+
+The opencode-swarm-plugin is currently a single-package TypeScript project. We need to extract the Swarm Mail actor-model primitives into a standalone package that can be:
+
+1. Published independently to npm for use in other projects
+2. Maintained with proper versioning and changelogs
+3. Developed alongside the OpenCode plugin without tight coupling
+4. Tested and built independently
+
+Research into modern monorepo solutions shows Turborepo + Bun provides:
+
+- Full compatibility (package-manager agnostic)
+- High-performance caching and incremental builds
+- Proven at scale (Vercel, PGLite's 9-package monorepo)
+- Excellent TypeScript support
+- Changesets integration for publishing
+
+Alternative considered: pnpm workspaces alone (rejected due to lack of task orchestration and caching).
+
+## Decision
+
+Adopt a Turborepo + Bun monorepo structure with:
+
+```
+opencode-swarm-plugin/
+├── packages/
+│   └── swarm-mail/            # ~3K lines - Actor-model primitives
+│       ├── src/
+│       │   ├── streams/       # Event sourcing, projections, store
+│       │   ├── agent-mail.ts  # High-level API
+│       │   └── index.ts
+│       ├── package.json       # Independent versioning, published as "swarm-mail"
+│       └── tsconfig.json
+├── src/                       # opencode-swarm-plugin source (stays at root)
+│   ├── beads.ts
+│   ├── swarm-*.ts
+│   └── plugin.ts
+├── apps/
+│   └── devtools/              # Future: SvelteKit DevTools UI
+├── turbo.json                 # Task pipeline definitions
+├── package.json               # Root = opencode-swarm-plugin, depends on swarm-mail
+└── .changeset/                # Publishing workflow
+```
+
+**Package naming:**
+
+- `swarm-mail` - Standalone actor-model library (npm: `swarm-mail`)
+- `opencode-swarm-plugin` - OpenCode integration (npm: `opencode-swarm-plugin`, depends on swarm-mail)
+
+Note: `swarm-mail` is intentionally agnostic of OpenCode - it's a general-purpose actor-model library that can be used in any TypeScript project.
+
+**Workspace dependencies:**
+
+```json
+{
+  "dependencies": {
+    "swarm-mail": "workspace:*"
+  }
+}
+```
+
+**Task pipeline (turbo.json):**
+
+```json
+{
+  "pipeline": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "test": {
+      "dependsOn": ["^build"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build"]
+    }
+  }
+}
+```
+
+**Publishing workflow:**
+
+- Changesets for version management
+- Independent versioning per package
+- Automated changelog generation
+- CI/CD integration for npm publish
+
+## Consequences
+
+### Easier
+
+- **Independent publishing** - `swarm-mail` can be used in any TypeScript project
+- **Clear boundaries** - Separation forces clean API design
+- **Parallel development** - Teams can work on packages independently
+- **Incremental builds** - Turborepo caches unchanged packages
+- **Type safety** - TypeScript project references ensure compile order
+- **Versioning** - Changesets tracks breaking changes per package
+
+### More Difficult
+
+- **Initial migration** - ~2-3 days to restructure existing code
+- **Breaking changes** - Extracting swarm-mail may reveal tight coupling
+- **Circular dependencies** - Must carefully design package boundaries
+- **Version conflicts** - Workspace deps must align across packages
+- **Build complexity** - More moving parts (mitigated by Turborepo automation)
+- **Learning curve** - Team must learn Turborepo conventions
+
+### Risks & Mitigations
+
+| Risk                               | Impact | Mitigation                                       |
+| ---------------------------------- | ------ | ------------------------------------------------ |
+| Breaking changes during extraction | High   | Feature branch, comprehensive test suite         |
+| Circular dependencies              | High   | Use dependency-cruiser to detect cycles          |
+| Version conflicts                  | Medium | Pin shared deps in root package.json             |
+| Build failures in CI               | Medium | Turborepo remote caching, isolated test runs     |
+| Overcomplicated structure          | Low    | Start with 2 packages, add more only when needed |
+
+## Implementation Notes
+
+### Phase 1: Initial Setup (Day 1)
+
+1. Install Turborepo and configure turbo.json
+2. Create packages/@swarm/mail and packages/@swarm/plugin directories
+3. Set up workspace dependencies in root package.json
+4. Configure TypeScript project references
+
+### Phase 2: Extract swarm-mail (Day 2-3)
+
+1. Move src/streams/\* to packages/swarm-mail/src/streams/
+2. Move agent-mail.ts, swarm-mail.ts to swarm-mail
+3. Update imports in opencode-swarm-plugin to use swarm-mail
+4. Run typecheck and fix breaking changes
+5. Migrate integration tests
+
+### Phase 3: CI/CD (Day 4)
+
+1. Update GitHub Actions to use `turbo run build test`
+2. Configure Changesets for publishing
+3. Add pre-commit hooks for type checking
+4. Document publishing workflow in CONTRIBUTING.md
+
+### Phase 4: Documentation (Day 5)
+
+1. Write swarm-mail README with API examples
+2. Create migration guide for existing users
+3. Add inline JSDoc comments for public API
+4. Generate TypeDoc API reference
+
+### Success Criteria
+
+- [ ] **bun run build** builds both packages in correct order
+- [ ] **bun run test** passes all tests in isolation
+- [ ] opencode-swarm-plugin can import from swarm-mail without errors
+- [ ] Changesets generates valid changelog entries
+- [ ] CI builds complete in less than 2 minutes (with caching)
+- [ ] Published swarm-mail package works in standalone project
+
+### Reference Implementation
+
+PGLite monorepo structure: https://github.com/electric-sql/pglite
+
+- 9 packages with scoped naming (@electric-sql/\*)
+- workspace:\* dependencies
+- Changesets publishing workflow
+- Independent versioning per package

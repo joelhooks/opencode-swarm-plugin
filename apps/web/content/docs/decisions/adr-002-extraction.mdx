@@ -1,0 +1,401 @@
+---
+title: "ADR-002: Package Extraction Strategy"
+description: Detailed strategy for extracting swarm-mail from plugin codebase
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+# ADR-002: Package Extraction Strategy
+
+<Callout type="info">
+**Status:** Accepted  
+**Date:** December 2024
+</Callout>
+
+## Context
+
+Following ADR-001's decision to adopt a monorepo structure, we need a detailed strategy for extracting the Swarm Mail actor-model primitives from the existing opencode-swarm-plugin codebase into a standalone `swarm-mail` package.
+
+The extraction must:
+
+1. Preserve all functionality without breaking changes
+2. Maintain backward compatibility for existing plugin users
+3. Provide clean API boundaries between packages
+4. Support independent versioning and publishing
+
+**Current Structure:**
+
+- `src/streams/` - Event sourcing primitives (~1.5K lines)
+- `src/agent-mail.ts` - High-level API (~500 lines)
+- `src/swarm-mail.ts` - Integration layer (~200 lines)
+- Integration tests scattered across codebase
+
+**Target Structure:**
+
+- `packages/swarm-mail` - Standalone actor-model library
+- `packages/opencode-swarm-plugin` - OpenCode integration (depends on swarm-mail)
+
+## Decision
+
+### Phase 1: Boundary Analysis (Pre-extraction)
+
+**1.1 Identify Public API Surface**
+
+```typescript
+// swarm-mail will export:
+export {
+  initializeSwarmMail,
+  sendMessage,
+  getInbox,
+  readMessage,
+  reserveFiles,
+  releaseReservations,
+} from "./agent-mail";
+export { SwarmMailStore, appendEvent, queryProjection } from "./streams/store";
+export { MailboxService, LockService, AskService } from "./streams/effect";
+export type { SwarmMailEvent, Message, FileReservation } from "./schemas";
+```
+
+**1.2 Dependency Audit**
+Use `dependency-cruiser` to detect:
+
+- Circular dependencies (fail build if found)
+- External dependencies (must be in swarm-mail package.json)
+- Internal coupling (refactor before extraction)
+
+```bash
+npx depcruise --config .dependency-cruiser.js src/
+```
+
+**1.3 Breaking Change Detection**
+Run full test suite with coverage:
+
+- Integration tests must pass 100%
+- Type checking must succeed
+- Public API must remain unchanged
+
+### Phase 2: Extraction Steps
+
+**2.1 Create Package Structure**
+
+```bash
+mkdir -p packages/swarm-mail/src/{streams,effect}
+mkdir -p packages/opencode-swarm-plugin/src
+```
+
+**2.2 Move Files (Atomic Operation)**
+
+```bash
+# Streams infrastructure
+git mv src/streams/* packages/swarm-mail/src/streams/
+
+# Agent Mail API
+git mv src/agent-mail.ts packages/swarm-mail/src/
+git mv src/swarm-mail.ts packages/swarm-mail/src/
+
+# Schemas
+git mv src/schemas/swarm-context.ts packages/swarm-mail/src/schemas/
+```
+
+**2.3 Update Imports**
+
+```typescript
+// Before (in opencode-swarm-plugin):
+import { initializeSwarmMail } from "../agent-mail";
+
+// After:
+import { initializeSwarmMail } from "swarm-mail";
+```
+
+Run AST-based codemod:
+
+```bash
+npx jscodeshift -t codemods/update-imports.js packages/opencode-swarm-plugin/src/**/*.ts
+```
+
+**2.4 Configure Package Dependencies**
+
+```json
+// packages/swarm-mail/package.json
+{
+  "name": "swarm-mail",
+  "version": "0.1.0",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "dependencies": {
+    "effect": "^3.12.3",
+    "@electric-sql/pglite": "^0.2.14",
+    "zod": "^3.24.1"
+  }
+}
+
+// packages/opencode-swarm-plugin/package.json
+{
+  "name": "opencode-swarm-plugin",
+  "dependencies": {
+    "swarm-mail": "workspace:*"
+  }
+}
+```
+
+**2.5 Migrate Tests**
+
+```bash
+# Integration tests for swarm-mail
+git mv src/agent-mail.integration.test.ts packages/swarm-mail/src/
+git mv src/swarm-mail.integration.test.ts packages/swarm-mail/src/
+git mv src/streams/**/*.test.ts packages/swarm-mail/src/streams/
+
+# Plugin-specific tests stay in opencode-swarm-plugin
+# Update test imports to use swarm-mail
+```
+
+### Phase 3: API Cleanup
+
+**3.1 Define Public Exports**
+
+```typescript
+// packages/swarm-mail/src/index.ts
+export {
+  // High-level API
+  initializeSwarmMail,
+  sendMessage,
+  getInbox,
+  readMessage,
+  summarizeThread,
+  reserveFiles,
+  releaseReservations,
+  acknowledgeMessage,
+} from "./agent-mail";
+
+export {
+  // Effect Services
+  MailboxService,
+  LockService,
+  AskService,
+  DurableDeferred,
+} from "./streams/effect";
+
+export {
+  // Event Sourcing
+  SwarmMailStore,
+  appendEvent,
+  queryProjection,
+} from "./streams/store";
+
+export type {
+  // Types
+  SwarmMailEvent,
+  Message,
+  FileReservation,
+  AgentRegistration,
+} from "./schemas";
+```
+
+**3.2 Mark Internal APIs**
+Use JSDoc `@internal` for non-public exports:
+
+```typescript
+/**
+ * @internal
+ * Internal projection builder - do not use outside swarm-mail
+ */
+export const buildProjection = ...
+```
+
+**3.3 Version Exports**
+Support both named and default exports:
+
+```typescript
+// Allow: import { initializeSwarmMail } from 'swarm-mail'
+// Allow: import SwarmMail from 'swarm-mail'
+export default {
+  initializeSwarmMail,
+  sendMessage,
+  // ...
+};
+```
+
+### Phase 4: Backward Compatibility (Transition Period)
+
+**4.1 Re-export from Plugin**
+
+```typescript
+// packages/opencode-swarm-plugin/src/agent-mail.ts (deprecated wrapper)
+/**
+ * @deprecated Import from 'swarm-mail' instead
+ */
+export {
+  initializeSwarmMail,
+  sendMessage,
+  // ...
+} from "swarm-mail";
+```
+
+**4.2 Add Deprecation Warnings**
+
+```typescript
+// packages/opencode-swarm-plugin/src/index.ts
+if (process.env.NODE_ENV !== "production") {
+  console.warn(
+    "[opencode-swarm-plugin] Importing agent-mail APIs from opencode-swarm-plugin is deprecated. " +
+      'Import from swarm-mail instead: import { initializeSwarmMail } from "swarm-mail"',
+  );
+}
+```
+
+**4.3 Migration Timeline**
+
+- v0.1.0 - Initial extraction, both packages work
+- v0.2.0 - Add deprecation warnings
+- v1.0.0 - Remove re-exports, swarm-mail required
+
+### Phase 5: Verification
+
+**5.1 Build Verification**
+
+```bash
+# Clean build
+rm -rf node_modules packages/*/dist
+bun install
+
+# Build all packages
+turbo run build
+
+# Expected: swarm-mail builds first, then opencode-swarm-plugin
+```
+
+**5.2 Test Verification**
+
+```bash
+# Run all tests
+turbo run test
+
+# Expected: All integration tests pass
+# Expected: No type errors
+```
+
+**5.3 Publish Dry Run**
+
+```bash
+# Test publishing workflow
+npx changeset add
+npx changeset version
+npm pack --dry-run
+
+# Expected: Valid tarball for swarm-mail
+```
+
+## Consequences
+
+### Easier
+
+- **Independent publishing** - swarm-mail can be versioned separately
+- **Clear boundaries** - Public API explicitly defined
+- **Standalone usage** - Other projects can use swarm-mail without plugin
+- **Focused testing** - swarm-mail tests independent of plugin
+- **Type safety** - TypeScript enforces package boundaries
+
+### More Difficult
+
+- **Import paths change** - All consumers must update imports
+- **Two-package maintenance** - Breaking changes require coordination
+- **Version alignment** - opencode-swarm-plugin must specify compatible swarm-mail version
+- **Testing complexity** - Must test both standalone and integrated usage
+
+### Risks & Mitigations
+
+| Risk                               | Impact   | Mitigation                                        |
+| ---------------------------------- | -------- | ------------------------------------------------- |
+| Breaking changes during extraction | Critical | Feature branch, full test coverage, manual QA     |
+| Missed dependencies                | High     | dependency-cruiser validation, build from scratch |
+| Import path confusion              | Medium   | Clear migration guide, deprecation warnings       |
+| Circular dependencies              | High     | Pre-extraction analysis, dependency-cruiser gate  |
+| Version mismatch bugs              | Medium   | Peer dependency constraints, CI matrix testing    |
+
+## Implementation Notes
+
+### Pre-Extraction Checklist
+
+- [ ] Run dependency-cruiser to detect circular deps
+- [ ] Audit all imports in src/streams/, src/agent-mail.ts
+- [ ] Document current public API surface
+- [ ] Create feature branch for extraction
+- [ ] Ensure all tests pass with 100% coverage
+
+### Extraction Checklist
+
+- [ ] Create packages/swarm-mail directory structure
+- [ ] Move src/streams/\* to swarm-mail
+- [ ] Move agent-mail.ts, swarm-mail.ts to swarm-mail
+- [ ] Update all imports in opencode-swarm-plugin
+- [ ] Configure package.json dependencies
+- [ ] Migrate integration tests
+- [ ] Add index.ts with public exports
+- [ ] Build both packages
+- [ ] Run full test suite
+
+### Post-Extraction Checklist
+
+- [ ] Add deprecation warnings in opencode-swarm-plugin
+- [ ] Write migration guide for users
+- [ ] Generate TypeDoc for swarm-mail API
+- [ ] Add README with usage examples
+- [ ] Configure Changesets for versioning
+- [ ] Publish swarm-mail@0.1.0 to npm
+- [ ] Update opencode-swarm-plugin to depend on published version
+
+### Success Criteria
+
+- [ ] **bun run build** succeeds for both packages
+- [ ] All integration tests pass
+- [ ] No circular dependencies detected
+- [ ] Published swarm-mail works in standalone project
+- [ ] opencode-swarm-plugin works with published swarm-mail
+- [ ] Type checking passes with no errors
+- [ ] Migration guide tested with real user
+
+### Codemod Example (update-imports.js)
+
+```javascript
+module.exports = function transformer(file, api) {
+  const j = api.jscodeshift;
+  const root = j(file.source);
+
+  // Replace ../agent-mail with swarm-mail
+  root
+    .find(j.ImportDeclaration, {
+      source: {
+        value: (v) =>
+          v.includes("../agent-mail") || v.includes("../swarm-mail"),
+      },
+    })
+    .forEach((path) => {
+      path.node.source.value = "swarm-mail";
+    });
+
+  return root.toSource();
+};
+```
+
+### Dependency Cruiser Config
+
+```javascript
+// .dependency-cruiser.js
+module.exports = {
+  forbidden: [
+    {
+      name: "no-circular",
+      severity: "error",
+      from: {},
+      to: { circular: true },
+    },
+    {
+      name: "no-plugin-in-mail",
+      severity: "error",
+      from: { path: "^packages/swarm-mail" },
+      to: { path: "^packages/opencode-swarm-plugin" },
+    },
+  ],
+};
+```

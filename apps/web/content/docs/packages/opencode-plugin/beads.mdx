@@ -1,0 +1,273 @@
+---
+title: Beads Tools
+description: Git-backed issue tracking with atomic epic creation
+---
+
+# Beads Tools
+
+Git-backed issue tracking with atomic epic creation. Beads are stored as JSONL files in `.beads/issues.jsonl` and synced via git.
+
+## beads_create
+
+Create a new bead with type-safe validation.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `title` | string | ✅ | Bead title |
+| `type` | `"bug" \| "feature" \| "task" \| "epic" \| "chore"` | ❌ | Bead type (default: `"task"`) |
+| `description` | string | ❌ | Detailed description |
+| `priority` | 0-3 | ❌ | Priority (0=urgent, 3=low, default: 2) |
+| `parent_id` | string | ❌ | Parent bead ID for subtasks |
+
+**Example:**
+
+```typescript
+beads_create({
+  title: "Add OAuth authentication",
+  type: "feature",
+  description: "Implement OAuth 2.0 with refresh tokens",
+  priority: 1
+})
+```
+
+**Returns:** `{ id: "bd-123", title: "...", status: "open", ... }`
+
+---
+
+## beads_create_epic
+
+Create an epic with subtasks atomically. Either all beads are created or none (with rollback hints).
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `epic_title` | string | ✅ | Epic title |
+| `epic_description` | string | ❌ | Epic description |
+| `subtasks` | array | ✅ | Array of subtask definitions |
+
+**Subtask Schema:**
+
+```typescript
+{
+  title: string;           // Required
+  priority?: 0-3;          // Optional, default: 2
+  files?: string[];        // Optional, files this subtask touches
+}
+```
+
+**Example:**
+
+```typescript
+beads_create_epic({
+  epic_title: "User Authentication",
+  epic_description: "OAuth 2.0 implementation with refresh tokens",
+  subtasks: [
+    { 
+      title: "Create auth schema", 
+      priority: 2,
+      files: ["src/auth/schema.ts"]
+    },
+    { 
+      title: "Implement OAuth flow",
+      priority: 2,
+      files: ["src/auth/oauth.ts", "src/auth/tokens.ts"]
+    },
+    {
+      title: "Add token refresh logic",
+      priority: 1,
+      files: ["src/auth/refresh.ts"]
+    }
+  ]
+})
+```
+
+**Returns:** `{ epic_id: "bd-123", subtask_ids: ["bd-123.1", "bd-123.2", ...] }`
+
+---
+
+## beads_query
+
+Query beads with filters. Replaces legacy `bd list`, `bd ready`, `bd wip` commands.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `status` | `"open" \| "in_progress" \| "blocked" \| "closed"` | ❌ | Filter by status |
+| `type` | `"bug" \| "feature" \| "task" \| "epic" \| "chore"` | ❌ | Filter by type |
+| `ready` | boolean | ❌ | Only unblocked beads |
+| `limit` | number | ❌ | Max results |
+
+**Example:**
+
+```typescript
+// Get all in-progress beads
+beads_query({ status: "in_progress" })
+
+// Get next ready bead
+beads_query({ ready: true, limit: 1 })
+
+// Get all open bugs
+beads_query({ type: "bug", status: "open" })
+```
+
+**Returns:** Array of beads matching filters.
+
+---
+
+## beads_update
+
+Update bead status, description, or priority.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | string | ✅ | Bead ID (e.g., `"bd-123"`) |
+| `status` | `"open" \| "in_progress" \| "blocked" \| "closed"` | ❌ | New status |
+| `description` | string | ❌ | New description |
+| `priority` | 0-3 | ❌ | New priority |
+
+**Example:**
+
+```typescript
+beads_update({
+  id: "bd-123",
+  status: "blocked",
+  description: "Blocked: waiting for API schema from bd-122"
+})
+```
+
+---
+
+## beads_close
+
+Close a bead with a reason. Prefer this over `beads_update` for closure tracking.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | string | ✅ | Bead ID |
+| `reason` | string | ✅ | Closure reason |
+
+**Example:**
+
+```typescript
+beads_close({
+  id: "bd-123",
+  reason: "Done: OAuth flow implemented and tested"
+})
+```
+
+---
+
+## beads_start
+
+Mark a bead as in-progress. Sets `status: "in_progress"`.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | string | ✅ | Bead ID |
+
+**Example:**
+
+```typescript
+beads_start({ id: "bd-123" })
+```
+
+---
+
+## beads_ready
+
+Get the next ready bead (unblocked, highest priority).
+
+**Parameters:** None
+
+**Example:**
+
+```typescript
+beads_ready()
+// Returns: { id: "bd-125", title: "...", priority: 0, ... }
+```
+
+---
+
+## beads_sync
+
+Sync beads to git. **MANDATORY** before ending a session.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `auto_pull` | boolean | ❌ | Pull before push (default: `true`) |
+
+**Example:**
+
+```typescript
+beads_sync()
+// Runs: git add .beads && git commit && git pull && git push
+```
+
+**Critical:** Always call this at session end. Changes not synced are lost.
+
+---
+
+## beads_link_thread
+
+Add metadata linking bead to Agent Mail thread.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `bead_id` | string | ✅ | Bead ID |
+| `thread_id` | string | ✅ | Thread ID from Agent Mail |
+
+**Example:**
+
+```typescript
+beads_link_thread({
+  bead_id: "bd-123",
+  thread_id: "msg-thread-42"
+})
+```
+
+---
+
+## Session Workflow
+
+```typescript
+// Session start
+beads_ready()                              // What's next?
+beads_query({ status: "in_progress" })     // What's mid-flight?
+
+// Start work
+beads_start({ id: "bd-123" })
+
+// Update if needed
+beads_update({
+  id: "bd-123",
+  description: "Updated scope to include refresh tokens"
+})
+
+// Complete
+beads_close({
+  id: "bd-123",
+  reason: "Done: OAuth implemented with refresh"
+})
+
+// Session end (MANDATORY)
+beads_sync()
+```
+
+## Next Steps
+
+- [Swarm Tools](/docs/packages/opencode-plugin/swarm) - Task decomposition and parallel coordination
+- [Skills Tools](/docs/packages/opencode-plugin/skills) - Knowledge injection system

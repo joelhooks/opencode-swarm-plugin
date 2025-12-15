@@ -1,0 +1,13 @@
+{
+  "title": "Decisions",
+  "description": "Architecture Decision Records and Engineering Design Reviews",
+  "pages": [
+    "index",
+    "adr-001-monorepo",
+    "adr-002-extraction",
+    "adr-003-performance",
+    "adr-004-message-queue",
+    "adr-005-devtools",
+    "edr-event-sourced-beads"
+  ]
+}

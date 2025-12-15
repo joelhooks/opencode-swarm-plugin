@@ -1,0 +1,277 @@
+---
+title: Event Sourcing
+description: How Swarm Tools derives state from an append-only event log
+---
+
+# Event Sourcing
+
+Event sourcing is the foundational pattern in Swarm Tools. Instead of storing current state directly, we store the sequence of events that led to that state.
+
+## The Core Idea
+
+Traditional approach:
+```
+Database: { user: { name: "Alice", email: "alice@example.com" } }
+```
+
+Event-sourced approach:
+```
+Events:
+1. UserCreated { name: "Alice" }
+2. EmailSet { email: "alice@example.com" }
+
+Current state = fold(events, initialState)
+```
+
+**Why?** The event log is the source of truth. Current state is just a cached computation.
+
+---
+
+## How Swarm Mail Uses Event Sourcing
+
+### Event Store
+
+All coordination events are appended to an immutable log:
+
+```typescript
+// Append an event
+await swarmMail.appendEvent({
+  type: 'agent_registered',
+  agent_name: 'WorkerA',
+  task_description: 'Implementing auth service',
+  timestamp: Date.now(),
+});
+
+// Events are immutable - you can't update or delete
+```
+
+### Projections
+
+Projections are materialized views derived from events:
+
+```typescript
+// The agents projection
+// Built by folding over AgentRegistered events
+const agents = await swarmMail.getAgents();
+
+// The messages projection
+// Built by folding over MessageSent events
+const inbox = await swarmMail.getInbox('WorkerA');
+
+// The reservations projection
+// Built by folding over FileReserved/FileReleased events
+const reservations = await swarmMail.getReservations();
+```
+
+### Event Types
+
+Swarm Mail defines these core event types:
+
+| Event | Purpose |
+|-------|---------|
+| `agent_registered` | Agent joins the coordination system |
+| `message_sent` | Agent sends a message to another agent |
+| `message_acknowledged` | Recipient confirms message receipt |
+| `file_reserved` | Agent claims exclusive access to files |
+| `file_released` | Agent releases file reservation |
+| `deferred_created` | Distributed promise created |
+| `deferred_resolved` | Distributed promise fulfilled |
+
+---
+
+## Benefits
+
+### Audit Trail
+
+Every action is recorded. You can answer "what happened?" at any point:
+
+```typescript
+// Get all events for debugging
+const events = await swarmMail.getEvents({ 
+  since: startTime,
+  type: 'message_sent' 
+});
+```
+
+### Time Travel
+
+Rebuild state at any point in history:
+
+```typescript
+// Replay events up to a specific point
+const stateAtTime = await swarmMail.replayTo(timestamp);
+```
+
+### Crash Recovery
+
+If the process crashes, rebuild state from events:
+
+```typescript
+// On startup, projections are rebuilt from event log
+const swarmMail = await getSwarmMail('/project');
+// State is automatically reconstructed
+```
+
+### Debugging
+
+See exactly what happened, in order:
+
+```
+Event 1: agent_registered { agent: "WorkerA" }
+Event 2: file_reserved { agent: "WorkerA", paths: ["src/auth.ts"] }
+Event 3: message_sent { from: "WorkerA", to: "Coordinator", body: "Started work" }
+Event 4: file_reserved { agent: "WorkerB", paths: ["src/auth.ts"] }  // CONFLICT!
+```
+
+---
+
+## Implementation Details
+
+### Storage
+
+Events are stored in PGLite (embedded Postgres):
+
+```sql
+CREATE TABLE events (
+  id SERIAL PRIMARY KEY,
+  type TEXT NOT NULL,
+  payload JSONB NOT NULL,
+  timestamp BIGINT NOT NULL,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Append-only: no UPDATE or DELETE
+```
+
+### Projection Updates
+
+Projections update automatically when events are appended:
+
+```typescript
+// Internal: projection update on event append
+async function appendEvent(event: SwarmEvent) {
+  await db.insert(events).values(event);
+  
+  // Update relevant projections
+  switch (event.type) {
+    case 'agent_registered':
+      await updateAgentsProjection(event);
+      break;
+    case 'message_sent':
+      await updateMessagesProjection(event);
+      break;
+    // ...
+  }
+}
+```
+
+### Consistency
+
+Events are appended in a transaction with projection updates:
+
+```typescript
+await db.transaction(async (tx) => {
+  // 1. Append event
+  await tx.insert(events).values(event);
+  
+  // 2. Update projections
+  await tx.insert(agents).values(/* ... */);
+  
+  // Both succeed or both fail
+});
+```
+
+---
+
+## Patterns
+
+### Event Naming
+
+Events are named in past tense (something happened):
+
+```typescript
+// Good: past tense, describes what happened
+'agent_registered'
+'message_sent'
+'file_reserved'
+
+// Bad: imperative, describes intent
+'register_agent'
+'send_message'
+'reserve_file'
+```
+
+### Event Payload
+
+Events contain all data needed to reconstruct state:
+
+```typescript
+// Good: self-contained
+{
+  type: 'message_sent',
+  from: 'WorkerA',
+  to: 'WorkerB',
+  subject: 'Status update',
+  body: 'Task 50% complete',
+  thread_id: 'bd-123',
+  timestamp: 1702656000000
+}
+
+// Bad: references external state
+{
+  type: 'message_sent',
+  message_id: 123  // Need to look up message elsewhere
+}
+```
+
+### Idempotency
+
+Events should be idempotent when replayed:
+
+```typescript
+// Good: can replay safely
+{
+  type: 'file_reserved',
+  agent: 'WorkerA',
+  paths: ['src/auth.ts'],
+  reservation_id: 'res-123'  // Unique ID prevents duplicates
+}
+```
+
+---
+
+## Trade-offs
+
+### Pros
+
+- **Complete history** - Nothing is lost
+- **Debugging** - See exactly what happened
+- **Flexibility** - Add new projections without migration
+- **Consistency** - Single source of truth
+
+### Cons
+
+- **Storage growth** - Events accumulate forever
+- **Query complexity** - Need projections for efficient reads
+- **Learning curve** - Different mental model than CRUD
+
+### Mitigations
+
+- **Snapshots** - Periodically snapshot projections for faster startup
+- **Compaction** - Archive old events (with care)
+- **Projections** - Pre-compute common queries
+
+---
+
+## Further Reading
+
+- [Martin Kleppmann - Designing Data-Intensive Applications](https://dataintensive.net/) - Chapter on event sourcing
+- [Greg Young - Event Sourcing](https://www.youtube.com/watch?v=8JKjvY4etTY) - Original talk
+- [Swarm Mail Architecture](/docs/packages/swarm-mail) - Implementation details
+
+---
+
+## Next Steps
+
+- [Actor Model](/docs/concepts/actor-model) - How agents communicate
+- [Swarm Mail Primitives](/docs/packages/swarm-mail/primitives) - Durable primitives built on events

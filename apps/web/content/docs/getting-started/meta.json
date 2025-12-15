@@ -1,0 +1,5 @@
+{
+  "title": "Getting Started",
+  "description": "Quick start guides and core concepts",
+  "pages": ["index", "quickstart", "philosophy"]
+}

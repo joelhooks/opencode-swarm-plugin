@@ -1,0 +1,95 @@
+---
+title: OpenCode Plugin
+description: Multi-agent coordination, task decomposition, and learning systems
+---
+
+# OpenCode Plugin
+
+The opencode-swarm-plugin provides 40+ tools for multi-agent coordination, task decomposition, and learning systems. All tools are type-safe with Zod validation.
+
+## Installation
+
+```bash
+npm install -g opencode-swarm-plugin@latest
+swarm setup
+```
+
+## Tool Categories
+
+The plugin is organized into four main categories:
+
+- **[Beads Tools](/docs/packages/opencode-plugin/beads)** - Git-backed issue tracking (8 tools)
+- **[Swarm Tools](/docs/packages/opencode-plugin/swarm)** - Task orchestration and parallel coordination (20+ tools)
+- **[Skills Tools](/docs/packages/opencode-plugin/skills)** - Knowledge injection system (8 tools)
+
+## Quick Start
+
+### Basic Beads Workflow
+
+```typescript
+// Session start
+beads_ready()                              // What's next?
+beads_query({ status: "in_progress" })     // What's mid-flight?
+
+// Start work
+beads_start({ id: "bd-123" })
+
+// Complete
+beads_close({
+  id: "bd-123",
+  reason: "Done: OAuth implemented with refresh"
+})
+
+// Session end (MANDATORY)
+beads_sync()
+```
+
+### Swarm Coordination
+
+```typescript
+// 1. Initialize swarm
+swarm_init({ project_path: "/my/project" })
+
+// 2. Decompose task
+const prompt = swarm_decompose({
+  task: "Add OAuth authentication",
+  max_subtasks: 5,
+  query_cass: true
+})
+
+// 3. Create epic + subtasks
+beads_create_epic({
+  epic_title: "User Authentication",
+  subtasks: [...]
+})
+
+// 4. Each worker agent completes via swarm_complete
+```
+
+### Skills Integration
+
+```typescript
+// List available skills
+skills_list()
+
+// Load skill for current task
+skills_use({
+  name: "testing-patterns",
+  context: "Breaking dependencies in AuthService"
+})
+```
+
+## Architecture
+
+The plugin is built on three core primitives:
+
+1. **Beads** - Git-backed JSONL issue tracker for persistent work tracking
+2. **Swarm Mail** - Event-sourced messaging with file reservations
+3. **Learning Systems** - Pattern maturity, confidence decay, outcome tracking
+
+## Next Steps
+
+- [Beads Tools Reference](/docs/packages/opencode-plugin/beads) - Complete beads API
+- [Swarm Tools Reference](/docs/packages/opencode-plugin/swarm) - Decomposition and coordination
+- [Skills Tools Reference](/docs/packages/opencode-plugin/skills) - Knowledge injection
+- [Swarm Mail Architecture](/docs/packages/swarm-mail) - Event sourcing internals

@@ -1,0 +1,124 @@
+---
+title: Core Concepts
+description: Deep dives into the foundational ideas behind Swarm Tools
+---
+
+# Core Concepts
+
+Swarm Tools is built on a few foundational ideas. Understanding these concepts helps you use the tools effectively and extend them for your own needs.
+
+## The Big Ideas
+
+### Event Sourcing
+
+All state changes are events first, materialized views second. This gives us:
+
+- **Audit trails** - Every action is recorded
+- **Time travel** - Replay from any point
+- **Crash recovery** - Rebuild state from events
+- **Debugging** - See exactly what happened
+
+[Learn more about event sourcing →](/docs/concepts/event-sourcing)
+
+---
+
+### Actor Model
+
+Agents are actors with mailboxes. They communicate through messages, not shared state:
+
+- **Isolation** - Each agent has its own context
+- **Concurrency** - Agents work in parallel
+- **Fault tolerance** - One agent's failure doesn't crash others
+- **Location transparency** - Same patterns work locally or distributed
+
+[Learn more about the actor model →](/docs/concepts/actor-model)
+
+---
+
+### Learning Systems
+
+The system learns from outcomes to improve future decompositions:
+
+- **Confidence decay** - Old patterns fade unless revalidated
+- **Pattern maturity** - Candidate → Established → Proven
+- **Anti-pattern detection** - Failing patterns auto-invert
+- **Implicit feedback** - Fast + success = good, slow + errors = bad
+
+[Learn more about learning systems →](/docs/concepts/learning-systems)
+
+---
+
+### Coordination Patterns
+
+Battle-tested patterns for multi-agent work:
+
+- **Coordinator pattern** - One orchestrates, others execute
+- **Reserve-Edit-Release** - Lock files before editing
+- **Fresh subagent per task** - Clean context beats polluted context
+- **Thread by bead ID** - Organize communication by task
+
+[Learn more about patterns →](/docs/concepts/patterns)
+
+---
+
+## Why These Ideas?
+
+### Primitives, Not Frameworks
+
+Each concept is a building block. You can use event sourcing without the actor model. You can use patterns without learning systems. Mix and match what you need.
+
+### Local-First
+
+Everything runs in your process. PGLite gives you Postgres without deployment. No external servers, no network latency, no vendor lock-in.
+
+### Type-Safe
+
+Full TypeScript with Zod schemas. Errors are part of the type signature. If it compiles, it probably works.
+
+### Composable
+
+Small pieces that combine well. DurableCursor + DurableDeferred = DurableMailbox. DurableMailbox + DurableLock = safe concurrent editing.
+
+---
+
+## Concept Map
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     SWARM TOOLS CONCEPTS                     │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌─────────────────┐    ┌─────────────────┐                │
+│  │ EVENT SOURCING  │───▶│  ACTOR MODEL    │                │
+│  │                 │    │                 │                │
+│  │ Events → State  │    │ Mailbox + Msgs  │                │
+│  └────────┬────────┘    └────────┬────────┘                │
+│           │                      │                          │
+│           ▼                      ▼                          │
+│  ┌─────────────────────────────────────────┐               │
+│  │         COORDINATION PATTERNS            │               │
+│  │                                          │               │
+│  │  Reserve → Edit → Release                │               │
+│  │  Coordinator → Workers                   │               │
+│  │  Thread by Bead ID                       │               │
+│  └────────────────────┬────────────────────┘               │
+│                       │                                     │
+│                       ▼                                     │
+│  ┌─────────────────────────────────────────┐               │
+│  │           LEARNING SYSTEMS               │               │
+│  │                                          │               │
+│  │  Confidence Decay │ Pattern Maturity    │               │
+│  │  Anti-Patterns    │ Implicit Feedback   │               │
+│  └─────────────────────────────────────────┘               │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Next Steps
+
+- [Event Sourcing](/docs/concepts/event-sourcing) - How state is derived from events
+- [Actor Model](/docs/concepts/actor-model) - Message-based agent coordination
+- [Learning Systems](/docs/concepts/learning-systems) - Adaptive pattern improvement
+- [Patterns](/docs/concepts/patterns) - Battle-tested coordination patterns

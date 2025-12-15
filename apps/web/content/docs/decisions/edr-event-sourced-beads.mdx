@@ -1,21 +1,19 @@
 ---
-title: Research & Design
-description: Engineering design reviews, architecture decisions, and feasibility studies
+title: "EDR-001: Event-Sourced Beads"
+description: Hybrid CRUD + event audit trail using Effect-TS
 ---
 
-# Research & Design
+import { Callout } from 'fumadocs-ui/components/callout';
 
-Deep dives into architecture decisions, feasibility studies, and engineering design reviews. These documents capture the thinking behind major technical decisions.
+# Event-Sourced Beads with Effect-TS
 
----
-
-## Event-Sourced Beads with Effect-TS
-
-**Date:** December 2025  
+<Callout type="info">
 **Status:** Research Complete  
+**Date:** December 2025  
 **Recommendation:** Build (Hybrid Approach)
+</Callout>
 
-### Executive Summary
+## Executive Summary
 
 **Question:** How feasible is rebuilding [steveyegge/beads](https://github.com/steveyegge/beads) using Effect-TS durable streams and event sourcing?
 
@@ -28,7 +26,7 @@ Deep dives into architecture decisions, feasibility studies, and engineering des
 | **Risk Level** | Medium - git sync proven, event sourcing adds complexity |
 | **Recommendation** | **BUILD IT** - hybrid CRUD + event audit trail |
 
-### Problem Statement
+## Problem Statement
 
 We have two separate systems:
 1. **steveyegge/beads** (Go) - Battle-tested issue tracker with git sync
@@ -36,9 +34,9 @@ We have two separate systems:
 
 The goal: A unified TypeScript implementation that maintains beads' proven git sync while leveraging swarm-mail's event sourcing infrastructure.
 
-### Architecture Comparison
+## Architecture Comparison
 
-#### steveyegge/beads (Current)
+### steveyegge/beads (Current)
 
 ```
 ┌─────────────────────────────────────────┐
@@ -63,7 +61,7 @@ The goal: A unified TypeScript implementation that maintains beads' proven git s
 
 **Key insight:** beads is **NOT event-sourced**. It's hybrid CRUD + event audit trail. Events are for audit only, not replayed for state reconstruction.
 
-#### Proposed Hybrid Architecture
+### Proposed Hybrid Architecture
 
 ```
 ┌─────────────────────────────────────────┐
@@ -99,9 +97,9 @@ The goal: A unified TypeScript implementation that maintains beads' proven git s
 2. **JSONL exports projections** - Same format as beads for merge driver compatibility
 3. **Hybrid model** - Events for audit/learning, projections for queries
 
-### Component Reuse Assessment
+## Component Reuse Assessment
 
-#### From swarm-mail (75% reusable)
+### From swarm-mail (75% reusable)
 
 | Component | Reuse | Notes |
 |-----------|-------|-------|
@@ -112,7 +110,7 @@ The goal: A unified TypeScript implementation that maintains beads' proven git s
 | DurableLock | 90% | **Critical** for concurrent updates |
 | Migrations | 100% | Add bead tables |
 
-#### From steveyegge/beads (vendor/port)
+### From steveyegge/beads (vendor/port)
 
 | Component | Action | License |
 |-----------|--------|---------|
@@ -122,7 +120,7 @@ The goal: A unified TypeScript implementation that maintains beads' proven git s
 | FlushManager Pattern | Port to TS | MIT |
 | Blocked Cache Logic | Port to TS | MIT |
 
-### Event Schema
+## Event Schema
 
 20 event types covering the full bead lifecycle:
 
@@ -162,13 +160,13 @@ type BeadEvent =
   | BeadCompactedEvent
 ```
 
-<Callout type="info">
+<Callout>
 Event schemas are already implemented in `packages/opencode-swarm-plugin/src/schemas/bead-events.ts`
 </Callout>
 
-### Git Sync Strategy
+## Git Sync Strategy
 
-#### Export Flow
+### Export Flow
 
 ```
 Event Appended
@@ -186,7 +184,7 @@ Clear dirty flags
 Git hooks (optional auto-commit)
 ```
 
-#### Import Flow
+### Import Flow
 
 ```
 Git pull / merge
@@ -203,7 +201,7 @@ Emit "bead_imported" events (audit)
 Rebuild blocked_beads_cache
 ```
 
-### Risk Assessment
+## Risk Assessment
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|------------|--------|------------|
@@ -212,7 +210,7 @@ Rebuild blocked_beads_cache
 | Projection drift from events | Medium | High | Checksums, replay |
 | Breaking existing beads_* tools | Medium | High | Adapter layer |
 
-### Implementation Plan
+## Implementation Plan
 
 | Phase | Duration | Deliverables |
 |-------|----------|--------------|
@@ -222,7 +220,7 @@ Rebuild blocked_beads_cache
 | **Plugin Migration** | Week 4 | Migrate beads_* tools, compat layer |
 | **Polish** | Week 5-6 | Performance, error handling, migration tooling |
 
-### Alternatives Considered
+## Alternatives Considered
 
 | Alternative | Why Rejected |
 |-------------|--------------|
@@ -230,7 +228,7 @@ Rebuild blocked_beads_cache
 | **Keep Separate Systems** | Duplicated infrastructure, no learning |
 | **Fork steveyegge/beads** | Different language, harder integration |
 
-### Conclusion
+## Conclusion
 
 **Recommendation: BUILD IT**
 

@@ -1,0 +1,49 @@
+---
+title: Decisions
+description: Architecture Decision Records and Engineering Design Reviews
+---
+
+# Architecture Decisions & Design Reviews
+
+This section documents significant technical decisions, architectural patterns, and engineering design reviews for the OpenCode Swarm Plugin.
+
+## What's Here?
+
+**Architecture Decision Records (ADRs)** - Captures the reasoning behind major technical choices, alternatives considered, and trade-offs made.
+
+**Engineering Design Reviews (EDRs)** - Deep feasibility studies and research into potential features or refactors.
+
+---
+
+## Decision Log
+
+| ID | Title | Status | Date | Summary |
+|----|-------|--------|------|---------|
+| [ADR-001](/docs/decisions/adr-001-monorepo) | Monorepo Structure | Accepted | Dec 2024 | Turborepo + Bun monorepo with swarm-mail extracted as standalone package |
+| [ADR-002](/docs/decisions/adr-002-extraction) | Package Extraction | Accepted | Dec 2024 | Detailed strategy for extracting swarm-mail from plugin codebase |
+| [ADR-003](/docs/decisions/adr-003-performance) | Performance Improvements | Proposed | Dec 2024 | Replace polling with PGLite live queries, add batch operations |
+| [ADR-004](/docs/decisions/adr-004-message-queue) | Message Queue Features | Proposed | Dec 2024 | Priority queues, DLQ, TTL, pub/sub, saga orchestration |
+| [ADR-005](/docs/decisions/adr-005-devtools) | DevTools + Observability | Proposed | Dec 2024 | SvelteKit UI, CLI, metrics, distributed tracing |
+| [EDR-001](/docs/decisions/edr-event-sourced-beads) | Event-Sourced Beads | Research Complete | Dec 2025 | Hybrid CRUD + event audit trail using Effect-TS |
+
+---
+
+## Status Definitions
+
+- **Proposed** - Under consideration, not yet implemented
+- **Accepted** - Decision made, implementation in progress or complete
+- **Research Complete** - Feasibility study done, awaiting decision to proceed
+- **Superseded** - Replaced by a later decision
+- **Deprecated** - No longer recommended
+
+---
+
+## Contributing
+
+When making significant technical decisions:
+
+1. **Create an ADR** - Document the problem, alternatives, decision, and consequences
+2. **Use the template** - See existing ADRs for structure
+3. **Update this index** - Add your ADR to the decision log table
+4. **Link from code** - Reference ADRs in comments when implementing decisions
+

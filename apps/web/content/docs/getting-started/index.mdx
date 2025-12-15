@@ -1,0 +1,63 @@
+---
+title: Getting Started
+description: Quick start guides and core concepts for Swarm Tools
+---
+
+# Getting Started
+
+Welcome to Swarm Tools! Get up and running with multi-agent coordination in minutes.
+
+## Quick Links
+
+<Cards>
+  <Card title="Quickstart" href="/docs/getting-started/quickstart">
+    Install and run your first swarm in 5 minutes
+  </Card>
+  <Card title="Philosophy" href="/docs/getting-started/philosophy">
+    Understand the design principles behind swarm coordination
+  </Card>
+</Cards>
+
+## What is Swarm Tools?
+
+Swarm Tools enables multiple AI agents to work together on complex tasks. The system provides primitives for:
+
+- **Task Decomposition** - Break large tasks into parallelizable subtasks
+- **File Reservations** - Prevent edit conflicts between concurrent agents
+- **Progress Tracking** - Monitor swarm status and completion
+- **Learning** - Improve decomposition strategies over time
+
+## Core Components
+
+### Beads Issue Tracking
+
+Git-backed issue tracking that integrates with swarm workflows:
+
+- Epics and subtasks for hierarchical work breakdown
+- Dependency tracking (block/blocked-by relationships)
+- Status management (open, in-progress, blocked, closed)
+- JSONL export for distributed collaboration
+
+### Agent Mail
+
+Inter-agent communication for coordination:
+
+- Async messaging between agents
+- File reservation system for exclusive edits
+- Thread-based conversations grouped by task
+
+### Swarm Coordination
+
+The orchestration layer that ties everything together:
+
+- Intelligent task decomposition with strategy selection
+- Parallel agent spawning with fresh context per task
+- Automated conflict detection and resolution
+- Learning from outcomes to improve future swarms
+
+## Next Steps
+
+1. **[Quickstart](/docs/getting-started/quickstart)** - Install and run your first swarm
+2. **[Philosophy](/docs/getting-started/philosophy)** - Learn the design principles
+3. **[API Reference](/docs/reference/opencode-plugin)** - Explore all available tools
+4. **[Research](/docs/research)** - Deep dive into architecture decisions

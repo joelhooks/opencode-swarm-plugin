@@ -1,0 +1,5 @@
+{
+  "title": "swarm-mail",
+  "description": "Event sourcing and actor-model primitives",
+  "pages": ["index", "primitives"]
+}

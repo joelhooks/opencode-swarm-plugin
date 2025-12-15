@@ -1,0 +1,210 @@
+---
+title: "ADR-005: DevTools + Observability"
+description: SvelteKit UI, CLI, metrics, distributed tracing
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+# ADR-005: DevTools + Observability
+
+<Callout type="warn">
+**Status:** Proposed  
+**Date:** December 2024
+</Callout>
+
+## Context
+
+Swarm Mail currently has no visibility:
+
+- No UI to inspect events, messages, locks
+- No metrics on latency, queue depth, throughput
+- No distributed tracing across agents
+- Hard to debug coordination issues
+
+Need both developer tools (UI + CLI) and production observability (metrics + tracing).
+
+## Decision
+
+Build layered observability:
+
+### 1. DevTools UI (SvelteKit)
+
+**Stack:**
+
+- SvelteKit for SSR + static export
+- Vite for dev server + build
+- Server-Sent Events (SSE) for real-time updates
+- Embeddable static build
+
+**Features:**
+
+- Event stream viewer (filterable, searchable)
+- Message inbox/outbox per agent
+- File reservation timeline
+- Saga instance tracker (future)
+
+**Build:**
+
+```bash
+cd apps/devtools
+bun run build  # Static export to apps/devtools/build
+```
+
+**Embed in plugin:**
+
+```typescript
+// Serve static UI at /_swarm/devtools
+const server = serve({
+  port: 4000,
+  fetch: (req) => {
+    if (req.url.startsWith("/_swarm/devtools")) {
+      return serveStatic("apps/devtools/build");
+    }
+  },
+});
+```
+
+### 2. CLI (@effect/cli)
+
+**Commands:**
+
+```bash
+swarm events [--project <key>] [--type <type>] [--tail]
+swarm messages [--agent <name>] [--unread]
+swarm locks [--agent <name>]
+swarm replay --from <sequence> [--to <sequence>]
+swarm metrics
+```
+
+**Implementation:**
+
+```typescript
+import { Command } from "@effect/cli";
+
+const eventsCommand = Command.make(
+  "events",
+  {
+    project: Options.string("project").optional,
+    type: Options.string("type").optional,
+    tail: Options.boolean("tail"),
+  },
+  ({ project, type, tail }) => {
+    // Query events table, optionally --tail with live query
+  },
+);
+```
+
+### 3. Metrics (Prometheus)
+
+**Histograms:**
+
+- `swarm_message_latency_seconds` - Send to receive time
+- `swarm_lock_contention_seconds` - Time waiting for lock
+- `swarm_queue_depth` - Unread messages per agent
+
+**Counters:**
+
+- `swarm_events_total{type}` - Events by type
+- `swarm_messages_sent_total{sender, recipient}`
+- `swarm_locks_acquired_total{agent}`
+
+**Example:**
+
+```typescript
+import { Registry, Histogram } from 'prom-client'
+
+const messageLatency = new Histogram({
+  name: 'swarm_message_latency_seconds',
+  help: 'Message delivery latency',
+  buckets: [0.01, 0.05, 0.1, 0.5, 1.0, 5.0]
+})
+
+// Record latency
+const start = Date.now()
+await sendMessage(msg)
+const latency = (Date.now() - start) / 1000
+messageLatency.observe(latency)
+```
+
+### 4. Distributed Tracing (OpenTelemetry)
+
+**Integration:**
+
+```typescript
+import { @effect/opentelemetry } from '@effect/opentelemetry'
+import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node'
+
+const provider = new NodeTracerProvider()
+const tracer = provider.getTracer('swarm-mail')
+
+// Trace message send
+const span = tracer.startSpan('sendMessage', {
+  attributes: {
+    'swarm.sender': 'AgentA',
+    'swarm.recipient': 'AgentB',
+    'swarm.thread_id': 'bd-123'
+  }
+})
+
+await sendMessage(msg)
+span.end()
+```
+
+**Trace Propagation:**
+
+- Add trace_id to message metadata
+- Worker agents continue traces from parents
+- Visualize full swarm execution flow
+
+## Consequences
+
+### Easier
+
+- **Visibility** - See all events, messages, locks in real-time
+- **Debugging** - Trace issues across agents via distributed tracing
+- **Performance** - Identify slow operations via histograms
+- **Operations** - CLI for prod debugging without UI
+
+### More Difficult
+
+- **Maintenance** - Another app to maintain (DevTools UI)
+- **Bundle size** - Metrics/tracing deps increase plugin size
+- **Performance overhead** - Instrumentation adds latency
+- **Configuration** - Metrics exporters, trace backends
+
+## Implementation Notes
+
+### Phase 1: CLI (Week 1)
+
+- Add @effect/cli dependency
+- Implement events, messages, locks commands
+- Test with real swarm sessions
+
+### Phase 2: DevTools UI (Week 2-3)
+
+- Scaffold SvelteKit app
+- Build event stream viewer
+- Add SSE endpoint for real-time updates
+- Static export + embed in plugin
+
+### Phase 3: Metrics (Week 4)
+
+- Add prom-client dependency
+- Instrument send/receive latency
+- Add queue depth gauge
+- Expose /metrics endpoint
+
+### Phase 4: Tracing (Week 5)
+
+- Add @effect/opentelemetry
+- Instrument message send/receive
+- Propagate trace context
+- Test with Jaeger/Zipkin
+
+### Success Criteria
+
+- [ ] CLI can tail events in real-time
+- [ ] DevTools UI shows live message stream
+- [ ] Metrics exposed at /metrics endpoint
+- [ ] Traces visible in Jaeger UI
+- [ ] Documentation for all observability tools

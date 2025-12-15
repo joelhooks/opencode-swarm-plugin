@@ -1,0 +1,355 @@
+---
+title: Actor Model
+description: Message-based coordination for multi-agent systems
+---
+
+# Actor Model
+
+The actor model is how Swarm Tools coordinates multiple agents. Each agent is an actor with its own mailbox, communicating through messages rather than shared state.
+
+## The Core Idea
+
+In the actor model:
+
+1. **Actors** are independent units of computation
+2. **Mailboxes** receive incoming messages
+3. **Messages** are the only way actors communicate
+4. **No shared state** - actors are isolated
+
+```
+┌─────────────┐         ┌─────────────┐
+│   Agent A   │         │   Agent B   │
+│             │         │             │
+│  ┌───────┐  │  msg    │  ┌───────┐  │
+│  │Mailbox│◀─┼─────────┼──│ Send  │  │
+│  └───────┘  │         │  └───────┘  │
+│             │         │             │
+│  ┌───────┐  │  msg    │  ┌───────┐  │
+│  │ Send  │──┼─────────┼─▶│Mailbox│  │
+│  └───────┘  │         │  └───────┘  │
+└─────────────┘         └─────────────┘
+```
+
+---
+
+## Why Actor Model for AI Agents?
+
+### Natural Fit
+
+AI agents already work like actors:
+- Each agent has its own context (state)
+- Agents communicate through prompts/responses (messages)
+- Agents work independently (isolation)
+
+### Concurrency Without Locks
+
+Multiple agents can work in parallel without explicit synchronization:
+
+```typescript
+// No locks needed - each agent processes its own mailbox
+Agent A: processing message 1
+Agent B: processing message 2  // Concurrent, no conflict
+Agent C: processing message 3
+```
+
+### Fault Isolation
+
+One agent's failure doesn't crash others:
+
+```typescript
+// Agent B crashes
+Agent A: still working ✓
+Agent B: crashed ✗
+Agent C: still working ✓
+
+// Coordinator can spawn a replacement
+Agent B': fresh agent takes over
+```
+
+### Location Transparency
+
+Same patterns work locally or distributed:
+
+```typescript
+// Local: same process
+await send('WorkerA', message);
+
+// Distributed: different machine (future)
+await send('WorkerA@node2', message);
+```
+
+---
+
+## Swarm Mail Implementation
+
+### DurableMailbox
+
+Each agent has a durable mailbox backed by the event store:
+
+```typescript
+import { DurableMailbox } from 'swarm-mail';
+import { Effect } from 'effect';
+
+// Create a mailbox for an agent
+const mailbox = DurableMailbox.create<TaskMessage>('worker-a');
+
+// Send a message
+await Effect.runPromise(
+  mailbox.send({ 
+    type: 'task', 
+    payload: 'implement auth service' 
+  })
+);
+
+// Receive messages
+await Effect.runPromise(
+  mailbox.receive().pipe(
+    Effect.tap((msg) => console.log('Got:', msg))
+  )
+);
+```
+
+### Message Envelopes
+
+Messages are wrapped in envelopes with metadata:
+
+```typescript
+interface MessageEnvelope<T> {
+  id: number;
+  from: string;
+  to: string;
+  subject: string;
+  body: T;
+  thread_id?: string;
+  importance: 'low' | 'normal' | 'high' | 'urgent';
+  timestamp: number;
+  ack_required: boolean;
+}
+```
+
+### Acknowledgments
+
+Messages can require acknowledgment:
+
+```typescript
+// Send with ack required
+await swarmmail_send({
+  to: ['WorkerA'],
+  subject: 'Critical task',
+  body: 'Need this done ASAP',
+  ack_required: true
+});
+
+// Recipient acknowledges
+await swarmmail_ack({ message_id: 123 });
+```
+
+---
+
+## Coordination Patterns
+
+### Request/Response (Ask Pattern)
+
+Synchronous-style RPC over async messages:
+
+```typescript
+import { ask } from 'swarm-mail';
+import { Effect } from 'effect';
+
+// Agent A asks Agent B for something
+const response = await Effect.runPromise(
+  ask<GetTypesRequest, TypesResponse>('agent-b', {
+    type: 'get-types',
+    file: 'src/auth.ts'
+  })
+);
+
+// Under the hood:
+// 1. Create DurableDeferred for response
+// 2. Send message with replyTo = deferred URL
+// 3. Block on deferred.value
+// 4. Agent B resolves deferred with response
+// 5. Agent A unblocks with response
+```
+
+### Fire and Forget
+
+Send without waiting for response:
+
+```typescript
+// Progress update - don't need response
+await swarmmail_send({
+  to: ['coordinator'],
+  subject: 'Progress: bd-123.2',
+  body: 'Task 50% complete',
+  thread_id: 'bd-123'
+});
+```
+
+### Broadcast
+
+Send to multiple agents:
+
+```typescript
+// Notify all workers
+await swarmmail_send({
+  to: ['WorkerA', 'WorkerB', 'WorkerC'],
+  subject: 'Epic complete',
+  body: 'All subtasks done, merging now',
+  thread_id: 'bd-123'
+});
+```
+
+---
+
+## Agent Lifecycle
+
+### Registration
+
+Agents register when they start working:
+
+```typescript
+// Agent registers with the system
+await swarmmail_init({
+  project_path: '/path/to/project',
+  task_description: 'Implementing auth service'
+});
+// Returns: { agent_name: 'BlueLake', project_key: '...' }
+```
+
+### Working
+
+Agents check inbox, process messages, send updates:
+
+```typescript
+// Check inbox (headers only, max 5)
+const messages = await swarmmail_inbox();
+
+// Read specific message if needed
+const msg = await swarmmail_read_message({ message_id: 123 });
+
+// Send progress update
+await swarmmail_send({
+  to: ['coordinator'],
+  subject: 'Progress',
+  body: 'Schema complete, starting service layer'
+});
+```
+
+### Completion
+
+Agents complete and release resources:
+
+```typescript
+// Complete subtask (releases reservations, records outcome)
+await swarm_complete({
+  project_key: '/path/to/project',
+  agent_name: 'BlueLake',
+  bead_id: 'bd-123.2',
+  summary: 'Auth service implemented',
+  files_touched: ['src/auth/service.ts']
+});
+```
+
+---
+
+## Isolation and Safety
+
+### File Reservations
+
+Prevent edit conflicts with exclusive reservations:
+
+```typescript
+// Reserve before editing
+await swarmmail_reserve({
+  paths: ['src/auth/**'],
+  reason: 'bd-123.2: Auth service',
+  ttl_seconds: 3600
+});
+
+// Other agents see the reservation
+// Attempting to reserve same files fails
+
+// Release when done (or via swarm_complete)
+await swarmmail_release();
+```
+
+### Context Isolation
+
+Each agent has fresh context:
+
+```typescript
+// Coordinator spawns workers with clean context
+for (const subtask of subtasks) {
+  Task({
+    subagent_type: 'swarm/worker',
+    prompt: generatePrompt(subtask)  // Fresh context
+  });
+}
+
+// Each worker starts clean, no accumulated cruft
+```
+
+---
+
+## Comparison to Other Models
+
+### vs Shared Memory
+
+| Aspect | Actor Model | Shared Memory |
+|--------|-------------|---------------|
+| Communication | Messages | Direct access |
+| Synchronization | Implicit (mailbox) | Explicit (locks) |
+| Debugging | Message trace | Race conditions |
+| Scaling | Natural | Requires careful design |
+
+### vs Traditional RPC
+
+| Aspect | Actor Model | RPC |
+|--------|-------------|-----|
+| Coupling | Loose | Tight |
+| Failure handling | Isolated | Cascading |
+| Async | Native | Bolted on |
+| State | Encapsulated | Often shared |
+
+---
+
+## Trade-offs
+
+### Pros
+
+- **Concurrency** - Natural parallelism without locks
+- **Isolation** - Failures don't cascade
+- **Debugging** - Message traces are clear
+- **Scaling** - Same patterns work at any scale
+
+### Cons
+
+- **Latency** - Message passing adds overhead
+- **Complexity** - Async reasoning is harder
+- **Ordering** - No global order guarantees
+- **Debugging** - Distributed state is harder to inspect
+
+### Mitigations
+
+- **Batching** - Reduce message count
+- **Patterns** - Use established coordination patterns
+- **Thread IDs** - Group related messages
+- **DevTools** - Visualize message flows
+
+---
+
+## Further Reading
+
+- [Carl Hewitt - Actor Model](https://en.wikipedia.org/wiki/Actor_model) - Original concept
+- [Erlang/OTP](https://www.erlang.org/) - Production actor system
+- [Akka](https://akka.io/) - JVM actor framework
+- [Swarm Mail Primitives](/docs/packages/swarm-mail/primitives) - Our implementation
+
+---
+
+## Next Steps
+
+- [Event Sourcing](/docs/concepts/event-sourcing) - How events power the actor system
+- [Patterns](/docs/concepts/patterns) - Coordination patterns for multi-agent work
+- [Swarm Mail](/docs/packages/swarm-mail) - Implementation details

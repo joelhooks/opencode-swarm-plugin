@@ -1,0 +1,413 @@
+---
+title: Learning Systems
+description: How Swarm Tools learns from outcomes to improve over time
+---
+
+# Learning Systems
+
+Swarm Tools learns from decomposition outcomes to improve future task breakdowns. This isn't machine learning - it's structured feedback that adjusts weights and detects patterns.
+
+## The Core Idea
+
+Every swarm execution generates signals:
+- **Duration** - How long did it take?
+- **Errors** - How many errors occurred?
+- **Retries** - How many retry attempts?
+- **Success** - Did it complete successfully?
+
+These signals feed back into the system to improve future decompositions.
+
+---
+
+## Confidence Decay
+
+Patterns fade over time unless revalidated. This prevents stale knowledge from dominating.
+
+### How It Works
+
+```
+Confidence = initial_weight × decay_factor^(days_since_validation / half_life)
+```
+
+With a 90-day half-life:
+- Day 0: 100% confidence
+- Day 90: 50% confidence
+- Day 180: 25% confidence
+- Day 270: 12.5% confidence
+
+### Why Decay?
+
+Codebases change. What worked 6 months ago might not work today:
+
+```typescript
+// 6 months ago: "Split by file type" worked great
+// Today: Codebase restructured, pattern no longer applies
+
+// Without decay: Old pattern dominates
+// With decay: Old pattern fades, new patterns emerge
+```
+
+### Revalidation
+
+When you confirm a pattern still works, reset its decay timer:
+
+```typescript
+// Pattern used successfully
+await semantic_memory_validate({ id: 'pattern-123' });
+// Decay timer resets to 0
+```
+
+---
+
+## Pattern Maturity
+
+Patterns progress through maturity stages based on usage and outcomes.
+
+### Stages
+
+```
+candidate → established → proven → deprecated
+```
+
+| Stage | Criteria | Weight Multiplier |
+|-------|----------|-------------------|
+| **Candidate** | New pattern, < 3 uses | 0.5x |
+| **Established** | 3+ uses, > 60% success | 1.0x |
+| **Proven** | 10+ uses, > 80% success | 1.5x |
+| **Deprecated** | > 60% failure rate | 0.0x |
+
+### Progression
+
+```typescript
+// New pattern starts as candidate
+{
+  pattern: "Split auth by layer (schema, service, routes)",
+  maturity: "candidate",
+  uses: 1,
+  successes: 1,
+  weight: 0.5
+}
+
+// After 3 successful uses → established
+{
+  pattern: "Split auth by layer (schema, service, routes)",
+  maturity: "established",
+  uses: 3,
+  successes: 3,
+  weight: 1.0
+}
+
+// After 10 successful uses → proven
+{
+  pattern: "Split auth by layer (schema, service, routes)",
+  maturity: "proven",
+  uses: 10,
+  successes: 9,
+  weight: 1.5
+}
+```
+
+### Deprecation
+
+Patterns with high failure rates are automatically deprecated:
+
+```typescript
+// Pattern keeps failing
+{
+  pattern: "Split by file extension",
+  maturity: "deprecated",  // > 60% failure rate
+  uses: 10,
+  successes: 3,
+  weight: 0.0  // Never suggested again
+}
+```
+
+---
+
+## Anti-Pattern Detection
+
+The system detects patterns that consistently fail and inverts them into warnings.
+
+### How It Works
+
+```typescript
+// Pattern fails repeatedly
+"Split by file type" → 80% failure rate
+
+// Auto-inverted to anti-pattern
+"AVOID: Split by file type (80% failure rate)"
+```
+
+### Inversion Threshold
+
+Patterns with > 60% failure rate over 5+ uses are inverted:
+
+```typescript
+if (failureRate > 0.6 && uses >= 5) {
+  invertToAntiPattern(pattern);
+}
+```
+
+### Anti-Pattern Injection
+
+Anti-patterns are injected into decomposition prompts:
+
+```typescript
+// Decomposition prompt includes:
+"AVOID these patterns (historically problematic):
+- Split by file type (80% failure rate)
+- Over-decompose simple tasks (70% failure rate)
+- Vague subtask descriptions (65% failure rate)"
+```
+
+---
+
+## Implicit Feedback Scoring
+
+Outcomes generate implicit feedback without explicit user ratings.
+
+### Signals
+
+| Signal | Good | Bad |
+|--------|------|-----|
+| Duration | Fast completion | Slow, timeouts |
+| Errors | Zero errors | Multiple errors |
+| Retries | No retries | Multiple retries |
+| Success | Task completed | Task failed/abandoned |
+
+### Scoring Formula
+
+```typescript
+score = baseScore
+  × (1 - errorPenalty × errorCount)
+  × (1 - retryPenalty × retryCount)
+  × durationFactor(actualDuration, expectedDuration)
+  × (success ? 1.0 : 0.0)
+```
+
+### Recording Outcomes
+
+```typescript
+// After subtask completion
+await swarm_record_outcome({
+  bead_id: 'bd-123.2',
+  duration_ms: 180000,  // 3 minutes
+  success: true,
+  error_count: 0,
+  retry_count: 0,
+  strategy: 'feature-based',
+  files_touched: ['src/auth/service.ts']
+});
+```
+
+---
+
+## CASS Integration
+
+The system queries CASS (Cross-Agent Session Search) for similar past decompositions.
+
+### How It Works
+
+```typescript
+// When decomposing a new task
+const similarTasks = await cass_search({
+  query: "authentication OAuth implementation",
+  limit: 5,
+  days: 90
+});
+
+// Extract successful patterns from similar tasks
+const patterns = extractPatterns(similarTasks);
+
+// Inject into decomposition prompt
+"Similar past tasks used these patterns:
+- Feature-based: schema → service → routes → tests
+- 4-5 subtasks optimal for auth features
+- Reserve src/auth/** early to prevent conflicts"
+```
+
+### Pattern Extraction
+
+From past sessions, extract:
+- Decomposition strategy used
+- Number of subtasks
+- File organization
+- Success/failure outcome
+
+---
+
+## Semantic Memory
+
+Long-term storage for learnings that persist across sessions.
+
+### Storing Learnings
+
+```typescript
+// After solving a tricky problem
+await semantic_memory_store({
+  information: "OAuth refresh tokens need 5min buffer before expiry to avoid race conditions",
+  metadata: "auth, oauth, tokens, race-conditions"
+});
+```
+
+### Retrieving Learnings
+
+```typescript
+// Before starting similar work
+const memories = await semantic_memory_find({
+  query: "OAuth token refresh",
+  limit: 5
+});
+```
+
+### Memory Decay
+
+Memories also decay (90-day half-life). Validate to refresh:
+
+```typescript
+// Confirm memory is still accurate
+await semantic_memory_validate({ id: 'mem-123' });
+```
+
+---
+
+## Putting It Together
+
+### Decomposition Flow
+
+```
+1. User requests: "Add OAuth authentication"
+
+2. Query CASS for similar past tasks
+   → Found 3 similar auth implementations
+
+3. Extract patterns from successful tasks
+   → Feature-based decomposition worked best
+   → 4-5 subtasks optimal
+   → Schema → Service → Routes → Tests order
+
+4. Check anti-patterns
+   → AVOID: "Split by file type" (80% failure)
+
+5. Apply pattern maturity weights
+   → "Feature-based" is proven (1.5x weight)
+   → "Layer-based" is established (1.0x weight)
+
+6. Generate decomposition prompt with context
+
+7. Execute swarm
+
+8. Record outcomes
+   → Duration, errors, retries, success
+
+9. Update pattern maturity
+   → "Feature-based" gets another success
+```
+
+### Feedback Loop
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     LEARNING LOOP                            │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌─────────┐    ┌─────────┐    ┌─────────┐                 │
+│  │  Task   │───▶│Decompose│───▶│ Execute │                 │
+│  └─────────┘    └────┬────┘    └────┬────┘                 │
+│                      │              │                       │
+│                      │              ▼                       │
+│                      │         ┌─────────┐                  │
+│                      │         │ Outcome │                  │
+│                      │         └────┬────┘                  │
+│                      │              │                       │
+│                      ▼              ▼                       │
+│  ┌─────────────────────────────────────────┐               │
+│  │           LEARNING SYSTEM                │               │
+│  │                                          │               │
+│  │  • Update pattern maturity               │               │
+│  │  • Detect anti-patterns                  │               │
+│  │  • Store in semantic memory              │               │
+│  │  • Adjust confidence weights             │               │
+│  └─────────────────────────────────────────┘               │
+│                      │                                      │
+│                      │ Improved patterns                    │
+│                      ▼                                      │
+│                 Next decomposition                          │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Configuration
+
+### Decay Settings
+
+```typescript
+// Default: 90-day half-life
+const CONFIDENCE_HALF_LIFE_DAYS = 90;
+
+// Adjust for faster/slower decay
+// Faster decay = more responsive to recent data
+// Slower decay = more stable, less reactive
+```
+
+### Maturity Thresholds
+
+```typescript
+const MATURITY_THRESHOLDS = {
+  established: { minUses: 3, minSuccessRate: 0.6 },
+  proven: { minUses: 10, minSuccessRate: 0.8 },
+  deprecated: { minUses: 5, maxSuccessRate: 0.4 }
+};
+```
+
+### Anti-Pattern Threshold
+
+```typescript
+// Invert to anti-pattern when:
+const ANTI_PATTERN_THRESHOLD = {
+  minUses: 5,
+  minFailureRate: 0.6
+};
+```
+
+---
+
+## Trade-offs
+
+### Pros
+
+- **Adaptive** - Improves over time without manual tuning
+- **Transparent** - Clear rules, not black-box ML
+- **Lightweight** - No training, no GPU, no external services
+- **Reversible** - Patterns can recover from deprecation
+
+### Cons
+
+- **Cold start** - No patterns initially
+- **Local** - Doesn't share across teams (yet)
+- **Noisy** - Early data can be misleading
+- **Manual seeding** - May need initial patterns
+
+### Mitigations
+
+- **Bundled patterns** - Ship with proven patterns
+- **CASS queries** - Learn from past sessions
+- **Semantic memory** - Persist learnings across sessions
+- **Manual overrides** - Force patterns when needed
+
+---
+
+## Further Reading
+
+- [Patterns & Practices](/docs/concepts/patterns) - Coordination patterns
+- [Swarm Orchestration](/docs/packages/opencode-plugin/swarm) - How swarms use learning
+- [Semantic Memory](/docs/packages/opencode-plugin#semantic-memory) - Long-term storage
+
+---
+
+## Next Steps
+
+- [Patterns](/docs/concepts/patterns) - Battle-tested coordination patterns
+- [Swarm Tools](/docs/packages/opencode-plugin/swarm) - Using learning in practice

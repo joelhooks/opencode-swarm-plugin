@@ -1,0 +1,285 @@
+---
+title: Skills Tools
+description: Knowledge injection system with bundled and custom skills
+---
+
+# Skills Tools
+
+Knowledge injection system with bundled and custom skills. Skills are reusable knowledge packages that can be loaded on-demand for specialized tasks.
+
+## skills_list
+
+List available skills from global, project, and bundled sources.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `source` | `"all" \| "global" \| "project" \| "bundled"` | ❌ | Filter by source |
+
+**Example:**
+
+```typescript
+skills_list()
+// Returns: [{ name: "testing-patterns", description: "...", hasScripts: false }, ...]
+
+// Filter by source
+skills_list({ source: "bundled" })
+skills_list({ source: "project" })
+```
+
+---
+
+## skills_use
+
+Load skill content into agent context with optional task context.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | ✅ | Skill name |
+| `context` | string | ❌ | Task context |
+
+**Example:**
+
+```typescript
+skills_use({
+  name: "testing-patterns",
+  context: "Need to break dependencies in legacy auth module"
+})
+// Returns formatted skill content with SKILL.md + references
+```
+
+**Returns:** Formatted skill content including SKILL.md and all reference files.
+
+---
+
+## skills_read
+
+Read full skill content including SKILL.md and references.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | ✅ | Skill name |
+
+**Example:**
+
+```typescript
+skills_read({ name: "swarm-coordination" })
+// Returns: { metadata: {...}, body: "...", references: [...] }
+```
+
+---
+
+## skills_create
+
+Create a new skill with SKILL.md template.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | ✅ | Skill name (lowercase, hyphens) |
+| `description` | string | ✅ | What the skill does |
+| `scope` | `"global" \| "project"` | ❌ | Skill scope (default: `"project"`) |
+| `tags` | string[] | ❌ | Tags for categorization |
+
+**Example:**
+
+```typescript
+skills_create({
+  name: "api-design",
+  description: "REST API design patterns and best practices",
+  scope: "global",
+  tags: ["architecture", "api", "rest"]
+})
+```
+
+**Returns:** Created skill path and metadata.
+
+---
+
+## skills_update
+
+Update an existing skill's SKILL.md content.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | ✅ | Skill name |
+| `content` | string | ✅ | New SKILL.md content |
+
+**Example:**
+
+```typescript
+skills_update({
+  name: "api-design",
+  content: "# API Design\n\nUpdated content..."
+})
+```
+
+---
+
+## skills_delete
+
+Delete a skill (project skills only).
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | ✅ | Skill name |
+
+**Example:**
+
+```typescript
+skills_delete({ name: "old-pattern" })
+```
+
+**Note:** Only project-scoped skills can be deleted. Global and bundled skills are protected.
+
+---
+
+## skills_init
+
+Initialize skills directory in current project.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | ❌ | Project path (defaults to cwd) |
+
+**Example:**
+
+```typescript
+skills_init({ path: "/Users/joel/projects/my-app" })
+// Creates .skills/ directory with README
+```
+
+---
+
+## skills_add_script
+
+Add an executable script to a skill.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `skill_name` | string | ✅ | Skill name |
+| `script_name` | string | ✅ | Script filename |
+| `content` | string | ✅ | Script content |
+| `executable` | boolean | ❌ | Make executable (default: `true`) |
+
+**Example:**
+
+```typescript
+skills_add_script({
+  skill_name: "testing-patterns",
+  script_name: "generate-test.sh",
+  content: "#!/bin/bash\necho 'Generating test...'",
+  executable: true
+})
+```
+
+---
+
+## skills_execute
+
+Execute a skill's script.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `skill_name` | string | ✅ | Skill name |
+| `script_name` | string | ✅ | Script filename |
+| `args` | string[] | ❌ | Script arguments |
+
+**Example:**
+
+```typescript
+skills_execute({
+  skill_name: "testing-patterns",
+  script_name: "generate-test.sh",
+  args: ["src/auth.ts"]
+})
+```
+
+---
+
+## Bundled Skills
+
+Located in `global-skills/`, shipped with the plugin:
+
+| Skill | Purpose |
+|-------|---------|
+| **testing-patterns** | 25 dependency-breaking techniques, characterization tests (Feathers patterns) |
+| **swarm-coordination** | Multi-agent decomposition, file reservations, coordination patterns |
+| **cli-builder** | Argument parsing, help text, subcommands, clack/commander patterns |
+| **system-design** | Architecture decisions, module boundaries, API design |
+| **learning-systems** | Confidence decay, pattern maturity, feedback loops |
+| **skill-creator** | Meta-skill for creating new skills |
+
+**Pro tip:** The `testing-patterns` skill has a full dependency-breaking catalog with 25 techniques in `references/dependency-breaking-catalog.md`.
+
+---
+
+## Skills Workflow
+
+```typescript
+// List available skills
+skills_list()
+
+// Load skill for current task
+skills_use({
+  name: "testing-patterns",
+  context: "Breaking dependencies in AuthService"
+})
+
+// Read full skill content (including references)
+skills_read({ name: "testing-patterns" })
+
+// Create a project-specific skill
+skills_create({
+  name: "auth-patterns",
+  description: "OAuth and JWT patterns for this project",
+  scope: "project"
+})
+
+// Add a script to automate common tasks
+skills_add_script({
+  skill_name: "auth-patterns",
+  script_name: "generate-token.ts",
+  content: "// Script to generate JWT tokens for testing"
+})
+```
+
+---
+
+## When to Use Skills
+
+- **Before unfamiliar work** - Check if a skill exists
+- **When you need domain-specific patterns** - Load the relevant skill
+- **For complex workflows** - Skills provide step-by-step guidance
+- **To capture project-specific knowledge** - Create custom skills
+
+### Skill Triggers (Auto-load these)
+
+```
+Writing tests?           → skills_use(name="testing-patterns")
+Breaking dependencies?   → skills_use(name="testing-patterns")
+Multi-agent work?        → skills_use(name="swarm-coordination")
+Building a CLI?          → skills_use(name="cli-builder")
+Making architecture decisions? → skills_use(name="system-design")
+```
+
+## Next Steps
+
+- [Beads Tools](/docs/packages/opencode-plugin/beads) - Git-backed issue tracking
+- [Swarm Tools](/docs/packages/opencode-plugin/swarm) - Task orchestration
