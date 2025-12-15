@@ -1,5 +1,13 @@
 # opencode-swarm-plugin
 
+## 0.23.2
+
+### Patch Changes
+
+- [`7f9ead6`](https://github.com/joelhooks/opencode-swarm-plugin/commit/7f9ead65dab1dd5dc9aff57df0871cc390556fe1) Thanks [@joelhooks](https://github.com/joelhooks)! - Fix workspace:\* protocol resolution using bun pack + npm publish
+
+  Uses bun pack to create tarball (which resolves workspace:\* to actual versions) then npm publish for OIDC trusted publisher support.
+
 ## 0.23.1
 
 ### Patch Changes
