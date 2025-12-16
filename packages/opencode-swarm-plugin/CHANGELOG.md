@@ -1,5 +1,13 @@
 # opencode-swarm-plugin
 
+## 0.25.2
+
+### Patch Changes
+
+- [`34a2c3a`](https://github.com/joelhooks/swarm-tools/commit/34a2c3a07f036297db449414ef8dbeb7b39721e2) Thanks [@joelhooks](https://github.com/joelhooks)! - Grant swarm workers autonomy to file beads against the epic
+
+  Workers can now create bugs, tech debt, and follow-up tasks linked to their parent epic via `parent_id`. Prompt explicitly encourages workers to file issues rather than silently ignoring them.
+
 ## 0.25.1
 
 ### Patch Changes
