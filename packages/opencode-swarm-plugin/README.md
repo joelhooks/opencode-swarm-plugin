@@ -129,6 +129,74 @@ src/
 
 ## Dependencies
 
+### Required
+
+| Dependency | Purpose |
+|------------|---------|
+| [OpenCode](https://opencode.ai) | AI coding agent (the plugin runs inside OpenCode) |
+| [Beads](https://github.com/steveyegge/beads) | Git-backed issue tracking |
+
+### Optional (Highly Recommended)
+
+These tools significantly enhance the swarm experience:
+
+| Tool | Purpose | Install |
+|------|---------|---------|
+| [CASS](https://github.com/Dicklesworthstone/coding_agent_session_search) | Historical context - queries past sessions for similar decompositions | See below |
+| [UBS](https://github.com/Dicklesworthstone/ultimate_bug_scanner) | Bug scanning - runs on subtask completion to catch issues | See below |
+| [semantic-memory](https://github.com/joelhooks/semantic-memory) | Learning persistence - stores patterns across sessions | See below |
+
+#### Installing CASS
+
+```bash
+# Clone and install
+git clone https://github.com/Dicklesworthstone/coding_agent_session_search
+cd coding_agent_session_search
+pip install -e .
+
+# Build the index (run periodically to index new sessions)
+cass index
+```
+
+#### Installing UBS
+
+```bash
+# Clone and install
+git clone https://github.com/Dicklesworthstone/ultimate_bug_scanner
+cd ultimate_bug_scanner
+pip install -e .
+```
+
+#### Installing semantic-memory
+
+Requires [Ollama](https://ollama.ai) with an embedding model:
+
+```bash
+# 1. Install Ollama (macOS)
+brew install ollama
+
+# 2. Start Ollama service
+ollama serve
+
+# 3. Pull an embedding model
+ollama pull mxbai-embed-large
+
+# 4. Install the OpenCode plugin
+# Add to your OpenCode config
+```
+
+The `semantic-memory_check` tool verifies Ollama is ready.
+
+**Why install these?**
+
+- **CASS** - When you run `/swarm "Add OAuth"`, the coordinator queries CASS for similar past tasks. Without it, decomposition is based only on the current task description.
+- **UBS** - Every `swarm_complete` runs UBS to scan for bugs. Without it, you lose automatic bug detection.
+- **semantic-memory** - Pattern maturity and anti-pattern detection persist across sessions. Without it, learning resets each session.
+
+Run `swarm doctor` to check which dependencies are installed.
+
+### npm Dependencies
+
 - [swarm-mail](../swarm-mail) - Event sourcing primitives (workspace dependency)
 - [@opencode-ai/plugin](https://www.npmjs.com/package/@opencode-ai/plugin) - OpenCode plugin API
 - [effect](https://effect.website) - Effect-TS for type-safe composition
