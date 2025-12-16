@@ -197,6 +197,10 @@ async function handleBeadClosed(db: DatabaseAdapter, event: BeadEvent): Promise<
     WHERE id = $4`,
     [event.timestamp, event.reason, event.timestamp, event.bead_id],
   );
+
+  // Invalidate blocked cache for dependents (beads that were blocked by this one)
+  const { invalidateBlockedCache } = await import("./dependencies.js");
+  await invalidateBlockedCache(db, event.project_key, event.bead_id);
 }
 
 async function handleBeadReopened(db: DatabaseAdapter, event: BeadEvent): Promise<void> {
@@ -232,8 +236,9 @@ async function handleDependencyAdded(db: DatabaseAdapter, event: BeadEvent): Pro
     [event.bead_id, dep.target, dep.type, event.timestamp, event.added_by || null],
   );
 
-  // Invalidate blocked cache
-  await invalidateBlockedCache(db, event.project_key, event.bead_id);
+  // Invalidate blocked cache (import at runtime)
+  const { invalidateBlockedCache: invalidate } = await import("./dependencies.js");
+  await invalidate(db, event.project_key, event.bead_id);
 }
 
 async function handleDependencyRemoved(db: DatabaseAdapter, event: BeadEvent): Promise<void> {
@@ -244,8 +249,9 @@ async function handleDependencyRemoved(db: DatabaseAdapter, event: BeadEvent): P
     [event.bead_id, dep.target, dep.type],
   );
 
-  // Invalidate blocked cache
-  await invalidateBlockedCache(db, event.project_key, event.bead_id);
+  // Invalidate blocked cache (import at runtime)
+  const { invalidateBlockedCache: invalidate } = await import("./dependencies.js");
+  await invalidate(db, event.project_key, event.bead_id);
 }
 
 async function handleLabelAdded(db: DatabaseAdapter, event: BeadEvent): Promise<void> {
@@ -542,94 +548,7 @@ export async function getBlockedBeads(
 // Cache Management
 // ============================================================================
 
-/**
- * Invalidate blocked cache for a bead
- *
- * Called when dependencies change. Forces recalculation on next query.
- */
-async function invalidateBlockedCache(
-  db: DatabaseAdapter,
-  projectKey: string,
-  beadId: string,
-): Promise<void> {
-  await db.query(
-    `DELETE FROM blocked_beads_cache WHERE bead_id = $1`,
-    [beadId],
-  );
-}
-
-/**
- * Rebuild blocked cache for a bead
- *
- * Recursively finds all blockers (including transitive dependencies).
- */
-export async function rebuildBlockedCache(
-  db: DatabaseAdapter,
-  projectKey: string,
-  beadId: string,
-): Promise<void> {
-  // Find all blockers (recursive query)
-  const result = await db.query<{ blocker_id: string }>(
-    `WITH RECURSIVE blockers AS (
-       -- Direct blockers
-       SELECT depends_on_id as blocker_id, 1 as depth
-       FROM bead_dependencies
-       WHERE bead_id = $1 AND relationship = 'blocks'
-       
-       UNION
-       
-       -- Transitive blockers
-       SELECT bd.depends_on_id, b.depth + 1
-       FROM bead_dependencies bd
-       JOIN blockers b ON bd.bead_id = b.blocker_id
-       WHERE bd.relationship = 'blocks' AND b.depth < 10
-     )
-     SELECT DISTINCT blocker_id FROM blockers`,
-    [beadId],
-  );
-
-  const blockerIds = result.rows.map((r) => r.blocker_id);
-
-  if (blockerIds.length > 0) {
-    // Insert or update cache
-    await db.query(
-      `INSERT INTO blocked_beads_cache (bead_id, blocker_ids, updated_at)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (bead_id) 
-       DO UPDATE SET blocker_ids = $2, updated_at = $3`,
-      [beadId, blockerIds, Date.now()],
-    );
-  } else {
-    // No blockers - remove from cache
-    await db.query(
-      `DELETE FROM blocked_beads_cache WHERE bead_id = $1`,
-      [beadId],
-    );
-  }
-}
-
-/**
- * Rebuild entire blocked cache for a project
- *
- * Used after migration or bulk dependency changes.
- */
-export async function rebuildAllBlockedCaches(
-  db: DatabaseAdapter,
-  projectKey: string,
-): Promise<void> {
-  // Get all beads with dependencies
-  const result = await db.query<{ id: string }>(
-    `SELECT DISTINCT b.id FROM beads b
-     JOIN bead_dependencies bd ON b.id = bd.bead_id
-     WHERE b.project_key = $1 AND bd.relationship = 'blocks'`,
-    [projectKey],
-  );
-
-  // Rebuild cache for each
-  for (const row of result.rows) {
-    await rebuildBlockedCache(db, projectKey, row.id);
-  }
-}
+// Cache management is now handled in dependencies.ts
 
 // ============================================================================
 // Dirty Tracking

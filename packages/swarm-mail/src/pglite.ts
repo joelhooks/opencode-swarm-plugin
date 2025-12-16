@@ -37,7 +37,7 @@ import { homedir } from "node:os";
  * but TypeScript needs the explicit wrapper for type safety.
  * PGLite's exec() returns Results[] but DatabaseAdapter expects void.
  */
-function wrapPGlite(pglite: PGlite): DatabaseAdapter {
+export function wrapPGlite(pglite: PGlite): DatabaseAdapter {
   return {
     query: <T>(sql: string, params?: unknown[]) => pglite.query<T>(sql, params),
     exec: async (sql: string) => {
