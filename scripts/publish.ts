@@ -32,6 +32,13 @@ async function getLocalVersion(pkgPath: string): Promise<{ name: string; version
   return { name: pkg.name, version: pkg.version };
 }
 
+async function cleanTarballs(pkgPath: string): Promise<void> {
+  const files = await readdir(pkgPath);
+  for (const f of files.filter(f => f.endsWith('.tgz'))) {
+    await unlink(`${pkgPath}/${f}`);
+  }
+}
+
 async function findTarball(pkgPath: string): Promise<string> {
   const files = await readdir(pkgPath);
   const tarball = files.find(f => f.endsWith('.tgz'));
@@ -56,6 +63,8 @@ async function main() {
     console.log(`📦 ${name}@${version} (npm: ${npmVersion ?? "none"})...`);
     
     try {
+      // Clean any stale tarballs first
+      await cleanTarballs(pkgPath);
       await $`bun pm pack`.cwd(pkgPath).quiet();
       const tarball = await findTarball(pkgPath);
       await $`npm publish ${tarball} --access public`.quiet();
