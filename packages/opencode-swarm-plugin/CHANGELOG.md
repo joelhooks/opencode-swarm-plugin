@@ -1,5 +1,25 @@
 # opencode-swarm-plugin
 
+## 0.25.3
+
+### Patch Changes
+
+- [`7471fd4`](https://github.com/joelhooks/swarm-tools/commit/7471fd43ef9b16b32e503d7cd4bdc5b7a74537e4) Thanks [@joelhooks](https://github.com/joelhooks)! - Fix swarm_complete tool execution failures and remove debug logging
+
+  **opencode-swarm-plugin:**
+
+  - Fix: Made sendSwarmMessage non-fatal in swarm_complete - failures no longer cause "Tool execution failed" errors
+  - Fix: Added message_sent and message_error fields to swarm_complete response for better error visibility
+  - Chore: Removed console.log statements from index.ts, swarm-orchestrate.ts, storage.ts, rate-limiter.ts
+  - Test: Added integration tests for swarm_complete error handling
+
+  **swarm-mail:**
+
+  - Chore: Cleaned up debug logging and improved migration handling
+
+- Updated dependencies [[`7471fd4`](https://github.com/joelhooks/swarm-tools/commit/7471fd43ef9b16b32e503d7cd4bdc5b7a74537e4)]:
+  - swarm-mail@0.1.4
+
 ## 0.25.2
 
 ### Patch Changes
