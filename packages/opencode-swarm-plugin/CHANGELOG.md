@@ -1,5 +1,28 @@
 # opencode-swarm-plugin
 
+## 0.27.0
+
+### Minor Changes
+
+- [`26fd2ef`](https://github.com/joelhooks/swarm-tools/commit/26fd2ef27562edc39f7db7a9cdbed399a465200d) Thanks [@joelhooks](https://github.com/joelhooks)! - Rename beads → hive across the codebase
+
+  - `createBeadsAdapter` → `createHiveAdapter` (old name still exported as alias)
+  - `BeadsAdapter` type → `HiveAdapter` type
+  - All internal references updated to use hive terminology
+  - Backward compatible: old exports still work but are deprecated
+
+- [`ab23071`](https://github.com/joelhooks/swarm-tools/commit/ab23071cc7509c4fc37e1cac0f38a3812022cdf5) Thanks [@joelhooks](https://github.com/joelhooks)! - Add swarm-aware compaction hook to keep swarms cooking after context compression
+
+  - New `experimental.session.compacting` hook detects active swarms and injects recovery context
+  - `hasSwarmSign()` checks for swarm evidence: in-progress beads, subtasks, unclosed epics
+  - Compaction prompt instructs coordinator to immediately resume orchestration
+  - Fix @types/node conflicts by pinning to 22.19.3 in root overrides
+
+### Patch Changes
+
+- Updated dependencies [[`26fd2ef`](https://github.com/joelhooks/swarm-tools/commit/26fd2ef27562edc39f7db7a9cdbed399a465200d)]:
+  - swarm-mail@0.3.0
+
 ## 0.26.1
 
 ### Patch Changes

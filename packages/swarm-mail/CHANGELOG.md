@@ -1,5 +1,16 @@
 # swarm-mail
 
+## 0.3.0
+
+### Minor Changes
+
+- [`26fd2ef`](https://github.com/joelhooks/swarm-tools/commit/26fd2ef27562edc39f7db7a9cdbed399a465200d) Thanks [@joelhooks](https://github.com/joelhooks)! - Rename beads → hive across the codebase
+
+  - `createBeadsAdapter` → `createHiveAdapter` (old name still exported as alias)
+  - `BeadsAdapter` type → `HiveAdapter` type
+  - All internal references updated to use hive terminology
+  - Backward compatible: old exports still work but are deprecated
+
 ## 0.2.1
 
 ### Patch Changes
