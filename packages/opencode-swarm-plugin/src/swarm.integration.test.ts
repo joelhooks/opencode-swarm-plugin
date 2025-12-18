@@ -2124,4 +2124,81 @@ describe("Contract Validation", () => {
       expect(mockResult.contract_validation.validated).toBe(false);
     });
   });
+
+  describe("swarm_complete project_key handling (bug fix)", () => {
+    it("finds cells created with full path project_key", async () => {
+      // BUG: swarm_complete was mangling project_key with .replace(/\//g, "-")
+      // before querying, but cells are stored with the original path.
+      // This caused "Bead not found" errors for cells created via hive_create_epic.
+      
+      const testProjectPath = "/tmp/swarm-complete-projectkey-test-" + Date.now();
+      const { getHiveAdapter } = await import("./hive");
+      const adapter = await getHiveAdapter(testProjectPath);
+      
+      // Create a cell using the full path as project_key (like hive_create_epic does)
+      const cell = await adapter.createCell(testProjectPath, {
+        title: "Test cell for project_key bug",
+        type: "task",
+        priority: 2,
+      });
+      
+      expect(cell.id).toBeDefined();
+      
+      // Now try to complete it via swarm_complete with the same project_key
+      const result = await swarm_complete.execute(
+        {
+          project_key: testProjectPath, // Full path, not mangled
+          agent_name: "test-agent",
+          bead_id: cell.id,
+          summary: "Testing project_key handling",
+          skip_verification: true,
+          skip_review: true,
+        },
+        mockContext,
+      );
+      
+      const parsed = JSON.parse(result);
+      
+      // This should succeed - the cell exists with this project_key
+      // BUG: Before fix, this fails with "Bead not found" because swarm_complete
+      // was looking for project_key "-tmp-swarm-complete-projectkey-test-xxx"
+      expect(parsed.success).toBe(true);
+      expect(parsed.error).toBeUndefined();
+      expect(parsed.bead_id).toBe(cell.id);
+    });
+
+    it("handles project_key with slashes correctly", async () => {
+      // Verify that project_key like "/Users/joel/Code/project" works
+      const testProjectPath = "/a/b/c/test-" + Date.now();
+      const { getHiveAdapter } = await import("./hive");
+      const adapter = await getHiveAdapter(testProjectPath);
+      
+      const cell = await adapter.createCell(testProjectPath, {
+        title: "Nested path test",
+        type: "task",
+        priority: 2,
+      });
+      
+      // Verify cell was created with correct project_key
+      const retrieved = await adapter.getCell(testProjectPath, cell.id);
+      expect(retrieved).not.toBeNull();
+      expect(retrieved?.id).toBe(cell.id);
+      
+      // swarm_complete should find it using the same project_key
+      const result = await swarm_complete.execute(
+        {
+          project_key: testProjectPath,
+          agent_name: "test-agent",
+          bead_id: cell.id,
+          summary: "Nested path test",
+          skip_verification: true,
+          skip_review: true,
+        },
+        mockContext,
+      );
+      
+      const parsed = JSON.parse(result);
+      expect(parsed.success).toBe(true);
+    });
+  });
 });

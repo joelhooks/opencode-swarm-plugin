@@ -1328,15 +1328,14 @@ Or use skip_review=true to bypass (not recommended for production work).`,
 
     try {
       // Validate bead_id exists and is not already closed (EARLY validation)
-      const projectKey = args.project_key
-        .replace(/\//g, "-")
-        .replace(/\\/g, "-");
+      // NOTE: Use args.project_key directly - cells are stored with the original path
+      // (e.g., "/Users/joel/Code/project"), not a mangled version.
 
       // Use HiveAdapter for validation (not bd CLI)
       const adapter = await getHiveAdapter(args.project_key);
 
       // 1. Check if bead exists
-      const cell = await adapter.getCell(projectKey, args.bead_id);
+      const cell = await adapter.getCell(args.project_key, args.bead_id);
       if (!cell) {
         return JSON.stringify({
           success: false,
@@ -1361,14 +1360,14 @@ Or use skip_review=true to bypass (not recommended for production work).`,
 
       try {
         const agent = await getAgent(
-          projectKey,
+          args.project_key,
           args.agent_name,
           args.project_key,
         );
         agentRegistered = agent !== null;
 
         if (!agentRegistered) {
-          registrationWarning = `⚠️  WARNING: Agent '${args.agent_name}' was NOT registered in swarm-mail for project '${projectKey}'.
+          registrationWarning = `⚠️  WARNING: Agent '${args.agent_name}' was NOT registered in swarm-mail for project '${args.project_key}'.
 
 This usually means you skipped the MANDATORY swarmmail_init step.
 
