@@ -28,6 +28,8 @@
 
 import type { DatabaseAdapter } from "../types/database.js";
 import type { HiveAdapter } from "../types/hive-adapter.js";
+import { readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 
 // Import implementation functions from store.ts and projections.ts
 import {
@@ -626,12 +628,16 @@ export function createHiveAdapter(
 }
 
 /**
- * Generate a unique bead ID
+ * Generate a unique cell ID with project-name prefix
  *
- * Format: bd-{project-hash}-{counter}
- * Example: bd-abc123-001
+ * Format: {project-name}-{project-hash}-{timestamp}{random}
+ * Example: swarm-mail-lf2p4u-mjbneh7mqah
+ * Fallback: cell-{hash}-{timestamp}{random} (when no package.json or name)
  */
 function generateBeadId(projectKey: string): string {
+  // Get project name prefix from package.json
+  const prefix = getProjectPrefix(projectKey);
+
   // Simple hash of project key
   const hash = projectKey
     .split("")
@@ -643,5 +649,52 @@ function generateBeadId(projectKey: string): string {
   const timestamp = Date.now().toString(36);
   const random = Math.random().toString(36).slice(2, 5);
 
-  return `bd-${hash}-${timestamp}${random}`;
+  return `${prefix}-${hash}-${timestamp}${random}`;
+}
+
+/**
+ * Get project name prefix from package.json
+ * Reads package.json from projectKey path and slugifies the name field
+ * Falls back to 'cell' if package.json not found or has no name
+ */
+function getProjectPrefix(projectKey: string): string {
+  try {
+    // Try to read package.json from the project path
+    const packageJsonPath = join(projectKey, "package.json");
+    
+    if (!existsSync(packageJsonPath)) {
+      return "cell";
+    }
+    
+    const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
+    
+    if (!packageJson.name || typeof packageJson.name !== "string") {
+      return "cell";
+    }
+    
+    return slugifyProjectName(packageJson.name);
+  } catch (error) {
+    // If anything goes wrong (read error, parse error, etc.), fallback to 'cell'
+    return "cell";
+  }
+}
+
+/**
+ * Slugify project name for use in cell ID prefix
+ * - Lowercase
+ * - Replace spaces and special chars with dashes
+ * - Remove leading/trailing dashes
+ * 
+ * Examples:
+ * - "My Cool App" -> "my-cool-app"
+ * - "app@v2.0" -> "app-v2-0"
+ * - "@scope/package" -> "scope-package"
+ */
+function slugifyProjectName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[@/]/g, "-") // Replace @ and / with dash
+    .replace(/[^a-z0-9-]/g, "-") // Replace any other non-alphanumeric with dash
+    .replace(/-+/g, "-") // Collapse multiple dashes
+    .replace(/^-+|-+$/g, ""); // Remove leading/trailing dashes
 }
