@@ -10,6 +10,7 @@ concurrency: ${{ github.workflow }}-${{ github.ref }}
 permissions:
   contents: write
   pull-requests: write
+  id-token: write
 
 jobs:
   release:
@@ -33,21 +34,30 @@ jobs:
       - name: Build packages
         run: bun turbo build --filter='!@swarmtools/web'
 
-      - name: Setup npmrc
-        run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > .npmrc
+      - name: Check for changesets
+        id: check
+        run: |
+          if ls .changeset/*.md 2>/dev/null | grep -v README.md | head -1 > /dev/null; then
+            echo "has_changesets=true" >> $GITHUB_OUTPUT
+            echo "📝 Found pending changesets - will create release PR"
+          else
+            echo "has_changesets=false" >> $GITHUB_OUTPUT
+            echo "📦 No changesets - will publish if versions differ from npm"
+          fi
 
-      - name: Create Release Pull Request or Publish
-        id: changesets
+      - name: Create Release Pull Request
+        if: steps.check.outputs.has_changesets == 'true'
         uses: changesets/action@v1
-        continue-on-error: true
         with:
           version: bun run ci:version
-          publish: bun run ci:publish
+          publish: echo "Skipping publish - PR created"
           title: "chore: release packages"
           commit: "chore: release packages"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Always try to publish - handles case where changesets action fails on empty PR
-      - name: Publish unpublished versions
+      - name: Publish to npm
+        if: steps.check.outputs.has_changesets == 'false'
         run: bun run ci:publish
+        env:
+          NPM_CONFIG_PROVENANCE: true

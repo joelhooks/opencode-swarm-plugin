@@ -1709,7 +1709,8 @@ async function setup() {
         
         try {
           // Get swarm-mail database for this project
-          const targetDb = await getSwarmMail(cwd);
+          const swarmMail = await getSwarmMail(cwd);
+          const targetDb = await swarmMail.getDatabase(cwd);
           migrateSpinner.message("Migrating memories...");
           
           // Run migration with progress updates

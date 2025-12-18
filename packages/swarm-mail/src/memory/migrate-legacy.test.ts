@@ -239,5 +239,33 @@ describe("Legacy Memory Migration", () => {
       expect(result.migrated).toBe(0);
       expect(result.errors.length).toBe(0);
     });
+
+    test("requires DatabaseAdapter with query method", async () => {
+      // Insert test data in legacy database
+      await legacyDb.query(
+        `INSERT INTO memories (id, content, collection) VALUES ($1, $2, $3)`,
+        ["mem-1", "Test memory content", "default"],
+      );
+
+      // This simulates the bug: passing an object without query() method
+      // (like SwarmMailAdapter instead of DatabaseAdapter)
+      const invalidAdapter = {
+        // SwarmMailAdapter has getDatabase() but not query()
+        getDatabase: async () => wrapPGlite(targetDb),
+        close: async () => {},
+      };
+
+      const result = await migrateLegacyMemories({
+        legacyPath,
+        // @ts-expect-error - intentionally passing wrong type to test runtime behavior
+        targetDb: invalidAdapter,
+        onProgress: () => {},
+      });
+
+      // Should fail gracefully with error, not crash
+      expect(result.failed).toBe(1);
+      expect(result.errors.length).toBeGreaterThan(0);
+      expect(result.errors[0]).toContain("query");
+    });
   });
 });
