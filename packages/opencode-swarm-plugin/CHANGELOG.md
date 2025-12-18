@@ -1,5 +1,81 @@
 # opencode-swarm-plugin
 
+## 0.30.3
+
+### Patch Changes
+
+- [`cc84c8f`](https://github.com/joelhooks/swarm-tools/commit/cc84c8f066696c7625dc307a5163ff50d672634e) Thanks [@joelhooks](https://github.com/joelhooks)! - ## 🐝 Fix Migration Adapter Type Mismatch
+
+  > _"The compiler is your friend. Listen to it."_
+  > — Every TypeScript developer, eventually
+
+  Fixed a runtime error in `swarm setup` where the legacy memory migration was receiving a `SwarmMailAdapter` instead of a `DatabaseAdapter`.
+
+  **The Bug:**
+
+  ```
+  targetDb.query is not a function
+  ```
+
+  **Root Cause:**
+  `getSwarmMail()` returns a `SwarmMailAdapter` which has `getDatabase()` method, not a direct `query()` method. The migration code expected a `DatabaseAdapter`.
+
+  **The Fix:**
+
+  ```typescript
+  // Before (wrong)
+  const targetDb = await getSwarmMail(cwd);
+
+  // After (correct)
+  const swarmMail = await getSwarmMail(cwd);
+  const targetDb = await swarmMail.getDatabase(cwd);
+  ```
+
+  **Test Added:**
+  New test case verifies that passing an invalid adapter (without `query()`) fails gracefully with a descriptive error instead of crashing.
+
+- [`1e41c9b`](https://github.com/joelhooks/swarm-tools/commit/1e41c9b42ae468761f813d406171d182fb9948e0) Thanks [@joelhooks](https://github.com/joelhooks)! - ## 🐝 Semantic Memory Consolidation
+
+  > _"Simplicity is the ultimate sophistication."_
+  > — Leonardo da Vinci
+
+  The semantic memory system has moved into swarm-mail, bringing persistent learning to the hive.
+
+  ### What's New
+
+  **Semantic Memory in swarm-mail:**
+
+  - `createSemanticMemory()` - Initialize memory store with PGLite + Ollama embeddings
+  - `getMigrationStatus()` - Check if legacy memory needs migration
+  - `migrateLegacyMemory()` - Migrate from old semantic-memory-mcp format
+  - Automatic migration on first use (no manual intervention needed)
+
+  **Legacy Migration:**
+
+  - Detects old `~/.semantic-memory/` databases
+  - Migrates memories, embeddings, and metadata
+  - Preserves all tags and timestamps
+  - Creates backup before migration
+
+  **Worker Handoff Protocol:**
+
+  - Agents can now hand off work mid-task
+  - State preserved via swarm mail messages
+  - Enables long-running tasks across context limits
+
+  ### Breaking Changes
+
+  None - this is additive. The old semantic-memory-mcp still works but is deprecated.
+
+  ### Files Added/Changed
+
+  - `packages/swarm-mail/src/memory/` - New memory subsystem
+  - `packages/swarm-mail/src/memory/migrate-legacy.ts` - Migration tooling
+  - `packages/opencode-swarm-plugin/bin/swarm.ts` - Uses new exports
+
+- Updated dependencies [[`1e41c9b`](https://github.com/joelhooks/swarm-tools/commit/1e41c9b42ae468761f813d406171d182fb9948e0)]:
+  - swarm-mail@0.5.0
+
 ## 0.30.2
 
 ### Patch Changes
