@@ -1,5 +1,14 @@
 # swarm-mail
 
+## 0.3.4
+
+### Patch Changes
+
+- [`90409ef`](https://github.com/joelhooks/swarm-tools/commit/90409ef4f353844b25fe04221bc80d6f930eced2) Thanks [@joelhooks](https://github.com/joelhooks)! - Fix table name mismatches and SQL alias typo in hive module
+
+  - jsonl.ts: Fixed DELETE queries using wrong table names (cell*\* → bead*\*)
+  - projections.ts: Fixed SQL alias typo (bcc.cell_id → bbc.cell_id)
+
 ## 0.3.3
 
 ### Patch Changes

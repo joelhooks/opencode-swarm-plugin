@@ -1,5 +1,12 @@
 # opencode-swarm-plugin
 
+## 0.28.2
+
+### Patch Changes
+
+- Updated dependencies [[`90409ef`](https://github.com/joelhooks/swarm-tools/commit/90409ef4f353844b25fe04221bc80d6f930eced2)]:
+  - swarm-mail@0.3.4
+
 ## 0.28.1
 
 ### Patch Changes
