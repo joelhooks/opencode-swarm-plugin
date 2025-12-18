@@ -1,5 +1,20 @@
 # opencode-swarm-plugin
 
+## 0.27.2
+
+### Patch Changes
+
+- [`50a2bf5`](https://github.com/joelhooks/swarm-tools/commit/50a2bf51c5320c038f202191d7acbfd2179f2cb3) Thanks [@joelhooks](https://github.com/joelhooks)! - Fix cells view migration not being applied
+
+  The v7 migration (cellsViewMigration) that creates the `cells` view was added after
+  swarm-mail@0.3.0 was published. This caused `hive_sync` to fail with
+  "relation cells does not exist" because the JSONL export queries the `cells` view.
+
+  This patch ensures the v7 migration is included in the published package.
+
+- Updated dependencies [[`50a2bf5`](https://github.com/joelhooks/swarm-tools/commit/50a2bf51c5320c038f202191d7acbfd2179f2cb3)]:
+  - swarm-mail@0.3.2
+
 ## 0.27.0
 
 ### Minor Changes
