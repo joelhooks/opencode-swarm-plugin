@@ -320,29 +320,31 @@ async function createPGliteWithRecovery(dbPath: string): Promise<PGlite> {
  * Uses singleton pattern - one instance per database path.
  * Safe to call multiple times for the same project.
  *
- * **Socket Mode (SWARM_MAIL_SOCKET=true):**
+ * **Socket Mode (default):**
  * - Checks if daemon is running, starts if needed
  * - Validates health before connecting
  * - Falls back to embedded PGLite on any failure
+ * - Set `SWARM_MAIL_SOCKET=false` to opt out
  *
- * **Embedded Mode (default):**
+ * **Embedded Mode (opt-out with SWARM_MAIL_SOCKET=false):**
  * - Uses embedded PGLite database
  * - No daemon required
+ * - Only use for single-process scenarios
  *
  * @param projectPath - Optional project root path (defaults to global)
  * @returns SwarmMailAdapter instance
  *
  * @example
  * ```typescript
- * // Project-local database (embedded or socket based on env)
+ * // Project-local database (daemon mode by default)
+ * const swarmMail = await getSwarmMail('/path/to/project');
+ *
+ * // Opt out of daemon mode (embedded PGLite)
+ * process.env.SWARM_MAIL_SOCKET = 'false';
  * const swarmMail = await getSwarmMail('/path/to/project');
  *
  * // Global database (shared across all projects)
  * const swarmMail = await getSwarmMail();
- *
- * // Explicit socket mode
- * process.env.SWARM_MAIL_SOCKET = 'true';
- * const swarmMail = await getSwarmMail('/path/to/project');
  * ```
  */
 export async function getSwarmMail(
@@ -363,12 +365,13 @@ export async function getSwarmMail(
 
   // Start new initialization
   const initPromise = (async () => {
-    // Check for socket mode via env var
-    const useSocket = process.env.SWARM_MAIL_SOCKET === 'true';
+    // Check for socket mode via env var (default is socket, opt-out with 'false')
+    const useSocket = process.env.SWARM_MAIL_SOCKET !== 'false';
 
     if (useSocket) {
       try {
         // Try socket mode with auto-daemon management
+        console.log('[swarm-mail] Using daemon mode (set SWARM_MAIL_SOCKET=false for embedded)');
         const adapter = await getSwarmMailSocketInternal(projectPath);
         instances.set(dbPath, { adapter, isSocket: true });
         return adapter;
@@ -380,8 +383,9 @@ export async function getSwarmMail(
       }
     }
 
-    // Embedded PGlite mode (default or fallback)
+    // Embedded PGlite mode (opt-out or fallback)
     // Use recovery wrapper to handle corrupted databases from crashed sessions
+    console.log('[swarm-mail] Using embedded mode (unset SWARM_MAIL_SOCKET to use daemon)');
     const pglite = await createPGliteWithRecovery(dbPath);
     const db = wrapPGlite(pglite);
     const adapter = createSwarmMailAdapter(db, projectKey);

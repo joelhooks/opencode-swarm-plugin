@@ -4,8 +4,12 @@ import { closeAllSwarmMail, getDatabasePath, getSwarmMail } from "./pglite";
 
 describe("PGLite recovery integration", () => {
   const testProjectPath = `/tmp/pglite-integration-test-${Date.now()}`;
+  const originalSocket = process.env.SWARM_MAIL_SOCKET;
   
   beforeAll(() => {
+    // Force embedded mode for tests (avoid daemon startup)
+    process.env.SWARM_MAIL_SOCKET = 'false';
+    
     // Clean slate
     const dbPath = getDatabasePath(testProjectPath);
     rmSync(dbPath, { recursive: true, force: true });
@@ -15,6 +19,9 @@ describe("PGLite recovery integration", () => {
     await closeAllSwarmMail();
     const dbPath = getDatabasePath(testProjectPath);
     rmSync(dbPath, { recursive: true, force: true });
+    
+    // Restore env
+    process.env.SWARM_MAIL_SOCKET = originalSocket;
   });
 
   test("concurrent getSwarmMail calls return same instance (race condition fix)", async () => {

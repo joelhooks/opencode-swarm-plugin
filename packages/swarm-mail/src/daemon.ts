@@ -1,8 +1,8 @@
 /**
- * Daemon Lifecycle Management for pglite-server
+ * Daemon Lifecycle Management for PGLiteSocketServer
  *
- * Provides start/stop/health functionality for the pglite-server daemon process.
- * Uses detached child_process for background operation with PID file tracking.
+ * Provides start/stop/health functionality for in-process PGLiteSocketServer.
+ * Uses module-level state to track active server instance.
  *
  * ## Usage
  * ```typescript
@@ -19,12 +19,39 @@
  * ```
  */
 
-import { spawn } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { readFile, writeFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { PGlite } from "@electric-sql/pglite";
+import { vector } from "@electric-sql/pglite/vector";
+import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
 import { getDatabasePath, getProjectTempDirName } from "./pglite";
+
+/**
+ * Module-level state tracking for active in-process server
+ *
+ * The daemon runs in-process using PGLiteSocketServer, not as external process.
+ * This state tracks the active server instance to support:
+ * - Server reuse (same project calling startDaemon multiple times)
+ * - Graceful shutdown (CHECKPOINT → stop → close)
+ * - Multi-project isolation (different projects get different servers)
+ *
+ * @internal
+ */
+let activeServer: PGLiteSocketServer | null = null;
+
+/**
+ * Active PGlite database instance
+ * @internal
+ */
+let activeDb: PGlite | null = null;
+
+/**
+ * Project path for the active server (used for reuse detection)
+ * @internal
+ */
+let activeProjectPath: string | undefined = undefined;
 
 /**
  * Daemon start options
@@ -255,9 +282,9 @@ export async function healthCheck(
 }
 
 /**
- * Start pglite-server daemon
+ * Start PGLiteSocketServer daemon in-process
  *
- * Spawns pglite-server as a detached background process.
+ * Creates PGlite instance and starts PGLiteSocketServer.
  * Writes PID file and waits for server to be ready via health check.
  *
  * If daemon is already running, returns existing daemon info.
@@ -288,7 +315,15 @@ export async function startDaemon(
 ): Promise<DaemonInfo> {
   const { port = 5433, host = "127.0.0.1", path, dbPath, projectPath } = options;
 
-  // Check if daemon is already running
+  // Check if daemon is already running (active server or PID file)
+  if (activeServer && activeProjectPath === projectPath) {
+    return {
+      pid: process.pid,
+      port: path ? undefined : port,
+      socketPath: path,
+    };
+  }
+
   if (await isDaemonRunning(projectPath)) {
     const pid = await readPidFile(projectPath);
     if (!pid) {
@@ -304,30 +339,26 @@ export async function startDaemon(
   // Determine database path
   const finalDbPath = dbPath || getDatabasePath(projectPath);
 
-  // Build command arguments
-  const args: string[] = [`--db=${finalDbPath}`];
-  if (path) {
-    args.push(`--path=${path}`);
-  } else {
-    args.push(`--port=${port}`);
-    args.push(`--host=${host}`);
-  }
-
-  // Spawn detached process
-  const child = spawn("pglite-server", args, {
-    detached: true,
-    stdio: "ignore", // Don't inherit stdio - daemon runs in background
+  // Create PGlite instance with vector extension
+  const db = await PGlite.create({
+    dataDir: finalDbPath,
+    extensions: { vector },
   });
 
-  // Unref so parent process can exit
-  child.unref();
+  // Create and start PGLiteSocketServer
+  const server = path
+    ? new PGLiteSocketServer({ db, path })
+    : new PGLiteSocketServer({ db, port, host });
 
-  if (!child.pid) {
-    throw new Error("Failed to spawn pglite-server - no PID returned");
-  }
+  await server.start();
 
-  // Write PID file
-  await writePidFile(child.pid, projectPath);
+  // Store module-level state
+  activeServer = server;
+  activeDb = db;
+  activeProjectPath = projectPath;
+
+  // Write PID file (use current process PID since it's in-process)
+  await writePidFile(process.pid, projectPath);
 
   // Wait for server to be ready (health check)
   const healthOptions = path ? { path } : { port, host };
@@ -337,30 +368,34 @@ export async function startDaemon(
   );
 
   if (!ready) {
-    // Clean up PID file if health check fails
+    // Clean up if health check fails
+    await server.stop();
+    await db.close();
+    activeServer = null;
+    activeDb = null;
+    activeProjectPath = undefined;
     await deletePidFile(projectPath);
     throw new Error(
-      "pglite-server failed to start - health check timeout after 10s",
+      "PGLiteSocketServer failed to start - health check timeout after 10s",
     );
   }
 
   return {
-    pid: child.pid,
+    pid: process.pid,
     port: path ? undefined : port,
     socketPath: path,
   };
 }
 
 /**
- * Stop pglite-server daemon
+ * Stop PGLiteSocketServer daemon
  *
- * Sends SIGTERM to the daemon process and waits for clean shutdown.
- * Cleans up PID file after process exits.
+ * Performs graceful shutdown: CHECKPOINT → server.stop() → db.close()
+ * Cleans up PID file and module-level state.
  *
  * If daemon is not running, this is a no-op (not an error).
  *
  * @param projectPath - Optional project root path
- * @throws Error if daemon doesn't stop within timeout
  *
  * @example
  * ```typescript
@@ -368,47 +403,54 @@ export async function startDaemon(
  * ```
  */
 export async function stopDaemon(projectPath?: string): Promise<void> {
+  // If active server is for this project, stop it directly
+  if (activeServer && activeProjectPath === projectPath) {
+    try {
+      // MANDATORY: CHECKPOINT before close to flush WAL
+      if (activeDb) {
+        await activeDb.exec("CHECKPOINT");
+      }
+      await activeServer.stop();
+      if (activeDb) {
+        await activeDb.close();
+      }
+    } catch (error) {
+      // Log but don't throw - cleanup should be best-effort
+      console.error("Error stopping daemon:", error);
+    } finally {
+      // Clean up module state
+      activeServer = null;
+      activeDb = null;
+      activeProjectPath = undefined;
+      await deletePidFile(projectPath);
+    }
+    return;
+  }
+
+  // Check if PID file exists but server is not active (stale state)
   const pid = await readPidFile(projectPath);
   if (!pid) {
     // No PID file - daemon not running
     return;
   }
 
+  // If PID is current process but server is not active, just clean up
+  if (pid === process.pid) {
+    await deletePidFile(projectPath);
+    return;
+  }
+
+  // If PID is different process, check if it's alive
   if (!isProcessAlive(pid)) {
     // Process already dead - just clean up PID file
     await deletePidFile(projectPath);
     return;
   }
 
-  // Send SIGTERM
-  try {
-    process.kill(pid, "SIGTERM");
-  } catch (error: unknown) {
-    if (
-      error instanceof Error &&
-      "code" in error &&
-      error.code === "ESRCH"
-    ) {
-      // Process already gone
-      await deletePidFile(projectPath);
-      return;
-    }
-    throw error;
-  }
-
-  // Wait for process to exit
-  const stopped = await waitFor(() => Promise.resolve(!isProcessAlive(pid)), 5000);
-
-  if (!stopped) {
-    // Force kill if SIGTERM didn't work
-    try {
-      process.kill(pid, "SIGKILL");
-      await waitFor(() => Promise.resolve(!isProcessAlive(pid)), 2000);
-    } catch {
-      // Ignore errors on SIGKILL
-    }
-  }
-
-  // Clean up PID file
+  // External process still alive - this shouldn't happen with in-process server
+  // but handle gracefully for migration scenarios
+  console.warn(
+    `PID file points to external process ${pid}, cleaning up file only`,
+  );
   await deletePidFile(projectPath);
 }

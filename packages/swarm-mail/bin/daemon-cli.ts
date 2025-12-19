@@ -2,10 +2,10 @@
 /**
  * swarm-mail-daemon CLI
  *
- * Command-line interface for managing the swarm-mail pglite-server daemon.
+ * Command-line interface for managing the in-process PGLiteSocketServer daemon.
  *
  * Commands:
- *   start [options]  - Start the daemon
+ *   start [options]  - Start the in-process daemon
  *   stop             - Stop the daemon
  *   status           - Show daemon status
  *
@@ -65,13 +65,13 @@ function info(msg: string) {
 
 function showHelp() {
 	console.log(`
-${colors.bold}swarm-mail-daemon${colors.reset} - Manage pglite-server daemon for swarm-mail
+${colors.bold}swarm-mail-daemon${colors.reset} - Manage in-process PGLiteSocketServer daemon
 
 ${colors.bold}USAGE${colors.reset}
   swarm-mail-daemon <command> [options]
 
 ${colors.bold}COMMANDS${colors.reset}
-  start [options]  Start the daemon
+  start [options]  Start the in-process daemon
   stop             Stop the daemon
   status           Show daemon status
 

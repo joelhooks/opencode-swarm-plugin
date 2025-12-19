@@ -13,11 +13,10 @@
  * 7. Query helpers - ready beads, in-progress, blocked
  */
 
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { PGlite } from "@electric-sql/pglite";
-import { vector } from "@electric-sql/pglite/vector";
-import { runMigrations } from "../streams/migrations.js";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import type { PGlite } from "@electric-sql/pglite";
 import type { DatabaseAdapter } from "../types/database.js";
+import { getTestDb, resetTestDatabase, startTestServer, stopTestServer } from "../test-server.js";
 import { createHiveAdapter } from "./adapter.js";
 import type { HiveAdapter } from "../types/hive-adapter.js";
 
@@ -35,26 +34,29 @@ function wrapPGlite(pglite: PGlite): DatabaseAdapter {
 }
 
 describe("Beads Adapter", () => {
-  let pglite: PGlite;
   let db: DatabaseAdapter;
   let adapter: HiveAdapter;
   const projectKey = "/test/project";
 
+  // ONE-TIME setup: Start shared test server
+  beforeAll(async () => {
+    await startTestServer();
+  });
+
+  // BEFORE EACH: Reset database state
   beforeEach(async () => {
-    // Create isolated in-memory instance for tests
-    pglite = await PGlite.create({ extensions: { vector } });
+    await resetTestDatabase();
     
-    // Run all migrations (0-9)
-    await runMigrations(pglite);
-    
+    const pglite = getTestDb();
     db = wrapPGlite(pglite);
 
     // Create adapter
     adapter = createHiveAdapter(db, projectKey);
   });
 
-  afterEach(async () => {
-    await pglite.close();
+  // CLEANUP: Stop test server after all tests
+  afterAll(async () => {
+    await stopTestServer();
   });
 
   // ============================================================================

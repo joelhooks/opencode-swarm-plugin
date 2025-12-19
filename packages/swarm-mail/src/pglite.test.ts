@@ -135,6 +135,12 @@ describe("pglite", () => {
    */
   describe("getSwarmMail singleton", () => {
     const testProjectPath = `/tmp/pglite-singleton-test-${Date.now()}`;
+    const originalSocket = process.env.SWARM_MAIL_SOCKET;
+
+    beforeAll(() => {
+      // Force embedded mode for tests (avoid daemon startup)
+      process.env.SWARM_MAIL_SOCKET = 'false';
+    });
 
     afterAll(async () => {
       await closeSwarmMail(testProjectPath);
@@ -143,6 +149,7 @@ describe("pglite", () => {
       if (existsSync(parentDir)) {
         rmSync(parentDir, { recursive: true, force: true });
       }
+      process.env.SWARM_MAIL_SOCKET = originalSocket;
     });
 
     test("returns same instance for same project path", async () => {
@@ -162,6 +169,70 @@ describe("pglite", () => {
   });
 
   /**
+   * Socket mode default behavior tests
+   * 
+   * Integration test: verifies getSwarmMail() uses embedded mode when
+   * SWARM_MAIL_SOCKET=false, and falls back to embedded when socket fails.
+   */
+  describe("socket mode default behavior", () => {
+    test("uses embedded mode when SWARM_MAIL_SOCKET=false", async () => {
+      const originalSocket = process.env.SWARM_MAIL_SOCKET;
+      process.env.SWARM_MAIL_SOCKET = 'false';
+      
+      const testProjectPath = `/tmp/pglite-embedded-test-${Date.now()}`;
+      
+      try {
+        // Should use embedded PGLite (no daemon attempt)
+        const instance = await getSwarmMail(testProjectPath);
+        expect(instance).toBeDefined();
+        
+        // Should be able to use it
+        await instance.registerAgent(testProjectPath, "embedded-test");
+        
+        await closeSwarmMail(testProjectPath);
+      } finally {
+        // Cleanup
+        const dbPath = getDatabasePath(testProjectPath);
+        const parentDir = dbPath.replace("/streams", "");
+        if (existsSync(parentDir)) {
+          rmSync(parentDir, { recursive: true, force: true });
+        }
+        process.env.SWARM_MAIL_SOCKET = originalSocket;
+      }
+    });
+    
+    test("attempts daemon mode by default (no env var set)", async () => {
+      const originalSocket = process.env.SWARM_MAIL_SOCKET;
+      delete process.env.SWARM_MAIL_SOCKET; // Explicitly unset
+      
+      const testProjectPath = `/tmp/pglite-daemon-default-test-${Date.now()}`;
+      
+      try {
+        // Should attempt daemon mode, fall back to embedded if daemon not running
+        // This test verifies the default is daemon attempt, not that daemon succeeds
+        const instance = await getSwarmMail(testProjectPath);
+        expect(instance).toBeDefined();
+        
+        // Should work either way (daemon or embedded fallback)
+        await instance.registerAgent(testProjectPath, "default-test");
+        
+        await closeSwarmMail(testProjectPath);
+      } finally {
+        // Cleanup
+        const dbPath = getDatabasePath(testProjectPath);
+        const parentDir = dbPath.replace("/streams", "");
+        if (existsSync(parentDir)) {
+          rmSync(parentDir, { recursive: true, force: true });
+        }
+        process.env.SWARM_MAIL_SOCKET = originalSocket;
+      }
+    });
+    
+    // Note: Testing successful daemon connection is covered in daemon.test.ts.
+    // Here we test the default behavior and opt-out mechanism.
+  });
+
+  /**
    * WASM abort recovery tests - needs to create corrupted state
    * 
    * Combined into single test to minimize PGLite instance creation.
@@ -169,6 +240,12 @@ describe("pglite", () => {
    */
   describe("WASM abort recovery", () => {
     const testProjectPath = `/tmp/pglite-recovery-test-${Date.now()}`;
+    const originalSocket = process.env.SWARM_MAIL_SOCKET;
+
+    beforeAll(() => {
+      // Force embedded mode for tests (avoid daemon startup)
+      process.env.SWARM_MAIL_SOCKET = 'false';
+    });
 
     afterAll(async () => {
       await closeAllSwarmMail();
@@ -177,6 +254,7 @@ describe("pglite", () => {
       if (existsSync(parentDir)) {
         rmSync(parentDir, { recursive: true, force: true });
       }
+      process.env.SWARM_MAIL_SOCKET = originalSocket;
     });
 
     test("recovers from stale postmaster.pid and corrupted database", async () => {

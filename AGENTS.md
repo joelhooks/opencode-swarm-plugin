@@ -86,7 +86,7 @@ beforeEach(async () => {
 });
 ```
 
-**WAL Safety Note:** In production, use daemon mode (single long-lived process). Multiple short-lived instances compound WAL accumulation. See `packages/swarm-mail/README.md` deployment section for details.
+**WAL Safety Note:** Daemon mode is now the default (single long-lived process via in-process PGLiteSocketServer). This prevents WAL accumulation from multiple instances. Set `SWARM_MAIL_SOCKET=false` to opt out (single-process only). See `packages/swarm-mail/README.md` deployment section for details.
 
 ### Anti-Patterns to Avoid
 

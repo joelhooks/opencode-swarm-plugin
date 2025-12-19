@@ -141,14 +141,16 @@ const swarmMail = await createInMemorySwarmMail() // in-memory
 
 ## Deployment
 
-### Daemon Mode (Recommended)
+### Connection Modes
 
-For production use, run a **single long-lived process** that owns the PGLite database:
+#### Daemon Mode (Default)
+
+By default, swarm-mail starts an in-process `PGLiteSocketServer` when you call `getSwarmMail()`. All database operations go through this server, preventing multi-process corruption.
 
 ```typescript
 import { getSwarmMail } from 'swarm-mail'
 
-// Start daemon
+// Default: starts daemon automatically
 const swarmMail = await getSwarmMail('/my/project')
 
 // Keep alive - handles cleanup on shutdown
@@ -158,11 +160,23 @@ process.on('SIGTERM', async () => {
 })
 ```
 
-**Why daemon mode?**
+**Why daemon mode is the default:**
 
+- **No external dependencies** - Uses `@electric-sql/pglite-socket` in-process
+- **Multi-process safe** - One PGLite instance, multiple clients can connect safely
 - **WAL safety** - Single process prevents WAL accumulation from multiple instances
 - **Proper cleanup** - Graceful shutdown triggers checkpoint, preventing unclean state
 - **Resource efficiency** - One PGLite instance shared across operations
+
+#### Embedded Mode (Opt-out)
+
+For single-process use cases where you're certain only one process will access the database, you can opt out of daemon mode:
+
+```bash
+SWARM_MAIL_SOCKET=false
+```
+
+⚠️ **Warning:** Embedded mode is NOT safe for multi-process access. PGLite uses a single connection, so concurrent processes will cause database corruption. Use only when you're absolutely certain only one process will access the database
 
 ### WAL Safety Features
 

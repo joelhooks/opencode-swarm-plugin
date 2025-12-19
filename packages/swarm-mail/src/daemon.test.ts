@@ -1,8 +1,11 @@
 /**
  * Daemon lifecycle management tests
  *
- * These tests verify PID file management and process lifecycle functions.
- * Actual daemon spawning is not tested here (requires pglite-server installed).
+ * Tests verify in-process PGLiteSocketServer daemon functionality:
+ * - Server starts and accepts connections
+ * - Health checks work
+ * - Server stops cleanly
+ * - PID file tracking works
  */
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
@@ -15,6 +18,7 @@ import {
   isDaemonRunning,
   startDaemon,
   stopDaemon,
+  healthCheck,
 } from "./daemon";
 import { getProjectTempDirName } from "./pglite";
 
@@ -105,6 +109,69 @@ describe("daemon lifecycle", () => {
 
       // PID file should be removed
       expect(existsSync(pidPath)).toBe(false);
+    });
+  });
+
+  // NEW TESTS FOR IN-PROCESS PGLITESOCKETSERVER
+  describe("PGLiteSocketServer in-process daemon", () => {
+    afterEach(async () => {
+      // Clean up daemon after each test
+      await stopDaemon(testProjectPath);
+    });
+
+    test("startDaemon creates server that accepts connections", async () => {
+      const { port, pid } = await startDaemon({
+        port: 15433,
+        projectPath: testProjectPath,
+      });
+
+      expect(pid).toBe(process.pid); // In-process means current process
+      expect(port).toBe(15433);
+
+      // Verify server is healthy
+      const healthy = await healthCheck({ port: 15433 });
+      expect(healthy).toBe(true);
+    });
+
+    test("stopDaemon closes server cleanly", async () => {
+      await startDaemon({ port: 15434, projectPath: testProjectPath });
+
+      // Verify server is running
+      let healthy = await healthCheck({ port: 15434 });
+      expect(healthy).toBe(true);
+
+      // Stop daemon
+      await stopDaemon(testProjectPath);
+
+      // Verify server is no longer responding
+      healthy = await healthCheck({ port: 15434 });
+      expect(healthy).toBe(false);
+
+      // PID file should be removed
+      const pidPath = getPidFilePath(testProjectPath);
+      expect(existsSync(pidPath)).toBe(false);
+    });
+
+    test("startDaemon reuses existing server", async () => {
+      const info1 = await startDaemon({ port: 15435, projectPath: testProjectPath });
+      const info2 = await startDaemon({ port: 15435, projectPath: testProjectPath });
+
+      expect(info1.pid).toBe(info2.pid);
+      expect(info1.port).toBe(info2.port);
+    });
+
+    test("startDaemon with Unix socket works", async () => {
+      const socketPath = join(tmpdir(), "test-daemon.sock");
+      const { socketPath: returnedPath } = await startDaemon({
+        path: socketPath,
+        projectPath: testProjectPath,
+      });
+
+      expect(returnedPath).toBe(socketPath);
+
+      // Verify server is healthy via socket
+      const healthy = await healthCheck({ path: socketPath });
+      expect(healthy).toBe(true);
     });
   });
 });
