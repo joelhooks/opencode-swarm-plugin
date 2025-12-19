@@ -22,42 +22,16 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Setup npmrc
-        run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > .npmrc
-
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
       - name: Build packages
         run: bun turbo build --filter='!@swarmtools/web'
 
-      # Check what changesets would do without actually doing it
-      - name: Check changesets status
-        id: status
-        run: |
-          # Run changeset status and capture output
-          STATUS=$(bunx changeset status --output=status.json 2>&1) || true
-          
-          if [ -f status.json ]; then
-            # Check if there are any releases (non-ignored packages)
-            RELEASES=$(cat status.json | jq '.releases | length')
-            if [ "$RELEASES" -gt 0 ]; then
-              echo "has_publishable=true" >> $GITHUB_OUTPUT
-              echo "📦 Found $RELEASES package(s) to release"
-              cat status.json | jq -r '.releases[] | "  - \(.name): \(.type)"'
-            else
-              echo "has_publishable=false" >> $GITHUB_OUTPUT
-              echo "📭 No publishable changesets (all ignored or none)"
-            fi
-            rm status.json
-          else
-            # No status file means no changesets at all
-            echo "has_publishable=false" >> $GITHUB_OUTPUT
-            echo "📭 No changesets found"
-          fi
-
+      # Changesets action handles BOTH cases:
+      # 1. If changesets exist → creates/updates version PR
+      # 2. If no changesets (version PR merged) → publishes packages
       - name: Create Release Pull Request or Publish
-        if: steps.status.outputs.has_publishable == 'true'
         id: changesets
         uses: changesets/action@v1
         with:
@@ -67,13 +41,15 @@ jobs:
           commit: "chore: release packages"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Summary
         run: |
-          if [ "${{ steps.status.outputs.has_publishable }}" != "true" ]; then
-            echo "✅ Nothing to release"
-          elif [ "${{ steps.changesets.outputs.published }}" = "true" ]; then
-            echo "🚀 Published packages"
-          else
+          if [ "${{ steps.changesets.outputs.published }}" = "true" ]; then
+            echo "🚀 Published packages:"
+            echo '${{ steps.changesets.outputs.publishedPackages }}' | jq -r '.[] | "  - \(.name)@\(.version)"'
+          elif [ "${{ steps.changesets.outputs.hasChangesets }}" = "true" ]; then
             echo "📝 Release PR created/updated"
+          else
+            echo "✅ No changesets and nothing to publish"
           fi
