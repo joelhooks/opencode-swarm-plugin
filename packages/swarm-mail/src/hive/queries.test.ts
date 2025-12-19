@@ -17,6 +17,7 @@ import {
   getEpicsEligibleForClosure,
   getStaleIssues,
   getStatistics,
+  resolvePartialId,
 } from "./queries.js";
 
 describe("beads/queries", () => {
@@ -564,6 +565,103 @@ describe("beads/queries", () => {
 
       const stale = await getStaleIssues(beads, projectKey, 7);
       expect(stale.map(b => b.id)).toEqual([old1.id, old2.id]);
+    });
+  });
+
+  describe("resolvePartialId", () => {
+    test("returns full ID when given complete hash portion", async () => {
+      const cell = await beads.createCell(projectKey, {
+        title: "Test task",
+        type: "task",
+        priority: 2,
+      });
+
+      // Extract hash portion from ID
+      // Format: {prefix}-{hash}-{timestamp}{random}
+      const parts = cell.id.split("-");
+      const hash = parts[1]; // e.g., "lf2p4u"
+
+      const { resolvePartialId } = await import("./queries.js");
+      const result = await resolvePartialId(beads, projectKey, hash);
+
+      expect(result).toBe(cell.id);
+    });
+
+    test("returns full ID when given partial hash", async () => {
+      const cell = await beads.createCell(projectKey, {
+        title: "Test task",
+        type: "task",
+        priority: 2,
+      });
+
+      const parts = cell.id.split("-");
+      const hash = parts[1];
+      const partialHash = hash.slice(0, 3); // first 3 chars
+
+      const { resolvePartialId } = await import("./queries.js");
+      const result = await resolvePartialId(beads, projectKey, partialHash);
+
+      expect(result).toBe(cell.id);
+    });
+
+    test("returns null when no matches found", async () => {
+      await beads.createCell(projectKey, {
+        title: "Test task",
+        type: "task",
+        priority: 2,
+      });
+
+      const { resolvePartialId } = await import("./queries.js");
+      const result = await resolvePartialId(beads, projectKey, "nonexistent");
+
+      expect(result).toBe(null);
+    });
+
+    test("throws error when multiple cells match (ambiguous)", async () => {
+      // This is edge case - would need hash collision
+      // For now, test that function returns first match consistently
+      const cell1 = await beads.createCell(projectKey, {
+        title: "Test 1",
+        type: "task",
+        priority: 2,
+      });
+
+      const cell2 = await beads.createCell(projectKey, {
+        title: "Test 2",
+        type: "task",
+        priority: 2,
+      });
+
+      // Both should have same hash (same project key)
+      const parts1 = cell1.id.split("-");
+      const parts2 = cell2.id.split("-");
+      
+      // Hashes should be identical for same projectKey
+      expect(parts1[1]).toBe(parts2[1]);
+
+      const { resolvePartialId } = await import("./queries.js");
+      // Should throw when ambiguous
+      await expect(
+        resolvePartialId(beads, projectKey, parts1[1])
+      ).rejects.toThrow(/multiple cells/i);
+    });
+
+    test("ignores deleted cells", async () => {
+      const cell = await beads.createCell(projectKey, {
+        title: "Test task",
+        type: "task",
+        priority: 2,
+      });
+
+      const parts = cell.id.split("-");
+      const hash = parts[1];
+
+      await beads.deleteCell(projectKey, cell.id);
+
+      const { resolvePartialId } = await import("./queries.js");
+      const result = await resolvePartialId(beads, projectKey, hash);
+
+      expect(result).toBe(null);
     });
   });
 

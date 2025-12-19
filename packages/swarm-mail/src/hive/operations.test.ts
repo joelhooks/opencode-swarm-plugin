@@ -435,4 +435,147 @@ describe("operations", () => {
       expect(results[0].type).toBe("bug");
     });
   });
+
+  describe("JSONL sync", () => {
+    it("marks cell dirty after creation", async () => {
+      // Create a cell
+      const cell = await createCell(adapter, projectKey, {
+        title: "Test cell",
+        type: "task",
+        priority: 2,
+      });
+
+      // Cell should be marked dirty
+      const dirtyCells = await adapter.getDirtyCells(projectKey);
+      expect(dirtyCells).toContain(cell.id);
+    });
+
+    it("syncs created cell to JSONL via exportDirtyBeads", async () => {
+      // Create a cell
+      const cell = await createCell(adapter, projectKey, {
+        title: "Test sync",
+        type: "task",
+        priority: 2,
+        description: "Should appear in JSONL",
+      });
+
+      // Import exportDirtyBeads
+      const { exportDirtyBeads } = await import("./jsonl.js");
+
+      // Export dirty beads to JSONL
+      const { jsonl, cellIds } = await exportDirtyBeads(adapter, projectKey);
+
+      // Should have exported the cell
+      expect(cellIds).toContain(cell.id);
+      expect(jsonl).toContain(cell.id);
+      expect(jsonl).toContain("Test sync");
+      expect(jsonl).toContain("Should appear in JSONL");
+
+      // Parse and verify structure
+      const { parseJSONL } = await import("./jsonl.js");
+      const cells = parseJSONL(jsonl);
+      expect(cells.length).toBe(1);
+      expect(cells[0].id).toBe(cell.id);
+      expect(cells[0].title).toBe("Test sync");
+    });
+
+    it("syncs updated cell to JSONL", async () => {
+      // Create a cell
+      const cell = await createCell(adapter, projectKey, {
+        title: "Original",
+        type: "task",
+        priority: 2,
+      });
+
+      // Import and export first time
+      const { exportDirtyBeads } = await import("./jsonl.js");
+      await exportDirtyBeads(adapter, projectKey);
+
+      // Clear dirty flag
+      await adapter.clearDirty(projectKey, cell.id);
+
+      // Update the cell
+      await updateCell(adapter, projectKey, cell.id, {
+        title: "Updated",
+      });
+
+      // Cell should be dirty again
+      const dirtyCells = await adapter.getDirtyCells(projectKey);
+      expect(dirtyCells).toContain(cell.id);
+
+      // Export should include the updated cell
+      const { jsonl } = await exportDirtyBeads(adapter, projectKey);
+      expect(jsonl).toContain("Updated");
+      expect(jsonl).not.toContain("Original");
+    });
+
+    it("syncs closed cell to JSONL", async () => {
+      // Create and close a cell
+      const cell = await createCell(adapter, projectKey, {
+        title: "To close",
+        type: "task",
+        priority: 2,
+      });
+
+      await closeCell(adapter, projectKey, cell.id, "Done");
+
+      // Export
+      const { exportDirtyBeads } = await import("./jsonl.js");
+      const { jsonl } = await exportDirtyBeads(adapter, projectKey);
+
+      // Parse and verify status
+      const { parseJSONL } = await import("./jsonl.js");
+      const cells = parseJSONL(jsonl);
+      const exported = cells.find((c) => c.id === cell.id);
+      expect(exported).toBeDefined();
+      expect(exported?.status).toBe("closed");
+    });
+
+    it("full integration: create → flush → verify JSONL file", async () => {
+      // This test verifies the ENTIRE flow from creation to file write
+      const { mkdtempSync, readFileSync } = await import("node:fs");
+      const { join } = await import("node:path");
+      const { tmpdir } = await import("node:os");
+      
+      // Create temp directory for JSONL file
+      const tempDir = mkdtempSync(join(tmpdir(), "hive-test-"));
+      const jsonlPath = join(tempDir, "issues.jsonl");
+
+      // Create a cell
+      const cell = await createCell(adapter, projectKey, {
+        title: "Full sync test",
+        type: "task",
+        priority: 2,
+        description: "Testing complete flow",
+      });
+
+      // Use FlushManager to write to file
+      const { FlushManager } = await import("./flush-manager.js");
+      const flushManager = new FlushManager({
+        adapter,
+        projectKey,
+        outputPath: jsonlPath,
+      });
+
+      // Flush to file
+      const result = await flushManager.flush();
+
+      // Verify flush happened
+      expect(result.cellsExported).toBe(1);
+      expect(result.bytesWritten).toBeGreaterThan(0);
+
+      // Read and verify file contents
+      const fileContents = readFileSync(jsonlPath, "utf-8");
+      expect(fileContents).toContain(cell.id);
+      expect(fileContents).toContain("Full sync test");
+      expect(fileContents).toContain("Testing complete flow");
+
+      // Parse and verify structure
+      const { parseJSONL } = await import("./jsonl.js");
+      const cells = parseJSONL(fileContents);
+      expect(cells.length).toBe(1);
+      expect(cells[0].id).toBe(cell.id);
+      expect(cells[0].title).toBe("Full sync test");
+    });
+  });
 });

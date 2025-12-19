@@ -85,7 +85,7 @@ describe("JSONL Export/Import", () => {
   });
 
   describe("serializeToJSONL", () => {
-    it("serializes cell to single JSONL line", () => {
+    it("serializes cell to single JSONL line with trailing newline", () => {
       const cell: CellExport = {
         id: "bd-abc123",
         title: "Fix bug",
@@ -102,8 +102,8 @@ describe("JSONL Export/Import", () => {
 
       const line = serializeToJSONL(cell);
 
-      expect(line).not.toContain("\n");
-      expect(JSON.parse(line)).toEqual(cell);
+      expect(line.endsWith("\n")).toBe(true);
+      expect(JSON.parse(line.trim())).toEqual(cell); // trim() to remove trailing \n before parsing
     });
 
     it("serializes cell with dependencies, labels, comments", () => {
@@ -427,6 +427,69 @@ describe("JSONL Export/Import", () => {
 
       expect(result.jsonl).toBe("");
       expect(result.cellIds).toEqual([]);
+    });
+  });
+
+  describe("JSONL newline bug", () => {
+    it("exportToJSONL adds trailing newline so wc -l counts correctly", async () => {
+      await adapter.createCell(projectKey, { title: "Task 1", type: "task" });
+      await adapter.createCell(projectKey, { title: "Task 2", type: "task" });
+
+      const jsonl = await exportToJSONL(adapter, projectKey);
+
+      // Split by newline - should have 2 records + 1 empty string from trailing newline
+      const lines = jsonl.split("\n");
+      const nonEmptyLines = lines.filter((l) => l.trim() !== "");
+
+      expect(nonEmptyLines).toHaveLength(2); // 2 records
+      expect(jsonl.endsWith("\n")).toBe(true); // MUST end with newline for wc -l
+    });
+
+    it("wc -l simulation: count newlines equals record count", async () => {
+      await adapter.createCell(projectKey, { title: "Task 1", type: "task" });
+      await adapter.createCell(projectKey, { title: "Task 2", type: "task" });
+      await adapter.createCell(projectKey, { title: "Task 3", type: "task" });
+
+      const jsonl = await exportToJSONL(adapter, projectKey);
+
+      // wc -l counts newline characters
+      const newlineCount = (jsonl.match(/\n/g) || []).length;
+      const recordCount = parseJSONL(jsonl).length;
+
+      expect(newlineCount).toBe(recordCount); // Each record has exactly one \n
+      expect(newlineCount).toBe(3);
+    });
+
+    it("serializeToJSONL adds newline to each record", () => {
+      const cell: CellExport = {
+        id: "bd-test",
+        title: "Test",
+        status: "open",
+        priority: 2,
+        issue_type: "task",
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
+        dependencies: [],
+        labels: [],
+        comments: [],
+      };
+
+      const line = serializeToJSONL(cell);
+
+      expect(line.endsWith("\n")).toBe(true);
+      expect(line.split("\n").length).toBe(2); // JSON + empty string from \n
+    });
+
+    it("parseJSONL handles files with trailing newlines", () => {
+      const jsonl = [
+        JSON.stringify({ id: "bd-1", title: "A", status: "open", priority: 2, issue_type: "task", created_at: "2024-01-01T00:00:00Z", updated_at: "2024-01-01T00:00:00Z", dependencies: [], labels: [], comments: [] }),
+        JSON.stringify({ id: "bd-2", title: "B", status: "open", priority: 2, issue_type: "task", created_at: "2024-01-01T00:00:00Z", updated_at: "2024-01-01T00:00:00Z", dependencies: [], labels: [], comments: [] }),
+        "", // Trailing newline creates empty line
+      ].join("\n");
+
+      const beads = parseJSONL(jsonl);
+
+      expect(beads).toHaveLength(2); // Should still parse 2 records
     });
   });
 

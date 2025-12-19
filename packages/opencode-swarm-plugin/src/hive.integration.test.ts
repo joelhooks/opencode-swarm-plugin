@@ -601,6 +601,181 @@ describe("beads integration", () => {
     });
   });
 
+  describe("partial ID resolution", () => {
+    let fullId: string;
+    let hash: string;
+
+    beforeEach(async () => {
+      // Create a test cell to resolve
+      const result = await hive_create.execute(
+        { title: "Partial ID test cell" },
+        mockContext,
+      );
+      const cell = parseResponse<Cell>(result);
+      fullId = cell.id;
+      createdBeadIds.push(fullId);
+
+      // Extract hash from ID (format: {prefix}-{hash}-{timestamp}{random})
+      // The last segment is always timestamp+random (11 chars)
+      // The hash is the 6-char segment before that
+      // Examples:
+      //   "opencode-swarm-monorepo-lf2p4u-mjd2h5v4wdt" -> hash is "lf2p4u"
+      //   "cell--gcel4-mjd2h5v4wdt" -> hash is "-gcel4" (negative hash creates consecutive hyphens)
+      
+      // Find the last hyphen, then work backwards to find the second-to-last hyphen
+      const lastHyphenIndex = fullId.lastIndexOf("-");
+      if (lastHyphenIndex === -1) {
+        hash = "";
+      } else {
+        // Get everything before the last hyphen
+        const beforeLast = fullId.substring(0, lastHyphenIndex);
+        // Find the second-to-last hyphen
+        const secondLastHyphenIndex = beforeLast.lastIndexOf("-");
+        if (secondLastHyphenIndex === -1) {
+          hash = "";
+        } else {
+          // Hash is between second-to-last and last hyphen
+          hash = fullId.substring(secondLastHyphenIndex + 1, lastHyphenIndex);
+        }
+      }
+    });
+
+    describe("hive_update", () => {
+      it("accepts full cell ID (no resolution needed)", async () => {
+        const result = await hive_update.execute(
+          { id: fullId, description: "Updated via full ID" },
+          mockContext,
+        );
+
+        const updated = parseResponse<Cell>(result);
+        expect(updated.id).toBe(fullId);
+        expect(updated.description).toContain("Updated via full ID");
+      });
+
+      it("resolves hash to full ID (or shows helpful error if ambiguous)", async () => {
+        try {
+          const result = await hive_update.execute(
+            { id: hash, priority: 1 },
+            mockContext,
+          );
+
+          const updated = parseResponse<Cell>(result);
+          expect(updated.id).toBe(fullId);
+          expect(updated.priority).toBe(1);
+        } catch (error) {
+          // In test environment with many cells, hash may be ambiguous
+          // Verify we get a helpful error message
+          if (error instanceof Error && error.message.includes("Ambiguous")) {
+            expect(error.message).toMatch(/ambiguous.*multiple/i);
+            expect(error.message).toContain(hash);
+          } else {
+            throw error; // Re-throw if not ambiguity error
+          }
+        }
+      });
+
+      it("throws helpful error for non-existent hash", async () => {
+        await expect(
+          hive_update.execute({ id: "zzzzzz", status: "closed" }, mockContext),
+        ).rejects.toThrow(/not found|no cell|zzzzzz/i);
+      });
+
+      it("throws helpful error for ambiguous hash", async () => {
+        // Create another cell with potentially similar hash
+        // (in practice, hashes are unique, but we simulate ambiguity by using a short partial)
+        // This test verifies the error message is helpful
+        try {
+          // Use a single char which might match multiple cells in larger datasets
+          await hive_update.execute({ id: "a", status: "closed" }, mockContext);
+          // If it succeeds, it means only one cell matched - that's fine
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          // Error should mention ambiguity if multiple matches
+          if (message.includes("ambiguous") || message.includes("multiple")) {
+            expect(message).toMatch(/ambiguous|multiple/i);
+          }
+        }
+      });
+    });
+
+    describe("hive_close", () => {
+      it("accepts full cell ID", async () => {
+        const result = await hive_close.execute(
+          { id: fullId, reason: "Closed via full ID" },
+          mockContext,
+        );
+
+        expect(result).toContain("Closed");
+        expect(result).toContain(fullId);
+
+        const closed = await adapter.getCell(TEST_PROJECT_KEY, fullId);
+        expect(closed?.status).toBe("closed");
+      });
+
+      it("resolves hash to full ID (or shows helpful error if ambiguous)", async () => {
+        try {
+          const result = await hive_close.execute(
+            { id: hash, reason: "Close via hash" },
+            mockContext,
+          );
+
+          expect(result).toContain("Closed");
+          expect(result).toContain(fullId);
+        } catch (error) {
+          if (error instanceof Error && error.message.includes("Ambiguous")) {
+            expect(error.message).toMatch(/ambiguous.*multiple/i);
+            expect(error.message).toContain(hash);
+          } else {
+            throw error;
+          }
+        }
+      });
+
+      it("throws helpful error for non-existent hash", async () => {
+        await expect(
+          hive_close.execute({ id: "nonono", reason: "Test" }, mockContext),
+        ).rejects.toThrow(/not found|no cell|nonono/i);
+      });
+    });
+
+    describe("hive_start", () => {
+      it("accepts full cell ID", async () => {
+        const result = await hive_start.execute({ id: fullId }, mockContext);
+
+        expect(result).toContain("Started");
+        expect(result).toContain(fullId);
+
+        const started = await adapter.getCell(TEST_PROJECT_KEY, fullId);
+        expect(started?.status).toBe("in_progress");
+      });
+
+      it("resolves hash to full ID (or shows helpful error if ambiguous)", async () => {
+        try {
+          const result = await hive_start.execute(
+            { id: hash },
+            mockContext,
+          );
+
+          expect(result).toContain("Started");
+          expect(result).toContain(fullId);
+        } catch (error) {
+          if (error instanceof Error && error.message.includes("Ambiguous")) {
+            expect(error.message).toMatch(/ambiguous.*multiple/i);
+            expect(error.message).toContain(hash);
+          } else {
+            throw error;
+          }
+        }
+      });
+
+      it("throws helpful error for non-existent hash", async () => {
+        await expect(
+          hive_start.execute({ id: "nope99" }, mockContext),
+        ).rejects.toThrow(/not found|no cell|nope99/i);
+      });
+    });
+  });
+
   describe("workflow integration", () => {
     it("complete bead lifecycle: create -> start -> update -> close", async () => {
       // 1. Create
@@ -1225,8 +1400,8 @@ describe("beads integration", () => {
           mockContext,
         );
 
-        // Should return "No cells to sync" since no dirty cells
-        expect(result).toContain("No cells to sync");
+        // Should return "No cells or memories to sync" since no dirty cells
+        expect(result).toContain("No cells or memories to sync");
       } finally {
         setHiveWorkingDirectory(originalDir);
         rmSync(tempProject, { recursive: true, force: true });

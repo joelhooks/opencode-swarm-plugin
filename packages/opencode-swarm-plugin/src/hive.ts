@@ -23,6 +23,7 @@ import {
   type HiveAdapter,
   type Cell as AdapterCell,
   getSwarmMail,
+  resolvePartialId,
 } from "swarm-mail";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -790,7 +791,7 @@ export const hive_query = tool({
 export const hive_update = tool({
   description: "Update cell status/description",
   args: {
-    id: tool.schema.string().describe("Cell ID"),
+    id: tool.schema.string().describe("Cell ID or partial hash"),
     status: tool.schema
       .enum(["open", "in_progress", "blocked", "closed"])
       .optional()
@@ -809,26 +810,29 @@ export const hive_update = tool({
     const adapter = await getHiveAdapter(projectKey);
 
     try {
+      // Resolve partial ID to full ID
+      const cellId = await resolvePartialId(adapter, projectKey, validated.id) || validated.id;
+      
       let cell: AdapterCell;
 
       // Status changes use changeCellStatus, other fields use updateCell
       if (validated.status) {
         cell = await adapter.changeCellStatus(
           projectKey,
-          validated.id,
+          cellId,
           validated.status,
         );
       }
 
       // Update other fields if provided
       if (validated.description !== undefined || validated.priority !== undefined) {
-        cell = await adapter.updateCell(projectKey, validated.id, {
+        cell = await adapter.updateCell(projectKey, cellId, {
           description: validated.description,
           priority: validated.priority,
         });
       } else if (!validated.status) {
         // No changes requested
-        const existingCell = await adapter.getCell(projectKey, validated.id);
+        const existingCell = await adapter.getCell(projectKey, cellId);
         if (!existingCell) {
           throw new HiveError(
             `Cell not found: ${validated.id}`,
@@ -838,12 +842,27 @@ export const hive_update = tool({
         cell = existingCell;
       }
 
-      await adapter.markDirty(projectKey, validated.id);
+      await adapter.markDirty(projectKey, cellId);
 
       const formatted = formatCellForOutput(cell!);
       return JSON.stringify(formatted, null, 2);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      
+      // Provide helpful error messages
+      if (message.includes("Ambiguous hash")) {
+        throw new HiveError(
+          `Ambiguous ID '${validated.id}': multiple cells match. Please provide more characters.`,
+          "hive_update",
+        );
+      }
+      if (message.includes("Bead not found") || message.includes("Cell not found")) {
+        throw new HiveError(
+          `No cell found matching ID '${validated.id}'`,
+          "hive_update",
+        );
+      }
+      
       throw new HiveError(
         `Failed to update cell: ${message}`,
         "hive_update",
@@ -858,7 +877,7 @@ export const hive_update = tool({
 export const hive_close = tool({
   description: "Close a cell with reason",
   args: {
-    id: tool.schema.string().describe("Cell ID"),
+    id: tool.schema.string().describe("Cell ID or partial hash"),
     reason: tool.schema.string().describe("Completion reason"),
   },
   async execute(args, ctx) {
@@ -867,17 +886,35 @@ export const hive_close = tool({
     const adapter = await getHiveAdapter(projectKey);
 
     try {
+      // Resolve partial ID to full ID
+      const cellId = await resolvePartialId(adapter, projectKey, validated.id) || validated.id;
+      
       const cell = await adapter.closeCell(
         projectKey,
-        validated.id,
+        cellId,
         validated.reason,
       );
 
-      await adapter.markDirty(projectKey, validated.id);
+      await adapter.markDirty(projectKey, cellId);
 
       return `Closed ${cell.id}: ${validated.reason}`;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      
+      // Provide helpful error messages
+      if (message.includes("Ambiguous hash")) {
+        throw new HiveError(
+          `Ambiguous ID '${validated.id}': multiple cells match. Please provide more characters.`,
+          "hive_close",
+        );
+      }
+      if (message.includes("Bead not found") || message.includes("Cell not found")) {
+        throw new HiveError(
+          `No cell found matching ID '${validated.id}'`,
+          "hive_close",
+        );
+      }
+      
       throw new HiveError(
         `Failed to close cell: ${message}`,
         "hive_close",
@@ -893,24 +930,42 @@ export const hive_start = tool({
   description:
     "Mark a cell as in-progress (shortcut for update --status in_progress)",
   args: {
-    id: tool.schema.string().describe("Cell ID"),
+    id: tool.schema.string().describe("Cell ID or partial hash"),
   },
   async execute(args, ctx) {
     const projectKey = getHiveWorkingDirectory();
     const adapter = await getHiveAdapter(projectKey);
 
     try {
+      // Resolve partial ID to full ID
+      const cellId = await resolvePartialId(adapter, projectKey, args.id) || args.id;
+      
       const cell = await adapter.changeCellStatus(
         projectKey,
-        args.id,
+        cellId,
         "in_progress",
       );
 
-      await adapter.markDirty(projectKey, args.id);
+      await adapter.markDirty(projectKey, cellId);
 
       return `Started: ${cell.id}`;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      
+      // Provide helpful error messages
+      if (message.includes("Ambiguous hash")) {
+        throw new HiveError(
+          `Ambiguous ID '${args.id}': multiple cells match. Please provide more characters.`,
+          "hive_start",
+        );
+      }
+      if (message.includes("Bead not found") || message.includes("Cell not found")) {
+        throw new HiveError(
+          `No cell found matching ID '${args.id}'`,
+          "hive_start",
+        );
+      }
+      
       throw new HiveError(
         `Failed to start cell: ${message}`,
         "hive_start",

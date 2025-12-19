@@ -7,6 +7,7 @@
  * - Epics eligible for closure
  * - Stale issues
  * - Statistics
+ * - Partial ID resolution (hash → full cell ID)
  *
  * Based on steveyegge/beads query patterns.
  *
@@ -321,6 +322,59 @@ export async function getStatistics(
     ready: readyCount,
     by_type,
   };
+}
+
+/**
+ * Resolve partial cell ID hash to full cell ID
+ * 
+ * Cell ID format: {prefix}-{hash}-{timestamp}{random}
+ * This function matches the hash portion (middle segment) and returns the full ID.
+ * 
+ * @param adapter - HiveAdapter instance
+ * @param projectKey - Project key to filter cells
+ * @param partialHash - Full or partial hash to match
+ * @returns Full cell ID if found, null if not found
+ * @throws Error if multiple cells match (ambiguous)
+ * 
+ * @example
+ * // Full hash
+ * await resolvePartialId(adapter, projectKey, "lf2p4u")
+ * // => "opencode-swarm-monorepo-lf2p4u-mjcadqq3fb9"
+ * 
+ * // Partial hash
+ * await resolvePartialId(adapter, projectKey, "lf2")
+ * // => "opencode-swarm-monorepo-lf2p4u-mjcadqq3fb9"
+ */
+export async function resolvePartialId(
+  adapter: HiveAdapter,
+  projectKey: string,
+  partialHash: string,
+): Promise<string | null> {
+  const db = await adapter.getDatabase();
+
+  // Use SQL LIKE with specific pattern for hash segment
+  // Pattern: %-{partialHash}%-% matches hash portion (second segment)
+  // The first % allows any prefix, %-{hash} ensures hash is after first hyphen,
+  // and %-% ensures there's a segment after the hash
+  const result = await db.query<Cell>(
+    `SELECT * FROM beads 
+     WHERE project_key = $1 
+       AND deleted_at IS NULL
+       AND id LIKE $2`,
+    [projectKey, `%-${partialHash}%-%`]
+  );
+
+  if (result.rows.length === 0) {
+    return null;
+  }
+
+  if (result.rows.length > 1) {
+    throw new Error(
+      `Ambiguous hash: multiple cells match '${partialHash}' (found ${result.rows.length} matches)`
+    );
+  }
+
+  return result.rows[0].id;
 }
 
 /**

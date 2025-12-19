@@ -166,3 +166,19 @@ export {
   type MergeResult,
   type MergeOptions,
 } from "./merge.js";
+
+// Query utilities
+export {
+  resolvePartialId,
+  getReadyWork,
+  getBlockedIssues,
+  getEpicsEligibleForClosure,
+  getStaleIssues,
+  getStatistics,
+  type SortPolicy,
+  type ReadyWorkOptions,
+  type BlockedCell,
+  type EpicStatus,
+  type StaleOptions,
+  type Statistics,
+} from "./queries.js";

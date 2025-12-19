@@ -76,9 +76,11 @@ export interface ImportResult {
 
 /**
  * Serialize a bead to a JSONL line
+ *
+ * Returns JSON with trailing newline for proper JSONL format.
  */
 export function serializeToJSONL(cell: CellExport): string {
-  return JSON.stringify(cell);
+  return JSON.stringify(cell) + "\n";
 }
 
 /**
@@ -217,7 +219,8 @@ export async function exportToJSONL(
     lines.push(serializeToJSONL(cellExport));
   }
 
-  return lines.join("\n");
+  // serializeToJSONL already adds \n, so just join without separator
+  return lines.join("");
 }
 
 /**
