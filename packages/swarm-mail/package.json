@@ -40,6 +40,7 @@
   "dependencies": {
     "@electric-sql/pglite": "0.3.14",
     "@electric-sql/pglite-socket": "^0.0.19",
+    "@libsql/client": "^0.15.15",
     "effect": "^3.19.12",
     "minimatch": "^10.1.1",
     "nanoid": "^5.1.6",
