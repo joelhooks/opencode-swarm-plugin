@@ -28,28 +28,81 @@ jobs:
       - name: Build packages
         run: bun turbo build --filter='!@swarmtools/web'
 
-      # Changesets action handles BOTH cases:
-      # 1. If changesets exist → creates/updates version PR
-      # 2. If no changesets (version PR merged) → publishes packages
-      - name: Create Release Pull Request or Publish
-        id: changesets
+      # Detect what state we're in:
+      # - has_changesets: there are changeset files for publishable packages
+      # - needs_publish: no changesets, but local versions > npm versions (version PR was merged)
+      - name: Check release state
+        id: check
+        run: |
+          # Check for publishable changesets
+          bunx changeset status --output=status.json 2>/dev/null || true
+          if [ -f status.json ]; then
+            RELEASES=$(cat status.json | jq '.releases | length')
+            rm status.json
+            if [ "$RELEASES" -gt 0 ]; then
+              echo "state=has_changesets" >> $GITHUB_OUTPUT
+              echo "📦 Found $RELEASES package(s) with changesets"
+              exit 0
+            fi
+          fi
+          
+          # No publishable changesets - check if we need to publish
+          # Compare local versions to npm versions
+          NEEDS_PUBLISH=false
+          
+          for pkg in packages/*/package.json; do
+            NAME=$(cat "$pkg" | jq -r '.name')
+            LOCAL_VERSION=$(cat "$pkg" | jq -r '.version')
+            
+            # Skip ignored packages
+            if [ "$NAME" = "@swarmtools/web" ]; then
+              continue
+            fi
+            
+            NPM_VERSION=$(npm view "$NAME" version 2>/dev/null || echo "0.0.0")
+            
+            if [ "$LOCAL_VERSION" != "$NPM_VERSION" ]; then
+              echo "📦 $NAME: local=$LOCAL_VERSION npm=$NPM_VERSION (needs publish)"
+              NEEDS_PUBLISH=true
+            fi
+          done
+          
+          if [ "$NEEDS_PUBLISH" = "true" ]; then
+            echo "state=needs_publish" >> $GITHUB_OUTPUT
+          else
+            echo "state=nothing" >> $GITHUB_OUTPUT
+            echo "✅ All packages up to date"
+          fi
+
+      # Case 1: Has changesets → create/update version PR
+      - name: Create Release Pull Request
+        if: steps.check.outputs.state == 'has_changesets'
+        id: version
         uses: changesets/action@v1
         with:
           version: bun run ci:version
-          publish: bun run ci:publish
           title: "chore: release packages"
           commit: "chore: release packages"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Case 2: No changesets but versions differ → publish
+      - name: Publish to npm
+        if: steps.check.outputs.state == 'needs_publish'
+        run: bun run ci:publish
+        env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Summary
         run: |
-          if [ "${{ steps.changesets.outputs.published }}" = "true" ]; then
-            echo "🚀 Published packages:"
-            echo '${{ steps.changesets.outputs.publishedPackages }}' | jq -r '.[] | "  - \(.name)@\(.version)"'
-          elif [ "${{ steps.changesets.outputs.hasChangesets }}" = "true" ]; then
-            echo "📝 Release PR created/updated"
-          else
-            echo "✅ No changesets and nothing to publish"
-          fi
+          case "${{ steps.check.outputs.state }}" in
+            has_changesets)
+              echo "📝 Release PR created/updated"
+              ;;
+            needs_publish)
+              echo "🚀 Published packages to npm"
+              ;;
+            *)
+              echo "✅ Nothing to release"
+              ;;
+          esac
