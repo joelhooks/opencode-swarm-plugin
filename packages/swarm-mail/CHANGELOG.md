@@ -1,5 +1,139 @@
 # swarm-mail
 
+## 1.0.0
+
+### Major Changes
+
+- [`230e9aa`](https://github.com/joelhooks/swarm-tools/commit/230e9aa91708610183119680cb5f6924c1089552) Thanks [@joelhooks](https://github.com/joelhooks)! - ## 🐝 The Daemon Awakens: Multi-Process Safety by Default
+
+  PGlite is single-connection. Multiple processes = corruption. We learned this the hard way.
+
+  **Now it just works.**
+
+  ### What Changed
+
+  **Daemon mode is the default.** When you call `getSwarmMail()`, we:
+
+  1. Start an in-process `PGLiteSocketServer` (no external binary!)
+  2. All connections go through this server
+  3. Multiple processes? No problem. They all talk to the same daemon.
+
+  ```typescript
+  // Before: Each process creates its own PGlite → 💥 corruption
+  const swarmMail = await getSwarmMail("/project");
+
+  // After: First process starts daemon, others connect → ✅ safe
+  const swarmMail = await getSwarmMail("/project");
+  ```
+
+  ### Opt-Out (if you must)
+
+  ```bash
+  # Single-process mode (embedded PGlite)
+  SWARM_MAIL_SOCKET=false
+  ```
+
+  ⚠️ Only use embedded mode when you're **certain** only one process accesses the database.
+
+  ### Bonus: 9x Faster Tests
+
+  We added a shared test server pattern. Instead of creating a new PGlite instance per test (~500ms WASM startup), tests share one instance and TRUNCATE between runs.
+
+  | Metric           | Before | After |
+  | ---------------- | ------ | ----- |
+  | adapter.test.ts  | 8.63s  | 0.96s |
+  | Per-test average | 345ms  | 38ms  |
+
+  ### Breaking Change
+
+  If you were relying on embedded mode being the default, set `SWARM_MAIL_SOCKET=false`.
+
+  ### The Architecture
+
+  ```
+  ┌─────────────────────────────────────────┐
+  │  Process 1      Process 2      ...      │
+  │      │              │                   │
+  │      └──────┬───────┘                   │
+  │             ▼                           │
+  │   ┌───────────────────┐                 │
+  │   │ PGLiteSocketServer │ (in-process)   │
+  │   │      + PGlite      │                │
+  │   └───────────────────┘                 │
+  │             │                           │
+  │             ▼                           │
+  │   ┌───────────────────┐                 │
+  │   │   Your Data 🍯    │                 │
+  │   └───────────────────┘                 │
+  └─────────────────────────────────────────┘
+  ```
+
+  No external binaries. No global installs. Just safety.
+
+### Minor Changes
+
+- [`181fdd5`](https://github.com/joelhooks/swarm-tools/commit/181fdd507b957ceb95e069ae71d527d3f7e1b940) Thanks [@joelhooks](https://github.com/joelhooks)! - ## 🛡️ WAL Safety: The Checkpoint That Saved the Hive
+
+  PGlite's Write-Ahead Log nearly ate our lunch. 930 WAL files. 930MB of uncommitted transactions.
+  One WASM OOM crash later, pdf-brain lost 359 documents.
+
+  **Never again.**
+
+  ### What Changed
+
+  **New DatabaseAdapter methods:**
+
+  ```typescript
+  // Force WAL flush to data files
+  await db.checkpoint();
+
+  // Monitor WAL health (default 100MB threshold)
+  const { healthy, message } = await db.checkWalHealth(100);
+
+  // Get raw stats
+  const { walSize, walFileCount } = await db.getWalStats();
+  ```
+
+  **Automatic checkpoints after:**
+
+  - Hive migrations complete
+  - Streams migrations complete
+  - Any batch operation that touches multiple records
+
+  **Health check integration:**
+
+  ```typescript
+  const health = await swarmMail.healthCheck();
+  // { connected: true, walHealth: { healthy: true, message: "WAL healthy: 2.5MB (3 files)" } }
+  ```
+
+  ### Why It Matters
+
+  PGlite in embedded mode accumulates WAL files without explicit CHECKPOINT calls. Each unclean shutdown compounds the problem. Eventually: OOM.
+
+  The fix is simple but critical:
+
+  1. **Checkpoint after batch ops** - forces WAL to data files, allows recycling
+  2. **Monitor WAL size** - warn at 100MB, not 930MB
+  3. **Prefer daemon mode** - single long-lived process handles its own WAL
+
+  ### Deployment Recommendation
+
+  **Use daemon mode in production.** Multiple short-lived PGlite instances compound WAL accumulation. A single daemon process:
+
+  - Owns the database connection
+  - Checkpoints naturally during operation
+  - Cleans up properly on shutdown
+
+  See README.md "Deployment Modes" section for details.
+
+  ### The Lesson
+
+  > "The database doesn't forget. It just waits."
+
+  WAL is a feature, not a bug. But like any feature, it needs care and feeding.
+  Now swarm-mail feeds it automatically.
+
 ## 0.5.0
 
 ### Minor Changes
