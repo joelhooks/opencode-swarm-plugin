@@ -169,13 +169,19 @@ describe("LibSQLAdapter", () => {
 			expect(result.rows[0]).toEqual({ id: "test", content: "hello" });
 		});
 
-		test("performs cosine similarity search", async () => {
+		test("performs cosine similarity search with vector_top_k", async () => {
 			await db.exec(`
 				CREATE TABLE memories (
 					id TEXT PRIMARY KEY,
 					content TEXT,
 					embedding F32_BLOB(4)
 				)
+			`);
+
+			// Create vector index for vector_top_k queries
+			await db.exec(`
+				CREATE INDEX idx_memories_embedding 
+				ON memories(libsql_vector_idx(embedding))
 			`);
 
 			// Insert test vectors
@@ -192,7 +198,10 @@ describe("LibSQLAdapter", () => {
 				);
 			}
 
-			// Search for similar to "auth" - should find id:1 and id:3 first
+			// Search for similar to "auth" using vector_top_k
+			// vector_top_k returns a virtual table with just (id) where id is rowid
+			// Results are already ordered by distance (nearest first)
+			// To get distance, we calculate it separately with vector_distance_cos
 			const queryVector = [1.0, 0.0, 0.0, 0.0];
 			const results = await db.query<{
 				id: string;
@@ -200,12 +209,13 @@ describe("LibSQLAdapter", () => {
 				distance: number;
 			}>(
 				`
-					SELECT id, content, vector_distance_cos(embedding, vector(?)) as distance
-					FROM memories
-					ORDER BY distance ASC
+					SELECT m.id, m.content, 
+					       vector_distance_cos(m.embedding, vector(?)) as distance
+					FROM vector_top_k('idx_memories_embedding', vector(?), 3) AS v
+					JOIN memories m ON m.rowid = v.id
 					LIMIT 2
 				`,
-				[JSON.stringify(queryVector)],
+				[JSON.stringify(queryVector), JSON.stringify(queryVector)],
 			);
 
 			expect(results.rows).toHaveLength(2);

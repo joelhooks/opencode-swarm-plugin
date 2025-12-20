@@ -76,7 +76,12 @@ export async function createLibSQLMemorySchema(db: Client): Promise<void> {
     ON memories(collection)
   `);
 
-  // Vector index is implicit with F32_BLOB column type in libSQL
+  // Vector index for cosine similarity search
+  // libSQL requires explicit index creation for vector_top_k() queries
+  await db.execute(`
+    CREATE INDEX IF NOT EXISTS idx_memories_embedding 
+    ON memories(libsql_vector_idx(embedding))
+  `);
 
   // ========================================================================
   // FTS5 Virtual Table (replaces PostgreSQL GIN index)

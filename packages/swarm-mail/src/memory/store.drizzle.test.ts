@@ -237,6 +237,12 @@ describe("Memory Store (Drizzle) - Vector Search", () => {
       )
     `);
 
+    // Create vector index for vector_top_k queries
+    await client.execute(`
+      CREATE INDEX idx_memories_embedding 
+      ON memories(libsql_vector_idx(embedding))
+    `);
+
     db = createDrizzleClient(client);
     store = createMemoryStore(db);
 

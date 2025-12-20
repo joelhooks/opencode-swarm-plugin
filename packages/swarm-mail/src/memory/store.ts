@@ -147,8 +147,14 @@ export function createMemoryStore(db: SwarmDb) {
     /**
      * Vector similarity search
      *
-     * Uses vector_distance_cos() function for cosine similarity.
+     * Uses vector_top_k() function with libsql_vector_idx for efficient ANN search.
      * Returns results sorted by similarity (highest first).
+     *
+     * libSQL vector search requires:
+     * 1. A vector index: CREATE INDEX ... ON table(libsql_vector_idx(column))
+     * 2. Using vector_top_k() which returns a virtual table with just (id) - the rowid
+     * 3. Joining the virtual table back to get full rows
+     * 4. Calculating distance separately with vector_distance_cos()
      *
      * @param queryEmbedding - 1024-dimensional query vector
      * @param options - Search options (limit, threshold, collection)
@@ -161,30 +167,43 @@ export function createMemoryStore(db: SwarmDb) {
       const { limit = 10, threshold = 0.3, collection } = options;
       const vectorStr = JSON.stringify(queryEmbedding);
 
-      // Build WHERE conditions
-      const conditions = [
-        sql`embedding IS NOT NULL`,
-        sql`1 - vector_distance_cos(embedding, vector(${vectorStr})) >= ${threshold}`,
-      ];
+      // Use vector_top_k for efficient ANN search via the vector index
+      // vector_top_k returns a virtual table with just (id) column - the rowid
+      // Results are already ordered by distance (nearest first)
+      // We calculate distance separately with vector_distance_cos()
+      //
+      // Note: cosine distance (0 = identical, 2 = opposite)
+      // Score = 1 - distance (so 1 = identical, -1 = opposite)
+      const collectionFilter = collection
+        ? sql`AND m.collection = ${collection}`
+        : sql``;
 
-      if (collection) {
-        conditions.push(eq(memories.collection, collection));
-      }
-
-      // Build query with Drizzle + raw SQL for vector operations
-      const results = await db
-        .select({
-          ...getTableColumns(memories),
-          score: sql<number>`1 - vector_distance_cos(embedding, vector(${vectorStr}))`,
-        })
-        .from(memories)
-        .where(and(...conditions))
-        .orderBy(sql`vector_distance_cos(embedding, vector(${vectorStr})) ASC`)
-        .limit(limit);
+      const results = await db.all<{
+        id: string;
+        content: string;
+        metadata: string;
+        collection: string;
+        created_at: string;
+        decay_factor: number;
+        distance: number;
+      }>(sql`
+        SELECT 
+          m.id,
+          m.content,
+          m.metadata,
+          m.collection,
+          m.created_at,
+          m.decay_factor,
+          vector_distance_cos(m.embedding, vector(${vectorStr})) as distance
+        FROM vector_top_k('idx_memories_embedding', vector(${vectorStr}), ${limit * 2}) AS v
+        JOIN memories m ON m.rowid = v.id
+        WHERE (1 - vector_distance_cos(m.embedding, vector(${vectorStr}))) >= ${threshold} ${collectionFilter}
+        LIMIT ${limit}
+      `);
 
       return results.map((row) => ({
-        memory: parseMemoryRow(row),
-        score: row.score,
+        memory: parseMemoryRow(row as unknown as typeof memories.$inferSelect),
+        score: 1 - row.distance, // Convert distance to similarity score
         matchType: "vector" as const,
       }));
     },

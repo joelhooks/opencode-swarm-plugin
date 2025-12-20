@@ -55,7 +55,9 @@ export interface LibSQLConfig {
  * 1. Converts $N to ? in order of appearance
  * 2. Expands the params array to match (duplicating values for reused placeholders)
  *
- * @param sql - SQL string with PostgreSQL placeholders
+ * If SQL already uses ? placeholders (native SQLite style), params are passed through unchanged.
+ *
+ * @param sql - SQL string with PostgreSQL or SQLite placeholders
  * @param params - Original parameters array
  * @returns Object with converted SQL and expanded parameters
  *
@@ -66,12 +68,25 @@ export interface LibSQLConfig {
  * const result = convertPlaceholders("VALUES ($1, $2, $1)", ["a", "b"]);
  * // result.sql = "VALUES (?, ?, ?)"
  * // result.params = ["a", "b", "a"]
+ *
+ * // Already SQLite style - pass through unchanged
+ * const result2 = convertPlaceholders("VALUES (?, ?, ?)", ["a", "b", "c"]);
+ * // result2.sql = "VALUES (?, ?, ?)"
+ * // result2.params = ["a", "b", "c"]
  * ```
  */
 function convertPlaceholders(
 	sql: string,
 	params?: unknown[],
 ): { sql: string; params: unknown[] | undefined } {
+	// Check if SQL contains PostgreSQL-style placeholders ($1, $2, etc.)
+	const hasPgPlaceholders = /\$\d+/.test(sql);
+
+	if (!hasPgPlaceholders) {
+		// SQL already uses ? placeholders or has no placeholders - pass through unchanged
+		return { sql, params };
+	}
+
 	if (!params || params.length === 0) {
 		// No params, just replace placeholders with ?
 		return { sql: sql.replace(/\$\d+/g, "?"), params };
