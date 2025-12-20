@@ -42,7 +42,9 @@
 
 import { Effect } from "effect";
 import { randomBytes } from "node:crypto";
-import type { DatabaseAdapter } from "../types/database.js";
+import { eq } from "drizzle-orm";
+import type { SwarmDb } from "../db/client.js";
+import { memories } from "../db/schema/memory.js";
 import { createMemoryStore, type Memory, type SearchResult } from "./store.js";
 import { makeOllamaLive, Ollama, type MemoryConfig } from "./ollama.js";
 
@@ -98,11 +100,11 @@ export interface HealthStatus {
 /**
  * Create a memory adapter with high-level operations
  *
- * @param db - DatabaseAdapter for PGlite/PostgreSQL
+ * @param db - Drizzle database instance (libSQL)
  * @param config - Ollama configuration
  * @returns Memory adapter instance
  */
-export function createMemoryAdapter(db: DatabaseAdapter, config: MemoryConfig) {
+export function createMemoryAdapter(db: SwarmDb, config: MemoryConfig) {
   const store = createMemoryStore(db);
   const ollamaLayer = makeOllamaLive(config);
 
@@ -324,12 +326,12 @@ export function createMemoryAdapter(db: DatabaseAdapter, config: MemoryConfig) {
         throw new Error(`Memory not found: ${id}`);
       }
 
-      // Update created_at directly via SQL (store() doesn't update timestamps on conflict)
+      // Update created_at directly via Drizzle (store() doesn't update timestamps on conflict)
       const now = new Date();
-      await db.query(
-        "UPDATE memories SET created_at = $1 WHERE id = $2",
-        [now.toISOString(), id]
-      );
+      await db
+        .update(memories)
+        .set({ created_at: now.toISOString() })
+        .where(eq(memories.id, id));
     },
 
     /**
