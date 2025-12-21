@@ -20,7 +20,7 @@ import {
   checkConflicts,
 } from "./projections";
 import { createEvent } from "./events";
-import { isDatabaseHealthy, getDatabaseStats } from "./index";
+// Removed: isDatabaseHealthy, getDatabaseStats (PGlite infrastructure cleanup)
 
 // ============================================================================
 // Constants
@@ -201,6 +201,28 @@ export interface HealthResult {
 }
 
 // ============================================================================
+// Database Helper
+// ============================================================================
+
+/**
+ * Get database adapter for a project path
+ * Creates adapter on-demand for each operation and ensures schema exists
+ */
+async function getProjectDatabase(projectPath: string) {
+  const { getDatabasePath } = await import("./index");
+  const { createLibSQLAdapter } = await import("../libsql");
+  const { createLibSQLStreamsSchema } = await import("./libsql-schema");
+  
+  const dbPath = getDatabasePath(projectPath);
+  const db = await createLibSQLAdapter({ url: `file:${dbPath}` });
+  
+  // Ensure schema exists (idempotent)
+  await createLibSQLStreamsSchema(db);
+  
+  return db;
+}
+
+// ============================================================================
 // Agent Operations
 // ============================================================================
 
@@ -218,13 +240,20 @@ export async function initAgent(
     taskDescription,
   } = options;
 
+  // Get database adapter
+  const db = await getProjectDatabase(projectPath);
+
   // Register the agent (creates event + updates view)
   await registerAgent(
     projectPath, // Use projectPath as projectKey
     agentName,
     { program, model, taskDescription },
     projectPath,
+    db, // Pass database adapter
   );
+
+  // Close database connection
+  await db.close?.();
 
   return {
     projectKey: projectPath,
@@ -253,6 +282,9 @@ export async function sendAgentMessage(
     ackRequired = false,
   } = options;
 
+  // Get database adapter
+  const db = await getProjectDatabase(projectPath);
+
   await sendMessage(
     projectPath,
     fromAgent,
@@ -261,19 +293,30 @@ export async function sendAgentMessage(
     body,
     { threadId, importance, ackRequired },
     projectPath,
+    db, // Pass database adapter
   );
 
   // Get the message ID from the messages table (not the event ID)
-  const { getDatabase } = await import("./index");
-  const db = await getDatabase(projectPath);
-  const result = await db.query<{ id: number }>(
-    `SELECT id FROM messages 
-     WHERE project_key = $1 AND from_agent = $2 AND subject = $3
-     ORDER BY created_at DESC LIMIT 1`,
-    [projectPath, fromAgent, subject],
-  );
+  const { toDrizzleDb } = await import("../libsql.convenience");
+  const { messagesTable } = await import("../db/schema/streams");
+  const { eq, desc, and } = await import("drizzle-orm");
+  
+  const swarmDb = toDrizzleDb(db);
+  const result = await swarmDb
+    .select({ id: messagesTable.id })
+    .from(messagesTable)
+    .where(and(
+      eq(messagesTable.project_key, projectPath),
+      eq(messagesTable.from_agent, fromAgent),
+      eq(messagesTable.subject, subject)
+    ))
+    .orderBy(desc(messagesTable.created_at))
+    .limit(1);
 
-  const messageId = result.rows[0]?.id ?? 0;
+  const messageId = result[0]?.id ?? 0;
+
+  // Close database connection
+  await db.close?.();
 
   return {
     success: true,
@@ -301,6 +344,9 @@ export async function getAgentInbox(
   // Enforce max limit
   const effectiveLimit = Math.min(limit, MAX_INBOX_LIMIT);
 
+  // Get database adapter
+  const db = await getProjectDatabase(projectPath);
+
   const messages = await getInbox(
     projectPath,
     agentName,
@@ -311,7 +357,11 @@ export async function getAgentInbox(
       includeBodies,
     },
     projectPath,
+    db, // Pass database adapter
   );
+
+  // Close database connection
+  await db.close?.();
 
   return {
     messages: messages.map((m) => ({
@@ -335,9 +385,13 @@ export async function readAgentMessage(
 ): Promise<InboxMessage | null> {
   const { projectPath, messageId, agentName, markAsRead = false } = options;
 
-  const message = await getMessage(projectPath, messageId, projectPath);
+  // Get database adapter
+  const db = await getProjectDatabase(projectPath);
+
+  const message = await getMessage(projectPath, messageId, projectPath, db);
 
   if (!message) {
+    await db.close?.();
     return null;
   }
 
@@ -350,8 +404,12 @@ export async function readAgentMessage(
         agent_name: agentName,
       }),
       projectPath,
+      db, // Pass database adapter
     );
   }
+
+  // Close database connection
+  await db.close?.();
 
   return {
     id: message.id,
@@ -370,6 +428,8 @@ export async function readAgentMessage(
 
 /**
  * Reserve files for exclusive editing
+ * 
+ * Now uses DurableLock underneath for actual mutual exclusion
  */
 export async function reserveAgentFiles(
   options: ReserveFilesOptions,
@@ -384,16 +444,21 @@ export async function reserveAgentFiles(
     force = false,
   } = options;
 
+  // Get database adapter
+  const db = await getProjectDatabase(projectPath);
+
   // Check for conflicts first
   const conflicts = await checkConflicts(
     projectPath,
     agentName,
     paths,
     projectPath,
+    db, // Pass database adapter
   );
 
   // If conflicts exist and not forcing, reject reservation
   if (conflicts.length > 0 && !force) {
+    await db.close?.();
     return {
       granted: [],
       conflicts: conflicts.map((c) => ({
@@ -404,13 +469,30 @@ export async function reserveAgentFiles(
     };
   }
 
-  // Only create reservations if no conflicts or force=true
+  // Acquire DurableLocks for each path
+  const { Effect } = await import("effect");
+  const { acquireLock, DurableLockLive } = await import("./effect/lock");
+  
+  const lockHolderIds: string[] = [];
+  
+  for (const path of paths) {
+    const program = Effect.gen(function* (_) {
+      const lock = yield* _(acquireLock(path, { db, ttlSeconds }));
+      return lock.holder;
+    });
+    
+    const holder = await Effect.runPromise(program.pipe(Effect.provide(DurableLockLive)));
+    lockHolderIds.push(holder);
+  }
+
+  // Create reservations with lock holder IDs
   const event = await reserveFiles(
     projectPath,
     agentName,
     paths,
-    { reason, exclusive, ttlSeconds },
+    { reason, exclusive, ttlSeconds, lockHolderIds },
     projectPath,
+    db, // Pass database adapter
   );
 
   // Build granted list
@@ -419,6 +501,9 @@ export async function reserveAgentFiles(
     path,
     expiresAt: event.expires_at,
   }));
+
+  // Close database connection
+  await db.close?.();
 
   return {
     granted,
@@ -432,34 +517,65 @@ export async function reserveAgentFiles(
 
 /**
  * Release file reservations
+ * 
+ * Now uses DurableLock.release() for actual lock release
  */
 export async function releaseAgentFiles(
   options: ReleaseFilesOptions,
 ): Promise<ReleaseFilesResult> {
   const { projectPath, agentName, paths, reservationIds } = options;
 
-  // Get current reservations to count what we're releasing
+  // Get database adapter
+  const db = await getProjectDatabase(projectPath);
+
+  // Get current reservations to count what we're releasing and get lock holders
   const currentReservations = await getActiveReservations(
     projectPath,
     projectPath,
     agentName,
+    db, // Pass database adapter
   );
 
   let releaseCount = 0;
+  let reservationsToRelease: typeof currentReservations = [];
 
   if (paths && paths.length > 0) {
     // Release specific paths
-    releaseCount = currentReservations.filter((r) =>
+    reservationsToRelease = currentReservations.filter((r) =>
       paths.includes(r.path_pattern),
-    ).length;
+    );
+    releaseCount = reservationsToRelease.length;
   } else if (reservationIds && reservationIds.length > 0) {
     // Release by ID
-    releaseCount = currentReservations.filter((r) =>
+    reservationsToRelease = currentReservations.filter((r) =>
       reservationIds.includes(r.id),
-    ).length;
+    );
+    releaseCount = reservationsToRelease.length;
   } else {
     // Release all
+    reservationsToRelease = currentReservations;
     releaseCount = currentReservations.length;
+  }
+
+  // Release DurableLocks for each reservation using stored holder IDs
+  const { Effect } = await import("effect");
+  const { releaseLock, DurableLockLive } = await import("./effect/lock");
+  
+  const lockHolderIds: string[] = [];
+  
+  // Attempt to release locks using stored holder IDs
+  for (const reservation of reservationsToRelease) {
+    if (reservation.lock_holder_id) {
+      lockHolderIds.push(reservation.lock_holder_id);
+      
+      try {
+        const program = releaseLock(reservation.path_pattern, reservation.lock_holder_id, db);
+        await Effect.runPromise(program.pipe(Effect.provide(DurableLockLive)));
+      } catch (error) {
+        // Ignore lock release errors - locks may have already expired (OK)
+        console.warn(`[agent-mail] Failed to release lock for ${reservation.path_pattern}:`, error);
+      }
+    }
   }
 
   // Create release event
@@ -469,9 +585,14 @@ export async function releaseAgentFiles(
       agent_name: agentName,
       paths,
       reservation_ids: reservationIds,
+      lock_holder_ids: lockHolderIds,
     }),
     projectPath,
+    db, // Pass database adapter
   );
+
+  // Close database connection
+  await db.close?.();
 
   return {
     released: releaseCount,
@@ -493,6 +614,9 @@ export async function acknowledgeMessage(
 
   const timestamp = Date.now();
 
+  // Get database adapter
+  const db = await getProjectDatabase(projectPath);
+
   await appendEvent(
     createEvent("message_acked", {
       project_key: projectPath,
@@ -500,7 +624,11 @@ export async function acknowledgeMessage(
       agent_name: agentName,
     }),
     projectPath,
+    db, // Pass database adapter
   );
+
+  // Close database connection
+  await db.close?.();
 
   return {
     acknowledged: true,
@@ -514,22 +642,13 @@ export async function acknowledgeMessage(
 
 /**
  * Check if the agent mail store is healthy
+ * 
+ * @deprecated PGlite infrastructure has been removed. Use createSwarmMailAdapter() instead.
  */
 export async function checkHealth(projectPath?: string): Promise<HealthResult> {
-  const healthy = await isDatabaseHealthy(projectPath);
-
-  if (!healthy) {
-    return {
-      healthy: false,
-      database: "disconnected",
-    };
-  }
-
-  const stats = await getDatabaseStats(projectPath);
-
-  return {
-    healthy: true,
-    database: "connected",
-    stats,
-  };
+  throw new Error(
+    "[agent-mail] checkHealth() has been removed. " +
+    "PGlite infrastructure is deprecated. " +
+    "Use createSwarmMailAdapter() and call adapter.checkHealth() instead."
+  );
 }

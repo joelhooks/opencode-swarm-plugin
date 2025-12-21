@@ -13,6 +13,8 @@ tools:
   - swarm_complete
   - swarm_status
   - swarm_progress
+  - swarm_review
+  - swarm_review_feedback
   - hive_create_epic
   - hive_query
   - swarmmail_init
@@ -442,7 +444,7 @@ for (const subtask of subtasks) {
 }
 ```
 
-### Phase 6: Monitor & Intervene
+### Phase 6: Monitor, Review & Intervene
 
 ```typescript
 // Check progress
@@ -454,8 +456,43 @@ const inbox = await swarmmail_inbox({ limit: 5 });
 // Read specific message if needed
 const message = await swarmmail_read_message({ message_id: N });
 
+// REVIEW COMPLETED WORK (MANDATORY)
+// When a worker reports completion, review before closing
+const reviewPrompt = await swarm_review({
+  project_key,
+  epic_id,
+  task_id: completedSubtaskId,
+  files_touched: ["src/auth/service.ts"]
+});
+
+// Send feedback based on review
+await swarm_review_feedback({
+  project_key,
+  task_id: completedSubtaskId,
+  worker_id: "WorkerName",
+  status: "approved",  // or "needs_changes"
+  summary: "LGTM - auth service looks solid",
+  // For needs_changes, include issues:
+  // issues: JSON.stringify([{ file: "src/auth.ts", line: 42, issue: "Missing null check", suggestion: "Add guard" }])
+});
+
 // Intervene if needed (see Intervention Patterns)
 ```
+
+**Review Workflow (3-Strike Rule):**
+
+1. Worker calls `swarm_complete` → Coordinator notified
+2. Coordinator runs `swarm_review` → Gets diff + epic context
+3. Coordinator evaluates against epic goals
+4. If good: `swarm_review_feedback(status="approved")` → Task closed
+5. If issues: `swarm_review_feedback(status="needs_changes", issues=[...])` → Worker fixes
+6. After 3 rejections → Task marked blocked (architectural problem, not "try harder")
+
+**Review Criteria:**
+- Does work fulfill subtask requirements?
+- Does it serve the overall epic goal?
+- Does it enable downstream tasks?
+- Type safety, no obvious bugs?
 
 ### Phase 7: Aggregate & Complete
 
@@ -777,6 +814,13 @@ One blocker affects multiple subtasks.
 | `swarmmail_release`      | Release file reservations           |
 | `swarmmail_ack`          | Acknowledge message                 |
 | `swarmmail_health`       | Check database health               |
+
+## Swarm Review Quick Reference
+
+| Tool                     | Purpose                                    |
+| ------------------------ | ------------------------------------------ |
+| `swarm_review`           | Generate review prompt with epic context + diff |
+| `swarm_review_feedback`  | Send approval/rejection to worker (3-strike rule) |
 
 ## Full Swarm Flow
 

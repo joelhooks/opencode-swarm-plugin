@@ -88,9 +88,11 @@ Extract from session context:
 
 1. \`swarm_status(epic_id="<epic>", project_key="<path>")\` - Get current state
 2. \`swarmmail_inbox(limit=5)\` - Check for agent messages
-3. **Spawn ready subtasks** - Don't wait, fire them off
-4. **Unblock blocked work** - Resolve dependencies, reassign if needed
-5. **Collect completed work** - Close done subtasks, verify quality
+3. \`swarm_review(project_key, epic_id, task_id, files_touched)\` - Review any completed work
+4. \`swarm_review_feedback(project_key, task_id, worker_id, status, issues)\` - Approve or request changes
+5. **Spawn ready subtasks** - Don't wait, fire them off
+6. **Unblock blocked work** - Resolve dependencies, reassign if needed
+7. **Collect completed work** - Close done subtasks, verify quality
 
 ### Keep the Swarm Cooking
 
