@@ -1790,8 +1790,9 @@ describe("Checkpoint/Recovery Flow (integration)", () => {
       const sessionID = `checkpoint-session-${Date.now()}`;
 
       // Initialize swarm-mail database directly (no Agent Mail needed)
-      const { getDatabase, closeDatabase } = await import("swarm-mail");
-      const db = await getDatabase(uniqueProjectKey);
+      const { getSwarmMailLibSQL, closeSwarmMailLibSQL } = await import("swarm-mail");
+      const swarmMail = await getSwarmMailLibSQL(uniqueProjectKey);
+      const db = await swarmMail.getDatabase();
 
       try {
         const ctx = {
@@ -1865,7 +1866,7 @@ describe("Checkpoint/Recovery Flow (integration)", () => {
         expect(recovery.files_modified).toEqual(["src/test.ts", "src/test2.ts"]);
         expect(recovery).toHaveProperty("last_checkpoint");
       } finally {
-        await closeDatabase(uniqueProjectKey);
+        await closeSwarmMailLibSQL(uniqueProjectKey);
       }
     });
 
@@ -1873,8 +1874,9 @@ describe("Checkpoint/Recovery Flow (integration)", () => {
       const uniqueProjectKey = `${TEST_PROJECT_PATH}-checkpoint-error-${Date.now()}`;
       const sessionID = `checkpoint-error-session-${Date.now()}`;
 
-      const { getDatabase, closeDatabase } = await import("swarm-mail");
-      const db = await getDatabase(uniqueProjectKey);
+      const { getSwarmMailLibSQL, closeSwarmMailLibSQL } = await import("swarm-mail");
+      const swarmMail = await getSwarmMailLibSQL(uniqueProjectKey);
+      const db = await swarmMail.getDatabase();
 
       try {
         const ctx = {
@@ -1912,7 +1914,7 @@ describe("Checkpoint/Recovery Flow (integration)", () => {
           "Hit type error on line 42, need to add explicit types",
         );
       } finally {
-        await closeDatabase(uniqueProjectKey);
+        await closeSwarmMailLibSQL(uniqueProjectKey);
       }
     });
   });
@@ -1922,8 +1924,9 @@ describe("Checkpoint/Recovery Flow (integration)", () => {
       const uniqueProjectKey = `${TEST_PROJECT_PATH}-recover-${Date.now()}`;
       const sessionID = `recover-session-${Date.now()}`;
 
-      const { getDatabase, closeDatabase } = await import("swarm-mail");
-      const db = await getDatabase(uniqueProjectKey);
+      const { getSwarmMailLibSQL, closeSwarmMailLibSQL } = await import("swarm-mail");
+      const swarmMail = await getSwarmMailLibSQL(uniqueProjectKey);
+      const db = await swarmMail.getDatabase();
 
       try {
         const ctx = {
@@ -1983,7 +1986,7 @@ describe("Checkpoint/Recovery Flow (integration)", () => {
           "swarm-coordination",
         ]);
       } finally {
-        await closeDatabase(uniqueProjectKey);
+        await closeSwarmMailLibSQL(uniqueProjectKey);
       }
     });
 
@@ -1991,8 +1994,8 @@ describe("Checkpoint/Recovery Flow (integration)", () => {
       const uniqueProjectKey = `${TEST_PROJECT_PATH}-recover-notfound-${Date.now()}`;
       const sessionID = `recover-notfound-session-${Date.now()}`;
 
-      const { getDatabase, closeDatabase } = await import("swarm-mail");
-      await getDatabase(uniqueProjectKey);
+      const { getSwarmMailLibSQL, closeSwarmMailLibSQL } = await import("swarm-mail");
+      await getSwarmMailLibSQL(uniqueProjectKey);
 
       try {
         const ctx = {
@@ -2015,7 +2018,7 @@ describe("Checkpoint/Recovery Flow (integration)", () => {
         expect(parsed.message).toContain("No checkpoint found");
         expect(parsed.epic_id).toBe("bd-nonexistent-epic");
       } finally {
-        await closeDatabase(uniqueProjectKey);
+        await closeSwarmMailLibSQL(uniqueProjectKey);
       }
     });
   });

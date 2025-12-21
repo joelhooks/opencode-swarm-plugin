@@ -552,6 +552,65 @@ Other cell operations:
 Begin now.`;
 
 /**
+ * Coordinator post-worker checklist - MANDATORY review loop
+ *
+ * This checklist is returned to coordinators after spawning a worker.
+ * It ensures coordinators REVIEW worker output before spawning the next worker.
+ */
+export const COORDINATOR_POST_WORKER_CHECKLIST = `
+## ⚠️ MANDATORY: Post-Worker Review (DO THIS IMMEDIATELY)
+
+**A worker just returned. Before doing ANYTHING else, complete this checklist:**
+
+### Step 1: Check Swarm Mail
+\`\`\`
+swarmmail_inbox()
+swarmmail_read_message(message_id=N)  // Read any messages from the worker
+\`\`\`
+
+### Step 2: Review the Work
+\`\`\`
+swarm_review(
+  project_key="{project_key}",
+  epic_id="{epic_id}",
+  task_id="{task_id}",
+  files_touched=[{files_touched}]
+)
+\`\`\`
+
+This generates a review prompt with:
+- Epic context (what we're trying to achieve)
+- Subtask requirements
+- Git diff of changes
+- Dependency status
+
+### Step 3: Evaluate Against Criteria
+- Does the work fulfill the subtask requirements?
+- Does it serve the overall epic goal?
+- Does it enable downstream tasks?
+- Type safety, no obvious bugs?
+
+### Step 4: Send Feedback
+\`\`\`
+swarm_review_feedback(
+  project_key="{project_key}",
+  task_id="{task_id}",
+  worker_id="{worker_id}",
+  status="approved",  // or "needs_changes"
+  summary="<brief summary>",
+  issues="[]"  // or "[{file, line, issue, suggestion}]"
+)
+\`\`\`
+
+### Step 5: ONLY THEN Continue
+- If approved: Close the cell, spawn next worker
+- If needs_changes: Worker gets feedback, retries (max 3 attempts)
+- If 3 failures: Mark blocked, escalate to human
+
+**⚠️ DO NOT spawn the next worker until review is complete.**
+`;
+
+/**
  * Prompt for self-evaluation before completing a subtask.
  *
  * Agents use this to assess their work quality before marking complete.
@@ -852,6 +911,15 @@ export const swarm_spawn_subtask = tool({
     
     const selectedModel = selectWorkerModel(subtask, config);
 
+    // Generate post-completion instructions for coordinator
+    const filesJoined = args.files.map(f => `"${f}"`).join(", ");
+    const postCompletionInstructions = COORDINATOR_POST_WORKER_CHECKLIST
+      .replace(/{project_key}/g, args.project_path || "$PWD")
+      .replace(/{epic_id}/g, args.epic_id)
+      .replace(/{task_id}/g, args.bead_id)
+      .replace(/{files_touched}/g, filesJoined)
+      .replace(/{worker_id}/g, "worker");  // Will be filled by actual worker name
+
     return JSON.stringify(
       {
         prompt,
@@ -861,6 +929,7 @@ export const swarm_spawn_subtask = tool({
         project_path: args.project_path,
         recovery_context: args.recovery_context,
         recommended_model: selectedModel,
+        post_completion_instructions: postCompletionInstructions,
       },
       null,
       2,

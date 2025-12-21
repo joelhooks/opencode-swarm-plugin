@@ -1133,27 +1133,33 @@ const result2 = await Task(subagent_type="swarm/worker", prompt="<from above>")
 
 **IMPORTANT:** Pass \`project_path\` to \`swarm_spawn_subtask\` so workers can call \`swarmmail_init\`.
 
-### Phase 7: Monitor & Review
+### Phase 7: MANDATORY Review Loop (NON-NEGOTIABLE)
 
-**Check swarm mail regularly:**
-\`\`\`
-swarmmail_inbox()                              # Check for worker messages
-swarmmail_read_message(message_id=N)           # Read specific message
-swarm_status(epic_id, project_key)             # Check overall progress
-\`\`\`
+**⚠️ AFTER EVERY Task() RETURNS, YOU MUST:**
 
-**When a worker reports completion, REVIEW their work:**
-\`\`\`
-swarm_review(project_key, epic_id, task_id, files_touched)  # Generate review prompt with diff
-# Review the code changes against epic goals
-swarm_review_feedback(project_key, task_id, worker_id, status="approved|needs_changes", issues="[...]")
-\`\`\`
+1. **CHECK INBOX** - Worker may have sent messages
+   \`swarmmail_inbox()\`
+   \`swarmmail_read_message(message_id=N)\`
 
-**Review criteria:**
-- Does the work fulfill the subtask requirements?
-- Does it serve the overall epic goal?
-- Does it enable downstream tasks?
-- Type safety, no obvious bugs?
+2. **REVIEW WORK** - Generate review with diff
+   \`swarm_review(project_key, epic_id, task_id, files_touched)\`
+
+3. **EVALUATE** - Does it meet epic goals?
+   - Fulfills subtask requirements?
+   - Serves overall epic goal?
+   - Enables downstream tasks?
+   - Type safety, no obvious bugs?
+
+4. **SEND FEEDBACK** - Approve or request changes
+   \`swarm_review_feedback(project_key, task_id, worker_id, status, issues)\`
+   
+   If approved: Close cell, spawn next worker
+   If needs_changes: Worker retries (max 3 attempts)
+   If 3 failures: Mark blocked, escalate to human
+
+5. **ONLY THEN** - Spawn next worker or complete
+
+**DO NOT skip this. DO NOT batch reviews. Review EACH worker IMMEDIATELY after return.**
 
 **Intervene if:**
 - Worker blocked >5min → unblock or reassign

@@ -18,13 +18,14 @@
  */
 import { createEvent } from "./events";
 // Note: isDatabaseHealthy and getDatabaseStats have been removed (PGlite infrastructure cleanup)
+// Use Drizzle-based implementations that auto-create adapters when dbOverride is not provided
 import {
   checkConflicts,
   getActiveReservations,
   getInbox,
   getMessage,
-} from "./projections";
-import { appendEvent, registerAgent, reserveFiles, sendMessage } from "./store";
+} from "./projections-drizzle";
+import { appendEvent } from "./store-drizzle";
 
 // ============================================================================
 // Constants
@@ -226,12 +227,15 @@ export async function initSwarmAgent(
   } = options;
 
   // Register the agent (creates event + updates view)
-  await registerAgent(
-    projectPath, // Use projectPath as projectKey
-    agentName,
-    { program, model, taskDescription },
-    projectPath,
-  );
+  // Inline the registerAgent logic using appendEvent + createEvent
+  const event = createEvent("agent_registered", {
+    project_key: projectPath,
+    agent_name: agentName,
+    program,
+    model,
+    task_description: taskDescription,
+  });
+  await appendEvent(event, projectPath);
 
   return {
     projectKey: projectPath,
@@ -262,15 +266,18 @@ export async function sendSwarmMessage(
     ackRequired = false,
   } = options;
 
-  await sendMessage(
-    projectPath,
-    fromAgent,
-    toAgents,
+  // Inline the sendMessage logic using appendEvent + createEvent
+  const messageEvent = createEvent("message_sent", {
+    project_key: projectPath,
+    from_agent: fromAgent,
+    to_agents: toAgents,
     subject,
     body,
-    { threadId, importance, ackRequired },
-    projectPath,
-  );
+    thread_id: threadId,
+    importance,
+    ack_required: ackRequired,
+  });
+  await appendEvent(messageEvent, projectPath);
 
   // Get the message ID from the messages table (not the event ID)
   const { getDatabasePath } = await import("./index");
@@ -419,13 +426,17 @@ export async function reserveSwarmFiles(
   );
 
   // Always create reservations - conflicts are warnings, not blockers
-  await reserveFiles(
-    projectPath,
-    agentName,
+  // Inline the reserveFiles logic using appendEvent + createEvent
+  const reserveEvent = createEvent("file_reserved", {
+    project_key: projectPath,
+    agent_name: agentName,
     paths,
-    { reason, exclusive, ttlSeconds },
-    projectPath,
-  );
+    reason,
+    exclusive,
+    ttl_seconds: ttlSeconds,
+    expires_at: Date.now() + ttlSeconds * 1000,
+  });
+  await appendEvent(reserveEvent, projectPath);
 
   // Query the actual reservation IDs from the database
   const reservations = await getActiveReservations(

@@ -174,3 +174,95 @@ describe("formatSubtaskPromptV2", () => {
     expect(result).toContain("semantic-memory_find");
   });
 });
+
+describe("swarm_spawn_subtask tool", () => {
+  test("returns post_completion_instructions field in JSON response", async () => {
+    const { swarm_spawn_subtask } = await import("./swarm-prompts");
+    
+    const result = await swarm_spawn_subtask.execute({
+      bead_id: "test-project-abc123-task1",
+      epic_id: "test-project-abc123-epic1",
+      subtask_title: "Implement feature X",
+      subtask_description: "Add feature X to the system",
+      files: ["src/feature.ts", "src/feature.test.ts"],
+      shared_context: "Epic context here",
+      project_path: "/Users/joel/Code/project",
+    });
+
+    const parsed = JSON.parse(result);
+    expect(parsed).toHaveProperty("post_completion_instructions");
+    expect(typeof parsed.post_completion_instructions).toBe("string");
+  });
+
+  test("post_completion_instructions contains mandatory review steps", async () => {
+    const { swarm_spawn_subtask } = await import("./swarm-prompts");
+    
+    const result = await swarm_spawn_subtask.execute({
+      bead_id: "test-project-abc123-task1",
+      epic_id: "test-project-abc123-epic1",
+      subtask_title: "Implement feature X",
+      files: ["src/feature.ts"],
+      project_path: "/Users/joel/Code/project",
+    });
+
+    const parsed = JSON.parse(result);
+    const instructions = parsed.post_completion_instructions;
+    
+    // Should contain all 5 steps
+    expect(instructions).toContain("Step 1: Check Swarm Mail");
+    expect(instructions).toContain("swarmmail_inbox()");
+    expect(instructions).toContain("Step 2: Review the Work");
+    expect(instructions).toContain("swarm_review");
+    expect(instructions).toContain("Step 3: Evaluate Against Criteria");
+    expect(instructions).toContain("Step 4: Send Feedback");
+    expect(instructions).toContain("swarm_review_feedback");
+    expect(instructions).toContain("Step 5: ONLY THEN Continue");
+  });
+
+  test("post_completion_instructions substitutes placeholders", async () => {
+    const { swarm_spawn_subtask } = await import("./swarm-prompts");
+    
+    const result = await swarm_spawn_subtask.execute({
+      bead_id: "test-project-abc123-task1",
+      epic_id: "test-project-abc123-epic1",
+      subtask_title: "Implement feature X",
+      files: ["src/feature.ts", "src/feature.test.ts"],
+      project_path: "/Users/joel/Code/project",
+    });
+
+    const parsed = JSON.parse(result);
+    const instructions = parsed.post_completion_instructions;
+    
+    // Placeholders should be replaced
+    expect(instructions).toContain("/Users/joel/Code/project");
+    expect(instructions).toContain("test-project-abc123-epic1");
+    expect(instructions).toContain("test-project-abc123-task1");
+    expect(instructions).toContain('"src/feature.ts"');
+    expect(instructions).toContain('"src/feature.test.ts"');
+    
+    // Placeholders should NOT remain
+    expect(instructions).not.toContain("{project_key}");
+    expect(instructions).not.toContain("{epic_id}");
+    expect(instructions).not.toContain("{task_id}");
+    expect(instructions).not.toContain("{files_touched}");
+  });
+
+  test("post_completion_instructions emphasizes mandatory nature", async () => {
+    const { swarm_spawn_subtask } = await import("./swarm-prompts");
+    
+    const result = await swarm_spawn_subtask.execute({
+      bead_id: "test-project-abc123-task1",
+      epic_id: "test-project-abc123-epic1",
+      subtask_title: "Implement feature X",
+      files: ["src/feature.ts"],
+      project_path: "/Users/joel/Code/project",
+    });
+
+    const parsed = JSON.parse(result);
+    const instructions = parsed.post_completion_instructions;
+    
+    // Should have strong language
+    expect(instructions).toMatch(/⚠️|MANDATORY|NON-NEGOTIABLE|DO NOT skip/i);
+    expect(instructions).toContain("DO THIS IMMEDIATELY");
+  });
+});

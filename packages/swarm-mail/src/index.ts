@@ -102,6 +102,7 @@ export { createEvent } from "./streams/events";
 // Projections (now using Drizzle via wrapper functions)
 export {
 	appendEvent,
+	clearAdapterCache,
 	getActiveReservations,
 	getAgent,
 	getEvalRecords,

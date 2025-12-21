@@ -8,11 +8,13 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { mkdir, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
-  resetDatabase,
-  getDatabase,
-  closeDatabase,
+  getSwarmMailLibSQL,
+  clearAdapterCache,
 } from "swarm-mail";
 import {
   swarmmail_init,
@@ -32,7 +34,7 @@ import {
 
 /** Generate unique test database path per test run */
 function testDbPath(prefix = "swarm-mail"): string {
-  return `/tmp/${prefix}-${randomUUID()}`;
+  return join(tmpdir(), `${prefix}-${randomUUID()}`);
 }
 
 /** Track paths created during test for cleanup */
@@ -81,29 +83,23 @@ async function executeTool<T>(
 beforeEach(async () => {
   testPaths = [];
   TEST_DB_PATH = trackPath(testDbPath());
-  await resetDatabase(TEST_DB_PATH);
+  // Create directory for test database
+  await mkdir(TEST_DB_PATH, { recursive: true });
+  // Clear adapter cache to ensure clean state
+  clearAdapterCache();
 });
 
 afterEach(async () => {
-  // Clean up all test databases
+  // Clear all cached adapters
+  clearAdapterCache();
+  
+  // Clean up all test database directories
   for (const path of testPaths) {
     try {
-      // Wipe all data before closing
-      const db = await getDatabase(path);
-      await db.exec(`
-        DELETE FROM message_recipients;
-        DELETE FROM messages;
-        DELETE FROM reservations;
-        DELETE FROM agents;
-        DELETE FROM events;
-        DELETE FROM locks;
-        DELETE FROM cursors;
-        DELETE FROM deferred;
-      `);
+      await rm(path, { recursive: true, force: true });
     } catch {
       // Ignore errors during cleanup
     }
-    await closeDatabase(path);
   }
   testPaths = [];
 });

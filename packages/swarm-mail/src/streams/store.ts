@@ -6,21 +6,66 @@
  *
  * @deprecated Use store-drizzle.ts with DatabaseAdapter
  */
-import { withTiming } from "./index";
+import { withTiming, getDatabasePath } from "./index";
 import type { DatabaseAdapter } from "../types/database";
+import { createLibSQLAdapter } from "../libsql";
+import { createLibSQLStreamsSchema } from "./libsql-schema";
 
 /**
- * Require dbOverride parameter (PGlite getDatabase removed)
+ * Adapter cache to avoid creating multiple instances for the same project
+ * Key: projectPath (or "global" for no projectPath)
  */
-function requireDbOverride(dbOverride?: DatabaseAdapter, fnName?: string): DatabaseAdapter {
-  if (!dbOverride) {
-    throw new Error(
-      `[streams/store] dbOverride parameter is required for ${fnName || "this function"}. ` +
-      "PGlite getDatabase() has been removed. " +
-      "Use store-drizzle.ts functions or pass DatabaseAdapter explicitly."
-    );
+const adapterCache = new Map<string, DatabaseAdapter>();
+
+/**
+ * Clear the adapter cache (primarily for test isolation)
+ * 
+ * In production, adapters are long-lived. In tests, call this in afterEach
+ * to ensure each test gets a fresh database instance.
+ * 
+ * @internal
+ */
+export function clearAdapterCache(): void {
+  adapterCache.clear();
+}
+
+/**
+ * Get or create a DatabaseAdapter
+ * 
+ * If dbOverride is provided, returns it directly (dependency injection).
+ * Otherwise, creates/reuses a cached adapter for the given projectPath.
+ * 
+ * @param dbOverride - Optional explicit adapter (for dependency injection)
+ * @param projectPath - Optional project path (uses global DB if not provided)
+ * @returns DatabaseAdapter instance
+ */
+async function getOrCreateAdapter(
+  dbOverride?: DatabaseAdapter,
+  projectPath?: string,
+): Promise<DatabaseAdapter> {
+  // If explicit adapter provided, use it (dependency injection)
+  if (dbOverride) {
+    return dbOverride;
   }
-  return dbOverride;
+
+  // Determine cache key
+  const cacheKey = projectPath || "global";
+
+  // Check cache
+  const cached = adapterCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  // Create new adapter
+  const dbPath = getDatabasePath(projectPath);
+  const adapter = await createLibSQLAdapter({ url: `file:${dbPath}` });
+  
+  // Initialize schema if needed
+  await createLibSQLStreamsSchema(adapter);
+  
+  adapterCache.set(cacheKey, adapter);
+  return adapter;
 }
 import {
   type AgentEvent,
@@ -82,7 +127,7 @@ export async function appendEvent(
   projectPath?: string,
   dbOverride?: DatabaseAdapter,
 ): Promise<AgentEvent & { id: number; sequence: number }> {
-  const db = requireDbOverride(dbOverride);
+  const db = await getOrCreateAdapter(dbOverride, projectPath);
 
   // Extract common fields
   const { type, project_key, timestamp, ...rest } = event;
@@ -120,7 +165,7 @@ export async function appendEvents(
   dbOverride?: DatabaseAdapter,
 ): Promise<Array<AgentEvent & { id: number; sequence: number }>> {
   return withTiming("appendEvents", async () => {
-    const db = requireDbOverride(dbOverride);
+    const db = await getOrCreateAdapter(dbOverride, projectPath);
     const results: Array<AgentEvent & { id: number; sequence: number }> = [];
 
     await db.exec("BEGIN");
@@ -195,7 +240,7 @@ export async function readEvents(
   dbOverride?: DatabaseAdapter,
 ): Promise<Array<AgentEvent & { id: number; sequence: number }>> {
   return withTiming("readEvents", async () => {
-    const db = requireDbOverride(dbOverride);
+    const db = await getOrCreateAdapter(dbOverride, projectPath);
 
     const conditions: string[] = [];
     const params: unknown[] = [];
@@ -282,7 +327,7 @@ export async function getLatestSequence(
   projectPath?: string,
   dbOverride?: DatabaseAdapter,
 ): Promise<number> {
-  const db = requireDbOverride(dbOverride);
+  const db = await getOrCreateAdapter(dbOverride, projectPath);
 
   const query = projectKey
     ? "SELECT MAX(sequence) as seq FROM events WHERE project_key = $1"
@@ -317,7 +362,7 @@ export async function replayEvents(
 ): Promise<{ eventsReplayed: number; duration: number }> {
   return withTiming("replayEvents", async () => {
     const startTime = Date.now();
-    const db = requireDbOverride(dbOverride);
+    const db = await getOrCreateAdapter(dbOverride, projectPath);
 
     // Optionally clear materialized views
     if (options.clearViews) {
@@ -414,7 +459,7 @@ export async function replayEventsBatched(
     const startTime = Date.now();
     const batchSize = options.batchSize ?? 1000;
     const fromSequence = options.fromSequence ?? 0;
-    const db = requireDbOverride(dbOverride, "replayEventsBatched");
+    const db = await getOrCreateAdapter(dbOverride, projectPath);
 
     // Optionally clear materialized views
     if (options.clearViews) {

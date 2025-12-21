@@ -25,6 +25,7 @@ import {
   registerAgent,
   sendMessage,
   reserveFiles,
+  clearAdapterCache,
 } from "./store";
 import { createEvent } from "./events";
 import { getDatabasePath } from "./index";
@@ -33,6 +34,16 @@ import { createLibSQLAdapter } from "../libsql";
 const getDatabase = async (path: string) => createLibSQLAdapter({ url: `file:${getDatabasePath(path)}` });
 const closeDatabase = async (_path?: string) => {}; // libSQL auto-closes
 const getDatabaseStats = async (_path?: string) => ({ events: 0, agents: 0, messages: 0, reservations: 0 });
+
+// Helper to delete the global database for test isolation
+async function deleteGlobalDatabase(): Promise<void> {
+  const dbPath = getDatabasePath();
+  try {
+    await rm(dbPath, { force: true });
+  } catch {
+    // Ignore if doesn't exist
+  }
+}
 
 // Use unique temp directory for each test run
 let TEST_PROJECT_PATH: string;
@@ -51,6 +62,10 @@ describe("Event Store", () => {
   afterEach(async () => {
     // Close and clean up
     await closeDatabase(TEST_PROJECT_PATH);
+    // Clear adapter cache to ensure test isolation
+    clearAdapterCache();
+    // Delete the global database file
+    await deleteGlobalDatabase();
     try {
       await rm(join(TEST_PROJECT_PATH, ".opencode"), { recursive: true });
     } catch {
