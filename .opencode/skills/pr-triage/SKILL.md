@@ -45,25 +45,69 @@ PR review tools (CodeRabbit) generate MASSIVE comment bodies. Fetching all = ins
 └─────────────────────────────────────────────┘
 ```
 
-## Quick Commands
+## SDK (Recommended)
+
+Use `scripts/pr-comments.ts` for type-safe, Zod-validated operations:
 
 ```bash
-# Metadata only (~100 bytes/comment)
+# List metadata (compact, ~100 bytes/comment)
+bun run scripts/pr-comments.ts list owner/repo 42
+
+# Smart triage with priority sorting
+bun run scripts/pr-comments.ts triage owner/repo 42
+
+# Expand single comment body (when needed)
+bun run scripts/pr-comments.ts expand owner/repo 123456
+
+# Reply to comment
+bun run scripts/pr-comments.ts reply owner/repo 42 123456 "✅ Fixed"
+
+# File-level summary
+bun run scripts/pr-comments.ts summary owner/repo 42
+```
+
+### Programmatic Usage
+
+```typescript
+import {
+  fetchMetadata,
+  fetchBody,
+  reply,
+  triage,
+  refineTriage,
+  extractSeverity,
+  templates,
+} from "./scripts/pr-comments.ts";
+
+// 1. Fetch metadata (compact)
+const comments = await fetchMetadata("owner/repo", 42);
+// → 50 comments = ~5KB
+
+// 2. Smart triage (sorts by priority, flags needsBody)
+const triaged = triage(comments);
+const needBody = triaged.filter(c => c.needsBody);
+// → Usually 3-5 comments need body fetch
+
+// 3. Fetch bodies selectively
+for (const c of needBody) {
+  const full = await fetchBody("owner/repo", c.id);
+  const refined = refineTriage(c, full.body);
+  
+  if (refined.category === "fix-with-code") {
+    // Implement fix...
+    await reply("owner/repo", 42, c.id, templates.fixed("abc123"));
+  }
+}
+```
+
+## Raw gh Commands (Fallback)
+
+```bash
+# Metadata only
 gh api repos/{owner}/{repo}/pulls/{pr}/comments \
   --jq '.[] | {id, path, line, author: .user.login}'
 
-# Group by file
-gh api repos/{owner}/{repo}/pulls/{pr}/comments \
-  --jq 'group_by(.path) | map({file: .[0].path, count: length})'
-
-# Human comments only
-gh api repos/{owner}/{repo}/pulls/{pr}/comments \
-  --jq '[.[] | select(.user.login != "coderabbitai")]'
-
-# Fetch single body (when needed)
-gh api repos/{owner}/{repo}/pulls/comments/{comment_id}
-
-# Reply to comment
+# Reply to comment (note: -F not -f, in_reply_to not in_reply_to_id)
 gh api repos/{owner}/{repo}/pulls/{pr}/comments \
   --method POST \
   -F body="✅ Fixed in abc123" \
@@ -139,4 +183,5 @@ Markers in comment body:
 
 ## References
 
-See `references/gh-api-patterns.md` for complete jq query library, pagination, GraphQL patterns, and rate limit handling.
+- `scripts/pr-comments.ts` - Type-safe SDK with Zod schemas
+- `references/gh-api-patterns.md` - Complete jq query library, pagination, GraphQL patterns
