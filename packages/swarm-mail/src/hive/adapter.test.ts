@@ -369,7 +369,9 @@ describe("Beads Adapter", () => {
       // Expected ID format: {slugified-name}-{hash}-{timestamp}{random}
       // Example: swarm-mail-lf2p4u-mjbneh7mqah
       
-      const testProjectPath = "/Users/joel/Code/joelhooks/opencode-swarm-plugin/packages/swarm-mail";
+      // Use import.meta.dir to get the directory of this test file
+      // Then navigate up to the package root (src/hive -> src -> package root)
+      const testProjectPath = import.meta.dir.split("/").slice(0, -2).join("/");
       const testAdapter = createHiveAdapter(db, testProjectPath);
       
       const bead = await testAdapter.createCell(testProjectPath, {

@@ -13,13 +13,29 @@
  * memory_embeddings table), so this migration path doesn't apply.
  * 
  * This is a one-time migration tool for users upgrading from standalone
- * semantic-memory MCP server (which was PGLite) to swarm-mail (also PGLite).
+ * semantic-memory MCP server (which was PGlite) to swarm-mail (also PGlite).
  */
+
+// Skip all tests if PGLite is not available (it's a devDependency)
+let pgliteAvailable = false;
+let PGlite: typeof import("@electric-sql/pglite").PGlite | undefined;
+let vector: typeof import("@electric-sql/pglite/vector").vector | undefined;
+
+try {
+  const pgliteModule = await import("@electric-sql/pglite");
+  const vectorModule = await import("@electric-sql/pglite/vector");
+  PGlite = pgliteModule.PGlite;
+  vector = vectorModule.vector;
+  pgliteAvailable = true;
+} catch {
+  console.log("PGLite not available, skipping migrate-legacy tests");
+}
+
+const describeIf = pgliteAvailable ? describe : describe.skip;
+
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PGlite } from "@electric-sql/pglite";
-import { vector } from "@electric-sql/pglite/vector";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   migrateLegacyMemories,
@@ -30,7 +46,7 @@ import {
 import { wrapPGlite } from "../pglite.js";
 import { runMigrations } from "../streams/migrations.js";
 
-describe("Legacy Memory Migration", () => {
+describeIf("Legacy Memory Migration", () => {
   let legacyDb: PGlite;
   let targetDb: PGlite;
   let legacyPath: string;
