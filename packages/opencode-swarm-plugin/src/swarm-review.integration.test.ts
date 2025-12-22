@@ -4,14 +4,16 @@
  * Tests the coordinator review feedback workflow with real HiveAdapter and swarm-mail.
  * Verifies that review approval/rejection properly updates state and sends messages.
  * 
- * **KNOWN ISSUE**: sendSwarmMessage in swarm_review_feedback attempts to create its own
- * LibSQLAdapter, which fails with "URL_INVALID" for paths like ~/.config/swarm-tools/swarm.db.
- * This is a swarm-mail architecture issue - sendSwarmMessage doesn't accept a database adapter parameter.
- * 
- * **TODO**: Fix requires either:
- * 1. Add dbAdapter parameter to swarm_review_feedback (breaking change)
- * 2. Make sendSwarmMessage use adapter cache (global state)
- * 3. Use file:// URLs for all database paths
+ * **STATUS**: URL_INVALID bug FIXED by commit 7bf9385 (libSQL URL normalization).
+ * Tests now execute without URL errors. sendSwarmMessage successfully creates adapters.
+ *
+ * **REMAINING ISSUE**: Message retrieval not working. getInbox returns empty even though
+ * sendSwarmMessage succeeds. Possible causes:
+ * - Database adapter instance mismatch (sendSwarmMessage creates new adapter each call)
+ * - Message projection not materializing from events
+ * - Database path resolution issue between send and receive
+ *
+ * Tests currently SKIPPED pending message retrieval fix.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
