@@ -569,14 +569,22 @@ export async function acknowledgeSwarmMessage(
 /**
  * Check if the swarm mail store is healthy
  * 
- * @deprecated PGlite infrastructure has been removed. Use adapter.checkHealth() instead.
+ * Migrated from PGlite to libSQL adapter pattern.
  */
 export async function checkSwarmHealth(
   projectPath?: string,
 ): Promise<SwarmHealthResult> {
-  throw new Error(
-    "[swarm-mail] checkSwarmHealth() has been removed. " +
-    "PGlite infrastructure is deprecated. " +
-    "Use createSwarmMailAdapter() and call adapter.checkHealth() instead."
-  );
+  const { getSwarmMailLibSQL } = await import("../libsql.convenience.js");
+  
+  const swarmMail = await getSwarmMailLibSQL(projectPath);
+  const db = await swarmMail.getDatabase();
+  
+  // Test basic connectivity with a simple query
+  const result = await db.query("SELECT 1 as test");
+  const isHealthy = result.rows.length === 1;
+  
+  return {
+    healthy: isHealthy,
+    database: "libsql",
+  };
 }

@@ -528,6 +528,26 @@ export async function getEvalStatsDrizzle(
 // ============================================================================
 
 /**
+ * Utility: Get or create database adapter with schema initialization
+ * 
+ * CRITICAL: All convenience wrappers MUST call this to ensure schema exists.
+ * Fixes bug where raw adapters (dbOverride) or auto-created adapters
+ * would throw "no such table" errors.
+ */
+async function getOrCreateAdapter(projectPath?: string, dbOverride?: any): Promise<any> {
+  const { getDatabasePath } = await import("./index.js");
+  const { createLibSQLAdapter } = await import("../libsql.js");
+  const { createLibSQLStreamsSchema } = await import("./libsql-schema.js");
+  
+  const db = dbOverride ?? (await createLibSQLAdapter({ url: `file:${getDatabasePath(projectPath)}` }));
+  
+  // CRITICAL: Ensure schema exists (idempotent - safe to call multiple times)
+  await createLibSQLStreamsSchema(db);
+  
+  return db;
+}
+
+/**
  * Convenience wrapper for getAgentsDrizzle that matches the old signature.
  */
 export async function getAgents(
@@ -535,11 +555,9 @@ export async function getAgents(
   projectPath?: string,
   dbOverride?: any,
 ): Promise<Agent[]> {
-  const { getDatabasePath } = await import("./index.js");
-  const { createLibSQLAdapter } = await import("../libsql.js");
   const { toDrizzleDb } = await import("../libsql.convenience.js");
   
-  const db = dbOverride ?? (await createLibSQLAdapter({ url: `file:${getDatabasePath(projectPath)}` }));
+  const db = await getOrCreateAdapter(projectPath, dbOverride);
   const swarmDb = toDrizzleDb(db);
   
   return getAgentsDrizzle(swarmDb, projectKey);
@@ -554,11 +572,9 @@ export async function getAgent(
   projectPath?: string,
   dbOverride?: any,
 ): Promise<Agent | null> {
-  const { getDatabasePath } = await import("./index.js");
-  const { createLibSQLAdapter } = await import("../libsql.js");
   const { toDrizzleDb } = await import("../libsql.convenience.js");
   
-  const db = dbOverride ?? (await createLibSQLAdapter({ url: `file:${getDatabasePath(projectPath)}` }));
+  const db = await getOrCreateAdapter(projectPath, dbOverride);
   const swarmDb = toDrizzleDb(db);
   
   return getAgentDrizzle(swarmDb, projectKey, agentName);
@@ -574,11 +590,9 @@ export async function getInbox(
   projectPath?: string,
   dbOverride?: any,
 ): Promise<Message[]> {
-  const { getDatabasePath } = await import("./index.js");
-  const { createLibSQLAdapter } = await import("../libsql.js");
   const { toDrizzleDb } = await import("../libsql.convenience.js");
   
-  const db = dbOverride ?? (await createLibSQLAdapter({ url: `file:${getDatabasePath(projectPath)}` }));
+  const db = await getOrCreateAdapter(projectPath, dbOverride);
   const swarmDb = toDrizzleDb(db);
   
   return getInboxDrizzle(swarmDb, projectKey, agentName, options);
@@ -593,11 +607,9 @@ export async function getMessage(
   projectPath?: string,
   dbOverride?: any,
 ): Promise<Message | null> {
-  const { getDatabasePath } = await import("./index.js");
-  const { createLibSQLAdapter } = await import("../libsql.js");
   const { toDrizzleDb } = await import("../libsql.convenience.js");
   
-  const db = dbOverride ?? (await createLibSQLAdapter({ url: `file:${getDatabasePath(projectPath)}` }));
+  const db = await getOrCreateAdapter(projectPath, dbOverride);
   const swarmDb = toDrizzleDb(db);
   
   return getMessageDrizzle(swarmDb, projectKey, messageId);
@@ -612,11 +624,9 @@ export async function getThreadMessages(
   projectPath?: string,
   dbOverride?: any,
 ): Promise<Message[]> {
-  const { getDatabasePath } = await import("./index.js");
-  const { createLibSQLAdapter } = await import("../libsql.js");
   const { toDrizzleDb } = await import("../libsql.convenience.js");
   
-  const db = dbOverride ?? (await createLibSQLAdapter({ url: `file:${getDatabasePath(projectPath)}` }));
+  const db = await getOrCreateAdapter(projectPath, dbOverride);
   const swarmDb = toDrizzleDb(db);
   
   return getThreadMessagesDrizzle(swarmDb, projectKey, threadId);
@@ -631,11 +641,9 @@ export async function getActiveReservations(
   agentName?: string,
   dbOverride?: any,
 ): Promise<Reservation[]> {
-  const { getDatabasePath } = await import("./index.js");
-  const { createLibSQLAdapter } = await import("../libsql.js");
   const { toDrizzleDb } = await import("../libsql.convenience.js");
   
-  const db = dbOverride ?? (await createLibSQLAdapter({ url: `file:${getDatabasePath(projectPath)}` }));
+  const db = await getOrCreateAdapter(projectPath, dbOverride);
   const swarmDb = toDrizzleDb(db);
   
   return getActiveReservationsDrizzle(swarmDb, projectKey, agentName);
@@ -650,12 +658,10 @@ export async function checkConflicts(
   paths: string[],
   projectPath?: string,
   dbOverride?: any,
-): Promise<Conflict[]> {
-  const { getDatabasePath } = await import("./index.js");
-  const { createLibSQLAdapter } = await import("../libsql.js");
+): Promise<ConflictResult> {
   const { toDrizzleDb } = await import("../libsql.convenience.js");
   
-  const db = dbOverride ?? (await createLibSQLAdapter({ url: `file:${getDatabasePath(projectPath)}` }));
+  const db = await getOrCreateAdapter(projectPath, dbOverride);
   const swarmDb = toDrizzleDb(db);
   
   return checkConflictsDrizzle(swarmDb, projectKey, agentName, paths);
@@ -666,15 +672,13 @@ export async function checkConflicts(
  */
 export async function getEvalRecords(
   projectKey: string,
-  options?: { limit?: number; strategy?: string },
+  options?: { limit?: number; offset?: number; strategy?: string },
   projectPath?: string,
   dbOverride?: any,
 ): Promise<EvalRecord[]> {
-  const { getDatabasePath } = await import("./index.js");
-  const { createLibSQLAdapter } = await import("../libsql.js");
   const { toDrizzleDb } = await import("../libsql.convenience.js");
   
-  const db = dbOverride ?? (await createLibSQLAdapter({ url: `file:${getDatabasePath(projectPath)}` }));
+  const db = await getOrCreateAdapter(projectPath, dbOverride);
   const swarmDb = toDrizzleDb(db);
   
   return getEvalRecordsDrizzle(swarmDb, projectKey, options);
@@ -688,11 +692,9 @@ export async function getEvalStats(
   projectPath?: string,
   dbOverride?: any,
 ): Promise<EvalStats> {
-  const { getDatabasePath } = await import("./index.js");
-  const { createLibSQLAdapter } = await import("../libsql.js");
   const { toDrizzleDb } = await import("../libsql.convenience.js");
   
-  const db = dbOverride ?? (await createLibSQLAdapter({ url: `file:${getDatabasePath(projectPath)}` }));
+  const db = await getOrCreateAdapter(projectPath, dbOverride);
   const swarmDb = toDrizzleDb(db);
   
   return getEvalStatsDrizzle(swarmDb, projectKey);

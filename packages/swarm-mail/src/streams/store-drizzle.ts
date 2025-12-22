@@ -548,6 +548,26 @@ async function handleSwarmRecoveredDrizzle(
 // ============================================================================
 
 /**
+ * Utility: Get or create database adapter with schema initialization
+ * 
+ * CRITICAL: All convenience wrappers MUST call this to ensure schema exists.
+ * Fixes bug where raw adapters (dbOverride) or auto-created adapters
+ * would throw "no such table" errors.
+ */
+async function getOrCreateAdapter(projectPath?: string, dbOverride?: any): Promise<any> {
+  const { getDatabasePath } = await import("./index.js");
+  const { createLibSQLAdapter } = await import("../libsql.js");
+  const { createLibSQLStreamsSchema } = await import("./libsql-schema.js");
+  
+  const db = dbOverride ?? (await createLibSQLAdapter({ url: getDatabasePath(projectPath) }));
+  
+  // CRITICAL: Ensure schema exists (idempotent - safe to call multiple times)
+  await createLibSQLStreamsSchema(db);
+  
+  return db;
+}
+
+/**
  * Convenience wrapper for appendEventDrizzle that matches the old signature.
  * Gets database from adapter and converts to SwarmDb.
  */
@@ -556,11 +576,9 @@ export async function appendEvent(
   projectPath?: string,
   dbOverride?: any,
 ): Promise<AgentEvent & { id: number; sequence: number }> {
-  const { getDatabasePath } = await import("./index.js");
-  const { createLibSQLAdapter } = await import("../libsql.js");
   const { toDrizzleDb } = await import("../libsql.convenience.js");
   
-  const db = dbOverride ?? (await createLibSQLAdapter({ url: getDatabasePath(projectPath) }));
+  const db = await getOrCreateAdapter(projectPath, dbOverride);
   const swarmDb = toDrizzleDb(db);
   
   return appendEventDrizzle(swarmDb, event);
@@ -582,11 +600,9 @@ export async function readEvents(
   projectPath?: string,
   dbOverride?: any,
 ): Promise<Array<AgentEvent & { id: number; sequence: number }>> {
-  const { getDatabasePath } = await import("./index.js");
-  const { createLibSQLAdapter } = await import("../libsql.js");
   const { toDrizzleDb } = await import("../libsql.convenience.js");
   
-  const db = dbOverride ?? (await createLibSQLAdapter({ url: getDatabasePath(projectPath) }));
+  const db = await getOrCreateAdapter(projectPath, dbOverride);
   const swarmDb = toDrizzleDb(db);
   
   return readEventsDrizzle(swarmDb, options);
@@ -600,11 +616,9 @@ export async function getLatestSequence(
   projectPath?: string,
   dbOverride?: any,
 ): Promise<number> {
-  const { getDatabasePath } = await import("./index.js");
-  const { createLibSQLAdapter } = await import("../libsql.js");
   const { toDrizzleDb } = await import("../libsql.convenience.js");
   
-  const db = dbOverride ?? (await createLibSQLAdapter({ url: getDatabasePath(projectPath) }));
+  const db = await getOrCreateAdapter(projectPath, dbOverride);
   const swarmDb = toDrizzleDb(db);
   
   return getLatestSequenceDrizzle(swarmDb, projectKey);

@@ -424,11 +424,16 @@ describe("Agent Mail Tools", () => {
   // ==========================================================================
 
   describe("reserveAgentFiles", () => {
-    // TODO: Update to use createSwarmMailAdapter() - checkHealth() was removed with PGLite
-    it.skip("grants reservations", async () => {
+    it("grants reservations", async () => {
+      const { createInMemorySwarmMailLibSQL } = await import("../libsql.convenience");
+      const testId = `grants-reservations-${Date.now()}`;
+      const swarmMail = await createInMemorySwarmMailLibSQL(testId);
+      const db = await swarmMail.getDatabase();
+
       const agent = await initAgent({
         projectPath: TEST_PROJECT_PATH,
         agentName: "Worker",
+        dbOverride: db,
       });
 
       const result = await reserveAgentFiles({
@@ -436,21 +441,30 @@ describe("Agent Mail Tools", () => {
         agentName: agent.agentName,
         paths: ["src/auth/**", "src/config.ts"],
         reason: "bd-123: Working on auth",
+        dbOverride: db,
       });
 
       expect(result.granted.length).toBe(2);
       expect(result.conflicts.length).toBe(0);
+
+      await swarmMail.close();
     });
 
-    // TODO: Update to use createSwarmMailAdapter() - checkHealth() was removed with PGLite
-    it.skip("detects conflicts with other agents", async () => {
+    it("detects conflicts with other agents", async () => {
+      const { createInMemorySwarmMailLibSQL } = await import("../libsql.convenience");
+      const testId = `detects-conflicts-${Date.now()}`;
+      const swarmMail = await createInMemorySwarmMailLibSQL(testId);
+      const db = await swarmMail.getDatabase();
+
       const agent1 = await initAgent({
         projectPath: TEST_PROJECT_PATH,
         agentName: "Worker1",
+        dbOverride: db,
       });
       const agent2 = await initAgent({
         projectPath: TEST_PROJECT_PATH,
         agentName: "Worker2",
+        dbOverride: db,
       });
 
       // Agent 1 reserves
@@ -459,6 +473,7 @@ describe("Agent Mail Tools", () => {
         agentName: agent1.agentName,
         paths: ["src/shared.ts"],
         exclusive: true,
+        dbOverride: db,
       });
 
       // Agent 2 tries to reserve same file
@@ -467,21 +482,30 @@ describe("Agent Mail Tools", () => {
         agentName: agent2.agentName,
         paths: ["src/shared.ts"],
         exclusive: true,
+        dbOverride: db,
       });
 
       expect(result.conflicts.length).toBe(1);
       expect(result.conflicts[0]?.holder).toBe("Worker1");
+
+      await swarmMail.close();
     });
 
-    // TODO: Update to use createSwarmMailAdapter() - checkHealth() was removed with PGLite
-    it.skip("allows non-exclusive reservations without conflict", async () => {
+    it("allows non-exclusive reservations without conflict", async () => {
+      const { createInMemorySwarmMailLibSQL } = await import("../libsql.convenience");
+      const testId = `non-exclusive-${Date.now()}`;
+      const swarmMail = await createInMemorySwarmMailLibSQL(testId);
+      const db = await swarmMail.getDatabase();
+
       const agent1 = await initAgent({
         projectPath: TEST_PROJECT_PATH,
         agentName: "Worker1",
+        dbOverride: db,
       });
       const agent2 = await initAgent({
         projectPath: TEST_PROJECT_PATH,
         agentName: "Worker2",
+        dbOverride: db,
       });
 
       // Agent 1 reserves non-exclusively
@@ -490,6 +514,7 @@ describe("Agent Mail Tools", () => {
         agentName: agent1.agentName,
         paths: ["src/shared.ts"],
         exclusive: false,
+        dbOverride: db,
       });
 
       // Agent 2 should not see conflict
@@ -498,16 +523,24 @@ describe("Agent Mail Tools", () => {
         agentName: agent2.agentName,
         paths: ["src/shared.ts"],
         exclusive: true,
+        dbOverride: db,
       });
 
       expect(result.conflicts.length).toBe(0);
+
+      await swarmMail.close();
     });
 
-    // TODO: Update to use createSwarmMailAdapter() - checkHealth() was removed with PGLite
-    it.skip("supports TTL for auto-expiry", async () => {
+    it("supports TTL for auto-expiry", async () => {
+      const { createInMemorySwarmMailLibSQL } = await import("../libsql.convenience");
+      const testId = `ttl-expiry-${Date.now()}`;
+      const swarmMail = await createInMemorySwarmMailLibSQL(testId);
+      const db = await swarmMail.getDatabase();
+
       const agent = await initAgent({
         projectPath: TEST_PROJECT_PATH,
         agentName: "Worker",
+        dbOverride: db,
       });
 
       const result = await reserveAgentFiles({
@@ -515,20 +548,29 @@ describe("Agent Mail Tools", () => {
         agentName: agent.agentName,
         paths: ["src/temp.ts"],
         ttlSeconds: 3600,
+        dbOverride: db,
       });
 
       expect(result.granted[0]?.expiresAt).toBeGreaterThan(Date.now());
+
+      await swarmMail.close();
     });
 
-    // TODO: Update to use createSwarmMailAdapter() - checkHealth() was removed with PGLite
-    it.skip("rejects reservation when conflicts exist (THE FIX)", async () => {
+    it("rejects reservation when conflicts exist (THE FIX)", async () => {
+      const { createInMemorySwarmMailLibSQL } = await import("../libsql.convenience");
+      const testId = `rejects-conflicts-${Date.now()}`;
+      const swarmMail = await createInMemorySwarmMailLibSQL(testId);
+      const db = await swarmMail.getDatabase();
+
       const agent1 = await initAgent({
         projectPath: TEST_PROJECT_PATH,
         agentName: "Agent1",
+        dbOverride: db,
       });
       const agent2 = await initAgent({
         projectPath: TEST_PROJECT_PATH,
         agentName: "Agent2",
+        dbOverride: db,
       });
 
       // Agent1 reserves src/**
@@ -537,6 +579,7 @@ describe("Agent Mail Tools", () => {
         agentName: agent1.agentName,
         paths: ["src/**"],
         reason: "bd-123: Working on src",
+        dbOverride: db,
       });
 
       // Agent2 tries to reserve src/file.ts - should be rejected
@@ -545,6 +588,7 @@ describe("Agent Mail Tools", () => {
         agentName: agent2.agentName,
         paths: ["src/file.ts"],
         reason: "bd-124: Trying to edit file",
+        dbOverride: db,
       });
 
       // No reservations granted
@@ -554,17 +598,25 @@ describe("Agent Mail Tools", () => {
       expect(result.conflicts[0]?.holder).toBe("Agent1");
       expect(result.conflicts[0]?.pattern).toBe("src/**");
       expect(result.conflicts[0]?.path).toBe("src/file.ts");
+
+      await swarmMail.close();
     });
 
-    // TODO: Update to use createSwarmMailAdapter() - checkHealth() was removed with PGLite
-    it.skip("allows reservation with force=true despite conflicts", async () => {
+    it("allows reservation with force=true despite conflicts", async () => {
+      const { createInMemorySwarmMailLibSQL } = await import("../libsql.convenience");
+      const testId = `force-reservation-${Date.now()}`;
+      const swarmMail = await createInMemorySwarmMailLibSQL(testId);
+      const db = await swarmMail.getDatabase();
+
       const agent1 = await initAgent({
         projectPath: TEST_PROJECT_PATH,
         agentName: "Agent1",
+        dbOverride: db,
       });
       const agent2 = await initAgent({
         projectPath: TEST_PROJECT_PATH,
         agentName: "Agent2",
+        dbOverride: db,
       });
 
       // Agent1 reserves src/**
@@ -573,6 +625,7 @@ describe("Agent Mail Tools", () => {
         agentName: agent1.agentName,
         paths: ["src/**"],
         reason: "bd-123: Working on src",
+        dbOverride: db,
       });
 
       // Agent2 forces reservation despite conflict
@@ -582,6 +635,7 @@ describe("Agent Mail Tools", () => {
         paths: ["src/file.ts"],
         reason: "bd-124: Emergency fix",
         force: true,
+        dbOverride: db,
       });
 
       // Reservation granted with force
@@ -590,13 +644,20 @@ describe("Agent Mail Tools", () => {
       // Conflicts still reported
       expect(result.conflicts).toHaveLength(1);
       expect(result.conflicts[0]?.holder).toBe("Agent1");
+
+      await swarmMail.close();
     });
 
-    // TODO: Update to use createSwarmMailAdapter() - checkHealth() was removed with PGLite
-    it.skip("grants reservation when no conflicts exist", async () => {
+    it("grants reservation when no conflicts exist", async () => {
+      const { createInMemorySwarmMailLibSQL } = await import("../libsql.convenience");
+      const testId = `no-conflicts-${Date.now()}`;
+      const swarmMail = await createInMemorySwarmMailLibSQL(testId);
+      const db = await swarmMail.getDatabase();
+
       const agent = await initAgent({
         projectPath: TEST_PROJECT_PATH,
         agentName: "Agent1",
+        dbOverride: db,
       });
 
       // First reservation - no conflicts
@@ -605,21 +666,30 @@ describe("Agent Mail Tools", () => {
         agentName: agent.agentName,
         paths: ["src/new-file.ts"],
         reason: "bd-125: Creating new file",
+        dbOverride: db,
       });
 
       expect(result.granted).toHaveLength(1);
       expect(result.conflicts).toHaveLength(0);
+
+      await swarmMail.close();
     });
 
-    // TODO: Update to use createSwarmMailAdapter() - checkHealth() was removed with PGLite
-    it.skip("rejects multiple conflicting paths atomically", async () => {
+    it("rejects multiple conflicting paths atomically", async () => {
+      const { createInMemorySwarmMailLibSQL } = await import("../libsql.convenience");
+      const testId = `atomic-reject-${Date.now()}`;
+      const swarmMail = await createInMemorySwarmMailLibSQL(testId);
+      const db = await swarmMail.getDatabase();
+
       const agent1 = await initAgent({
         projectPath: TEST_PROJECT_PATH,
         agentName: "Agent1",
+        dbOverride: db,
       });
       const agent2 = await initAgent({
         projectPath: TEST_PROJECT_PATH,
         agentName: "Agent2",
+        dbOverride: db,
       });
 
       // Agent1 reserves multiple paths
@@ -627,6 +697,7 @@ describe("Agent Mail Tools", () => {
         projectPath: TEST_PROJECT_PATH,
         agentName: agent1.agentName,
         paths: ["src/a.ts", "src/b.ts"],
+        dbOverride: db,
       });
 
       // Agent2 tries to reserve same paths - all should be rejected
@@ -634,12 +705,15 @@ describe("Agent Mail Tools", () => {
         projectPath: TEST_PROJECT_PATH,
         agentName: agent2.agentName,
         paths: ["src/a.ts", "src/b.ts", "src/c.ts"], // Mix of conflicts + available
+        dbOverride: db,
       });
 
       // No reservations granted (even for src/c.ts)
       expect(result.granted).toHaveLength(0);
       // Conflicts for the reserved paths
       expect(result.conflicts.length).toBeGreaterThan(0);
+
+      await swarmMail.close();
     });
   });
 
@@ -648,58 +722,82 @@ describe("Agent Mail Tools", () => {
   // ==========================================================================
 
   describe("releaseAgentFiles", () => {
-    // TODO: Update to use createSwarmMailAdapter() - checkHealth() was removed with PGLite
-    it.skip("releases all reservations for agent", async () => {
+    it("releases all reservations for agent", async () => {
+      const { createInMemorySwarmMailLibSQL } = await import("../libsql.convenience");
+      const testId = `release-all-${Date.now()}`;
+      const swarmMail = await createInMemorySwarmMailLibSQL(testId);
+      const db = await swarmMail.getDatabase();
+
       const agent = await initAgent({
         projectPath: TEST_PROJECT_PATH,
         agentName: "Worker",
+        dbOverride: db,
       });
 
       await reserveAgentFiles({
         projectPath: TEST_PROJECT_PATH,
         agentName: agent.agentName,
         paths: ["src/a.ts", "src/b.ts"],
+        dbOverride: db,
       });
 
       const result = await releaseAgentFiles({
         projectPath: TEST_PROJECT_PATH,
         agentName: agent.agentName,
+        dbOverride: db,
       });
 
       expect(result.released).toBe(2);
+
+      await swarmMail.close();
     });
 
-    // TODO: Update to use createSwarmMailAdapter() - checkHealth() was removed with PGLite
-    it.skip("releases specific paths only", async () => {
+    it("releases specific paths only", async () => {
+      const { createInMemorySwarmMailLibSQL } = await import("../libsql.convenience");
+      const testId = `release-specific-${Date.now()}`;
+      const swarmMail = await createInMemorySwarmMailLibSQL(testId);
+      const db = await swarmMail.getDatabase();
+
       const agent = await initAgent({
         projectPath: TEST_PROJECT_PATH,
         agentName: "Worker",
+        dbOverride: db,
       });
 
       await reserveAgentFiles({
         projectPath: TEST_PROJECT_PATH,
         agentName: agent.agentName,
         paths: ["src/a.ts", "src/b.ts"],
+        dbOverride: db,
       });
 
       const result = await releaseAgentFiles({
         projectPath: TEST_PROJECT_PATH,
         agentName: agent.agentName,
         paths: ["src/a.ts"],
+        dbOverride: db,
       });
 
       expect(result.released).toBe(1);
+
+      await swarmMail.close();
     });
 
-    // TODO: Update to use createSwarmMailAdapter() - checkHealth() was removed with PGLite
-    it.skip("allows other agents to reserve after release", async () => {
+    it("allows other agents to reserve after release", async () => {
+      const { createInMemorySwarmMailLibSQL } = await import("../libsql.convenience");
+      const testId = `reserve-after-release-${Date.now()}`;
+      const swarmMail = await createInMemorySwarmMailLibSQL(testId);
+      const db = await swarmMail.getDatabase();
+
       const agent1 = await initAgent({
         projectPath: TEST_PROJECT_PATH,
         agentName: "Worker1",
+        dbOverride: db,
       });
       const agent2 = await initAgent({
         projectPath: TEST_PROJECT_PATH,
         agentName: "Worker2",
+        dbOverride: db,
       });
 
       // Agent 1 reserves then releases
@@ -708,10 +806,12 @@ describe("Agent Mail Tools", () => {
         agentName: agent1.agentName,
         paths: ["src/shared.ts"],
         exclusive: true,
+        dbOverride: db,
       });
       await releaseAgentFiles({
         projectPath: TEST_PROJECT_PATH,
         agentName: agent1.agentName,
+        dbOverride: db,
       });
 
       // Agent 2 should be able to reserve
@@ -720,10 +820,13 @@ describe("Agent Mail Tools", () => {
         agentName: agent2.agentName,
         paths: ["src/shared.ts"],
         exclusive: true,
+        dbOverride: db,
       });
 
       expect(result.conflicts.length).toBe(0);
       expect(result.granted.length).toBe(1);
+
+      await swarmMail.close();
     });
   });
 

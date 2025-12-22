@@ -127,3 +127,156 @@ describe("swarm_recover integration", () => {
 		expect(parsed.found).toBe(false);
 	});
 });
+
+describe("E2E swarm coordination", () => {
+	let testProjectPath: string;
+	let swarmMail: SwarmMailAdapter;
+
+	beforeEach(async () => {
+		// Create temp project directory
+		testProjectPath = join(tmpdir(), `swarm-e2e-${Date.now()}`);
+		mkdirSync(testProjectPath, { recursive: true });
+
+		// Initialize swarm-mail for this project
+		swarmMail = await createInMemorySwarmMailLibSQL(testProjectPath);
+		
+		// Set working directory so hive and swarm tools use this project
+		const { setHiveWorkingDirectory } = await import("./hive");
+		setHiveWorkingDirectory(testProjectPath);
+	});
+
+	afterEach(async () => {
+		// Clean up
+		await swarmMail.close();
+		clearAdapterCache();
+		rmSync(testProjectPath, { recursive: true, force: true });
+	});
+
+	test("full multi-worker coordination flow", async () => {
+		// Import all necessary tools
+		const { hive_create_epic } = await import("./hive");
+		
+		// Step 1: Create epic with 2 subtasks using hive_create_epic
+		const epicResult = await hive_create_epic.execute({
+			epic_title: "E2E Test Epic",
+			epic_description: "Full coordination flow test",
+			subtasks: [
+				{
+					title: "Subtask 1: Setup",
+					priority: 2,
+					files: ["src/setup.ts"],
+				},
+				{
+					title: "Subtask 2: Implementation",
+					priority: 2,
+					files: ["src/impl.ts"],
+				},
+			],
+		});
+
+		// Parse the JSON result to get epic and subtask IDs
+		const epicData = JSON.parse(epicResult);
+		expect(epicData.success).toBe(true);
+		expect(epicData.epic).toBeDefined();
+		expect(epicData.subtasks).toBeDefined();
+		expect(epicData.subtasks.length).toBe(2);
+
+		const epicId = epicData.epic.id;
+		const subtask1Id = epicData.subtasks[0].id;
+		const subtask2Id = epicData.subtasks[1].id;
+
+		// Step 2: Register 2 workers in swarm-mail
+		await swarmMail.registerAgent(testProjectPath, "Worker1", {
+			program: "test",
+			model: "test-model-1",
+		});
+		await swarmMail.registerAgent(testProjectPath, "Worker2", {
+			program: "test",
+			model: "test-model-2",
+		});
+
+		// Step 3: Simulate workers reserving files (parallel coordination)
+		await swarmMail.reserveFiles(
+			testProjectPath,
+			"Worker1",
+			["src/setup.ts"],
+			{
+				reason: `${subtask1Id}: Setup work`,
+				exclusive: true,
+			},
+		);
+
+		await swarmMail.reserveFiles(
+			testProjectPath,
+			"Worker2",
+			["src/impl.ts"],
+			{
+				reason: `${subtask2Id}: Implementation work`,
+				exclusive: true,
+			},
+		);
+
+		// Verify both workers have active reservations
+		const db = await swarmMail.getDatabase();
+		const activeReservationsResult = await db.query<{ path_pattern: string; agent_name: string }>(
+			"SELECT path_pattern, agent_name FROM reservations WHERE agent_name IN (?, ?) AND released_at IS NULL",
+			["Worker1", "Worker2"],
+		);
+		const activeReservations = activeReservationsResult.rows;
+		expect(activeReservations.length).toBe(2);
+		expect(activeReservations.some(r => r.agent_name === "Worker1" && r.path_pattern === "src/setup.ts")).toBe(true);
+		expect(activeReservations.some(r => r.agent_name === "Worker2" && r.path_pattern === "src/impl.ts")).toBe(true);
+
+		// Step 4: Both workers complete their tasks (using swarm_complete)
+		const { swarm_complete } = await import("./swarm-orchestrate");
+		
+		const worker1CompleteResult = await swarm_complete.execute({
+			project_key: testProjectPath,
+			agent_name: "Worker1",
+			bead_id: subtask1Id,
+			summary: "Setup completed",
+			files_touched: ["src/setup.ts"],
+			skip_verification: true,
+			skip_review: true,
+		});
+
+		const worker1Complete = JSON.parse(worker1CompleteResult);
+		expect(worker1Complete.success).toBe(true);
+		expect(worker1Complete.closed).toBe(true);
+
+		const worker2CompleteResult = await swarm_complete.execute({
+			project_key: testProjectPath,
+			agent_name: "Worker2",
+			bead_id: subtask2Id,
+			summary: "Implementation completed",
+			files_touched: ["src/impl.ts"],
+			skip_verification: true,
+			skip_review: true,
+		});
+
+		const worker2Complete = JSON.parse(worker2CompleteResult);
+		expect(worker2Complete.success).toBe(true);
+		expect(worker2Complete.closed).toBe(true);
+
+		// Step 5: Verify completion results
+		// Both workers should have successfully completed their tasks
+		expect(worker1Complete.success).toBe(true);
+		expect(worker1Complete.closed).toBe(true);
+		expect(worker1Complete.bead_id).toBe(subtask1Id);
+		
+		expect(worker2Complete.success).toBe(true);
+		expect(worker2Complete.closed).toBe(true);
+		expect(worker2Complete.bead_id).toBe(subtask2Id);
+		
+		// Step 6: Verify coordination flow completed
+		// SUCCESS CRITERIA MET:
+		// ✅ Epic created with 2 subtasks (hive_create_epic)
+		// ✅ 2 workers registered in swarm-mail
+		// ✅ Workers reserved their respective files (parallel coordination)
+		// ✅ Workers completed tasks (swarm_complete)
+		// ✅ Cells marked as closed (verified via completion response)
+		
+		// This test demonstrates full E2E swarm coordination without
+		// requiring external database or filesystem access
+	});
+});

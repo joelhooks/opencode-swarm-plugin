@@ -21,6 +21,7 @@ import {
 } from "./projections";
 import { createEvent } from "./events";
 import { needsMigration, migrateProjectToGlobal } from "./auto-migrate";
+import type { DatabaseAdapter } from "../types/database";
 // Removed: isDatabaseHealthy, getDatabaseStats (PGlite infrastructure cleanup)
 
 // ============================================================================
@@ -89,6 +90,7 @@ export interface InitAgentOptions {
   program?: string;
   model?: string;
   taskDescription?: string;
+  dbOverride?: DatabaseAdapter;
 }
 
 export interface SendMessageOptions {
@@ -148,6 +150,7 @@ export interface ReserveFilesOptions {
   exclusive?: boolean;
   ttlSeconds?: number;
   force?: boolean;
+  dbOverride?: DatabaseAdapter;
 }
 
 export interface GrantedReservation {
@@ -172,6 +175,7 @@ export interface ReleaseFilesOptions {
   agentName: string;
   paths?: string[];
   reservationIds?: number[];
+  dbOverride?: DatabaseAdapter;
 }
 
 export interface ReleaseFilesResult {
@@ -241,6 +245,7 @@ export async function initAgent(
     program = "opencode",
     model = "unknown",
     taskDescription,
+    dbOverride,
   } = options;
 
   // Auto-migrate old project DBs to global DB (fast check, runs once per project)
@@ -255,7 +260,7 @@ export async function initAgent(
   }
 
   // Get database adapter
-  const db = await getProjectDatabase(projectPath);
+  const db = dbOverride ?? await getProjectDatabase(projectPath);
 
   // Register the agent (creates event + updates view)
   await registerAgent(
@@ -266,8 +271,10 @@ export async function initAgent(
     db, // Pass database adapter
   );
 
-  // Close database connection
-  await db.close?.();
+  // Close database connection (only if we created it)
+  if (!dbOverride) {
+    await db.close?.();
+  }
 
   return {
     projectKey: projectPath,
@@ -456,10 +463,11 @@ export async function reserveAgentFiles(
     exclusive = true,
     ttlSeconds = DEFAULT_TTL_SECONDS,
     force = false,
+    dbOverride,
   } = options;
 
   // Get database adapter
-  const db = await getProjectDatabase(projectPath);
+  const db = dbOverride ?? await getProjectDatabase(projectPath);
 
   // Check for conflicts first
   const conflicts = await checkConflicts(
@@ -472,7 +480,9 @@ export async function reserveAgentFiles(
 
   // If conflicts exist and not forcing, reject reservation
   if (conflicts.length > 0 && !force) {
-    await db.close?.();
+    if (!dbOverride) {
+      await db.close?.();
+    }
     return {
       granted: [],
       conflicts: conflicts.map((c) => ({
@@ -483,20 +493,22 @@ export async function reserveAgentFiles(
     };
   }
 
-  // Acquire DurableLocks for each path
-  const { Effect } = await import("effect");
-  const { acquireLock, DurableLockLive } = await import("./effect/lock");
-  
+  // Acquire DurableLocks for each path (only for exclusive reservations)
   const lockHolderIds: string[] = [];
   
-  for (const path of paths) {
-    const program = Effect.gen(function* (_) {
-      const lock = yield* _(acquireLock(path, { db, ttlSeconds }));
-      return lock.holder;
-    });
+  if (exclusive) {
+    const { Effect } = await import("effect");
+    const { acquireLock, DurableLockLive } = await import("./effect/lock");
     
-    const holder = await Effect.runPromise(program.pipe(Effect.provide(DurableLockLive)));
-    lockHolderIds.push(holder);
+    for (const path of paths) {
+      const program = Effect.gen(function* (_) {
+        const lock = yield* _(acquireLock(path, { db, ttlSeconds }));
+        return lock.holder;
+      });
+      
+      const holder = await Effect.runPromise(program.pipe(Effect.provide(DurableLockLive)));
+      lockHolderIds.push(holder);
+    }
   }
 
   // Create reservations with lock holder IDs
@@ -516,8 +528,10 @@ export async function reserveAgentFiles(
     expiresAt: event.expires_at,
   }));
 
-  // Close database connection
-  await db.close?.();
+  // Close database connection (only if we created it)
+  if (!dbOverride) {
+    await db.close?.();
+  }
 
   return {
     granted,
@@ -537,10 +551,10 @@ export async function reserveAgentFiles(
 export async function releaseAgentFiles(
   options: ReleaseFilesOptions,
 ): Promise<ReleaseFilesResult> {
-  const { projectPath, agentName, paths, reservationIds } = options;
+  const { projectPath, agentName, paths, reservationIds, dbOverride } = options;
 
   // Get database adapter
-  const db = await getProjectDatabase(projectPath);
+  const db = dbOverride ?? await getProjectDatabase(projectPath);
 
   // Get current reservations to count what we're releasing and get lock holders
   const currentReservations = await getActiveReservations(
@@ -605,8 +619,10 @@ export async function releaseAgentFiles(
     db, // Pass database adapter
   );
 
-  // Close database connection
-  await db.close?.();
+  // Close database connection (only if we created it)
+  if (!dbOverride) {
+    await db.close?.();
+  }
 
   return {
     released: releaseCount,
@@ -657,12 +673,15 @@ export async function acknowledgeMessage(
 /**
  * Check if the agent mail store is healthy
  * 
- * @deprecated PGlite infrastructure has been removed. Use createSwarmMailAdapter() instead.
+ * Migrated from PGlite to libSQL adapter pattern.
+ * Delegates to checkSwarmHealth() which uses getSwarmMailLibSQL().
  */
 export async function checkHealth(projectPath?: string): Promise<HealthResult> {
-  throw new Error(
-    "[agent-mail] checkHealth() has been removed. " +
-    "PGlite infrastructure is deprecated. " +
-    "Use createSwarmMailAdapter() and call adapter.checkHealth() instead."
-  );
+  const { checkSwarmHealth } = await import("./swarm-mail.js");
+  const result = await checkSwarmHealth(projectPath);
+  
+  return {
+    healthy: result.healthy,
+    database: result.database,
+  };
 }

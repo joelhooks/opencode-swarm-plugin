@@ -17,6 +17,7 @@ import {
   reserveSwarmFiles,
   releaseSwarmFiles,
   acknowledgeSwarmMessage,
+  checkSwarmHealth,
 } from "./swarm-mail";
 
 describe("swarm-mail", () => {
@@ -173,6 +174,45 @@ describe("swarm-mail", () => {
       });
 
       expect(result.acknowledged).toBe(true);
+    });
+  });
+
+  describe("checkSwarmHealth", () => {
+    test("should return health status without throwing error", async () => {
+      const result = await checkSwarmHealth(TEST_PROJECT);
+
+      expect(result).toBeDefined();
+      expect(result.healthy).toBe(true);
+      expect(result.database).toBe("libsql");
+    });
+
+    test("should work without projectPath (global DB)", async () => {
+      const result = await checkSwarmHealth();
+
+      expect(result).toBeDefined();
+      expect(result.healthy).toBe(true);
+    });
+  });
+
+  describe("getSwarmInbox - schema initialization", () => {
+    test("should not fail with 'no such table' error when using raw adapter", async () => {
+      // Import raw adapter creator to simulate cold start WITHOUT getSwarmMailLibSQL
+      const { createLibSQLAdapter } = await import("../libsql");
+      
+      // Create raw adapter - NO schema initialization
+      const rawDb = await createLibSQLAdapter({ url: ":memory:" });
+
+      // This should NOT throw "no such table: messages"
+      // The wrapper should auto-initialize schema
+      const result = await getSwarmInbox({
+        projectPath: "/test/raw",
+        agentName: "RawAgent",
+        dbOverride: rawDb,
+      });
+
+      expect(result.messages).toBeDefined();
+      expect(Array.isArray(result.messages)).toBe(true);
+      expect(result.messages.length).toBe(0); // Empty inbox is fine
     });
   });
 });
