@@ -347,6 +347,41 @@ OpenCode plugin providing:
 - Learning system (pattern maturity, anti-pattern detection)
 - Skills system (knowledge injection)
 
+## Project Skills
+
+Skills live in `.opencode/skills/` and provide reusable knowledge for agents.
+
+### pr-triage
+
+Context-efficient PR comment handling. Prevents context exhaustion from verbose PR reviews (CodeRabbit, etc).
+
+**Location:** `.opencode/skills/pr-triage/`
+
+**SDK:** `scripts/pr-comments.ts` - Zod-validated TypeScript SDK with CLI
+
+```bash
+# List metadata (compact, ~100 bytes/comment)
+bun run .opencode/skills/pr-triage/scripts/pr-comments.ts list owner/repo 42
+
+# Smart triage with priority sorting
+bun run .opencode/skills/pr-triage/scripts/pr-comments.ts triage owner/repo 42
+
+# Expand single comment body
+bun run .opencode/skills/pr-triage/scripts/pr-comments.ts expand owner/repo 123456
+
+# Reply to comment
+bun run .opencode/skills/pr-triage/scripts/pr-comments.ts reply owner/repo 42 123456 "✅ Fixed"
+```
+
+**Key functions:**
+- `fetchMetadata()` - compact list (~100 bytes/comment vs ~5KB with body)
+- `fetchBody()` - selective body fetch
+- `triage()` - prioritize human > bot root > bot reply
+- `refineTriage()` - categorize after body fetch (fix-with-code, won't-fix, tracked-in-cell)
+- `templates.fixed/wontFix/tracked/batchAck` - response templates
+
+**References:** `references/gh-api-patterns.md` for raw jq patterns
+
 ## Publishing (Changesets + Bun)
 
 This repo uses **Changesets** for versioning and **bun publish** for npm publishing.
