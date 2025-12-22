@@ -55,9 +55,16 @@ import {
 } from "./hive";
 
 import {
+  swarm_broadcast,
+  swarm_checkpoint,
   swarm_progress,
   swarm_status,
 } from "./swarm-orchestrate";
+
+import {
+  semantic_memory_store,
+  semantic_memory_find,
+} from "./memory-tools";
 
 import type { Bead, EpicCreateResult } from "./schemas";
 
@@ -855,6 +862,328 @@ describe("swarm tools adapter wiring", () => {
       expect(result.progress_percent).toBeGreaterThanOrEqual(0);
       
       // If we got here, adapter wiring works!
+    } finally {
+      setHiveWorkingDirectory(originalDir);
+    }
+  });
+
+  /**
+   * TEST: swarm_broadcast works without explicit dbOverride
+   * 
+   * Tests that broadcasting messages goes through DB adapter correctly
+   */
+  it("swarm_broadcast works without explicit dbOverride", async () => {
+    const ctx = createTestContext();
+    const originalDir = getHiveWorkingDirectory();
+    setHiveWorkingDirectory(TEST_DB_PATH);
+
+    try {
+      // Create an epic with subtasks
+      const epic = await executeTool<EpicCreateResult>(
+        hive_create_epic,
+        {
+          epic_title: "Broadcast test epic",
+          subtasks: [
+            { title: "Broadcast subtask 1", priority: 2 },
+          ],
+        },
+        ctx,
+      );
+
+      // Initialize swarm mail
+      await executeTool(
+        swarmmail_init,
+        { project_path: TEST_DB_PATH, agent_name: "BroadcastAgent" },
+        ctx,
+      );
+
+      // Broadcast message (this calls store functions)
+      const result = await executeToolRaw(
+        swarm_broadcast,
+        {
+          project_path: TEST_DB_PATH,
+          agent_name: "BroadcastAgent",
+          epic_id: epic.epic.id,
+          message: "Testing broadcast functionality",
+          importance: "info",
+          files_affected: ["src/test.ts"],
+        },
+        ctx,
+      );
+
+      // Should succeed (no "dbOverride required" error)
+      expect(result).toContain("Broadcast");
+      
+      // If we got here, adapter wiring works!
+      clearSessionState(ctx.sessionID);
+    } finally {
+      setHiveWorkingDirectory(originalDir);
+    }
+  });
+
+  /**
+   * TEST: swarm_checkpoint works without explicit dbOverride
+   * 
+   * Tests that checkpoint creation goes through DB adapter correctly
+   * NOTE: May fail with "no such table: swarm_contexts" (expected - test DB doesn't have that table)
+   * but should NOT fail with "dbOverride required" (that's the bug we're preventing)
+   */
+  it("swarm_checkpoint works without explicit dbOverride", async () => {
+    const ctx = createTestContext();
+    const originalDir = getHiveWorkingDirectory();
+    setHiveWorkingDirectory(TEST_DB_PATH);
+
+    try {
+      // Create an epic with subtask
+      const epic = await executeTool<EpicCreateResult>(
+        hive_create_epic,
+        {
+          epic_title: "Checkpoint test epic",
+          subtasks: [
+            { title: "Checkpoint subtask", priority: 2 },
+          ],
+        },
+        ctx,
+      );
+
+      // Initialize swarm mail
+      await executeTool(
+        swarmmail_init,
+        { project_path: TEST_DB_PATH, agent_name: "CheckpointAgent" },
+        ctx,
+      );
+
+      // Create checkpoint (this calls store functions)
+      const result = await executeToolRaw(
+        swarm_checkpoint,
+        {
+          project_key: TEST_DB_PATH,
+          agent_name: "CheckpointAgent",
+          bead_id: epic.subtasks[0].id,
+          epic_id: epic.epic.id,
+          files_modified: ["src/test.ts"],
+          progress_percent: 50,
+          directives: {
+            shared_context: "Testing checkpoint",
+          },
+        },
+        ctx,
+      );
+
+      // Key test: did NOT throw "dbOverride required" error
+      // Result may contain error message about missing table (that's OK - test DB doesn't have swarm_contexts)
+      // But it should NOT contain "dbOverride parameter is required"
+      expect(result).not.toContain("dbOverride parameter is required");
+      expect(result).not.toContain("dbOverride required");
+      
+      // If we got here, adapter wiring works!
+      // (Even if checkpoint failed for OTHER reasons like missing table)
+      clearSessionState(ctx.sessionID);
+    } finally {
+      setHiveWorkingDirectory(originalDir);
+    }
+  });
+});
+
+// ============================================================================
+// MEMORY TOOLS - Adapter Wiring Tests
+// ============================================================================
+
+describe("memory tools adapter wiring", () => {
+  /**
+   * TEST: semantic_memory_store works without explicit dbOverride
+   * 
+   * Tests that storing memories goes through DB adapter correctly
+   */
+  it("semantic_memory_store works without explicit dbOverride", async () => {
+    const ctx = createTestContext();
+
+    // Store a memory (this calls store functions)
+    const result = await executeTool<{ id: string }>(
+      semantic_memory_store,
+      {
+        information: "Test memory for adapter wiring verification",
+        tags: "test,memory",
+      },
+      ctx,
+    );
+
+    // Should succeed (no "dbOverride required" error)
+    expect(result.id).toBeTruthy();
+    expect(result.id).toMatch(/^mem_/);
+    
+    // If we got here, adapter wiring works!
+  });
+
+  /**
+   * TEST: semantic_memory_find works without explicit dbOverride
+   * 
+   * Tests that finding memories goes through DB adapter correctly
+   */
+  it("semantic_memory_find works without explicit dbOverride", async () => {
+    const ctx = createTestContext();
+
+    // Store a memory first
+    const stored = await executeTool<{ id: string }>(
+      semantic_memory_store,
+      {
+        information: "OAuth refresh tokens need 5min buffer before expiry",
+        metadata: "auth,tokens,oauth",
+        tags: "auth,integration-test",
+      },
+      ctx,
+    );
+
+    expect(stored.id).toBeTruthy();
+
+    // Find the memory (this calls store functions)
+    const result = await executeToolRaw(
+      semantic_memory_find,
+      {
+        query: "OAuth tokens buffer",
+        limit: 5,
+      },
+      ctx,
+    );
+
+    // Should succeed (no "dbOverride required" error)
+    expect(result).toContain("OAuth");
+    expect(result).toContain("buffer");
+    
+    // If we got here, adapter wiring works!
+  });
+});
+
+// ============================================================================
+// SMOKE TEST - Full Workflow Integration
+// ============================================================================
+
+describe("smoke test - all tools in sequence", () => {
+  /**
+   * CRITICAL INTEGRATION TEST
+   * 
+   * This test runs a COMPLETE workflow using multiple tools in sequence.
+   * If ANY tool has broken adapter wiring, this test fails.
+   * 
+   * This catches interaction bugs that unit tests miss:
+   * - Adapter lifecycle issues
+   * - State corruption between tool calls
+   * - Context loss across layers
+   * - Resource cleanup problems
+   * 
+   * The workflow simulates a real swarm agent task:
+   * 1. Initialize agent
+   * 2. Create work item
+   * 3. Reserve files
+   * 4. Report progress
+   * 5. Store learning
+   * 6. Query learnings
+   * 7. Complete and communicate
+   * 8. Close work item
+   * 9. Release resources
+   */
+  it("runs full workflow without adapter errors", async () => {
+    const ctx = createTestContext();
+    const originalDir = getHiveWorkingDirectory();
+    setHiveWorkingDirectory(TEST_DB_PATH);
+
+    try {
+      // 1. Initialize swarm mail
+      const init = await executeTool<{ agent_name: string; project_key: string }>(
+        swarmmail_init,
+        { project_path: TEST_DB_PATH, agent_name: "SmokeTestAgent" },
+        ctx,
+      );
+      expect(init.agent_name).toBe("SmokeTestAgent");
+
+      // 2. Create a cell
+      const cell = await executeTool<Bead>(
+        hive_create,
+        { title: "Smoke test workflow cell", description: "Full integration test" },
+        ctx,
+      );
+      expect(cell.id).toBeTruthy();
+
+      // 3. Reserve files
+      const reserve = await executeTool<{ granted: Array<{ id: number }> }>(
+        swarmmail_reserve,
+        {
+          paths: ["src/smoke-test-1.ts", "src/smoke-test-2.ts"],
+          reason: `${cell.id}: Smoke test workflow`,
+          exclusive: true,
+        },
+        ctx,
+      );
+      expect(reserve.granted.length).toBe(2);
+
+      // 4. Report progress
+      const progress = await executeToolRaw(
+        swarm_progress,
+        {
+          project_key: TEST_DB_PATH,
+          agent_name: "SmokeTestAgent",
+          bead_id: cell.id,
+          status: "in_progress",
+          message: "Testing workflow integration",
+          progress_percent: 50,
+        },
+        ctx,
+      );
+      expect(progress).toContain("Progress");
+
+      // 5. Store a learning
+      const memory = await executeTool<{ id: string }>(
+        semantic_memory_store,
+        {
+          information: "Smoke test verified full tool adapter wiring works end-to-end",
+          tags: "test,verification",
+        },
+        ctx,
+      );
+      expect(memory.id).toBeTruthy();
+
+      // 6. Find the learning
+      const findResult = await executeToolRaw(
+        semantic_memory_find,
+        { query: "smoke test adapter wiring", limit: 3 },
+        ctx,
+      );
+      expect(findResult).toContain("Smoke test");
+
+      // 7. Send completion message
+      const send = await executeTool<{ success: boolean; message_id: number }>(
+        swarmmail_send,
+        {
+          to: ["coordinator"],
+          subject: `Completed: ${cell.id}`,
+          body: "Smoke test workflow completed successfully",
+          thread_id: cell.id,
+        },
+        ctx,
+      );
+      expect(send.success).toBe(true);
+
+      // 8. Close the cell
+      const close = await executeToolRaw(
+        hive_close,
+        { id: cell.id, reason: "Smoke test workflow completed" },
+        ctx,
+      );
+      expect(close).toContain("Closed");
+
+      // 9. Release files
+      const release = await executeTool<{ released: number }>(
+        swarmmail_release,
+        {},
+        ctx,
+      );
+      expect(release.released).toBe(2);
+
+      // ✅ If we got here, ALL tools work correctly through the adapter!
+      // No "dbOverride required" errors occurred.
+      // This proves the full tool → store → DB path is intact.
+      
+      clearSessionState(ctx.sessionID);
     } finally {
       setHiveWorkingDirectory(originalDir);
     }
