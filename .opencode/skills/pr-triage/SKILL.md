@@ -1,6 +1,6 @@
 ---
 name: pr-triage
-description: "Context-efficient PR comment triage. Fetch metadata first, bodies selectively. Prevents context exhaustion from verbose PR reviews."
+description: "Context-efficient PR comment triage. Evaluate, decide, act. Fix important issues, resolve the rest silently."
 tags:
   - pr
   - review
@@ -9,179 +9,140 @@ tags:
   - context-efficiency
 ---
 
-# PR Comment Triage - Context-Efficient Workflow
+# PR Comment Triage - Evaluate → Decide → Act
 
-## The Problem
+## Philosophy
 
-PR review tools (CodeRabbit) generate MASSIVE comment bodies. Fetching all = instant context exhaustion.
+**Replies are SECONDARY to addressing concerns.**
 
-## The Solution: Metadata-First
+- Important issue? **FIX IT** → reply with commit ref → resolve
+- Not important? **RESOLVE SILENTLY** → no reply needed
+- Don't reply to every comment - that's noise
+
+## The Workflow
 
 ```
 ┌─────────────────────────────────────────────┐
-│   EFFICIENT PR COMMENT TRIAGE WORKFLOW      │
+│         EVALUATE → DECIDE → ACT             │
 ├─────────────────────────────────────────────┤
 │                                             │
-│  1. METADATA ONLY (compact)                 │
-│     → id, path, line, author                │
-│     → 50 comments = ~5KB not 500KB          │
+│  1. FETCH UNREPLIED (metadata only)         │
+│     → Get root comments without replies     │
+│     → ~100 bytes/comment, paginated         │
 │                                             │
-│  2. CATEGORIZE without bodies               │
-│     → Group by file/severity                │
-│     → Filter by author (skip bots)          │
+│  2. EVALUATE each comment                   │
+│     → Fetch body only if path looks important│
+│     → Skip: metadata files, style nits      │
+│     → Check: security, correctness, tests   │
 │                                             │
-│  3. FETCH BODY selectively                  │
-│     → Human comments: YES                   │
-│     → Bot critical: YES                     │
-│     → Bot suggestions: NO                   │
+│  3. DECIDE action                           │
+│     → FIX: implement change, reply, resolve │
+│     → RESOLVE: close silently, no reply     │
+│     → DEFER: create cell, resolve           │
 │                                             │
-│  4. TRIAGE into buckets                     │
-│     → fix-with-code                         │
-│     → won't-fix                             │
-│     → tracked-in-cell                       │
-│                                             │
-│  5. RESPOND with templates                  │
+│  4. ACT                                     │
+│     → Fix issues in code                    │
+│     → Resolve threads (not reply)           │
+│     → Reply ONLY when you fixed something   │
 │                                             │
 └─────────────────────────────────────────────┘
 ```
 
-## SDK (Recommended)
+## Decision Matrix
 
-Use `scripts/pr-comments.ts` for type-safe, Zod-validated operations:
+| Comment Type | Action | Reply? |
+|--------------|--------|--------|
+| Security/correctness bug | FIX → reply with commit | ✅ Yes |
+| Valid improvement, in scope | FIX → reply with commit | ✅ Yes |
+| Valid but out of scope | Create cell → resolve | ❌ No |
+| Style/formatting nit | Resolve silently | ❌ No |
+| Metadata file (.jsonl, etc) | Resolve silently | ❌ No |
+| Already fixed | Reply with commit → resolve | ✅ Yes |
+| Disagree with suggestion | Resolve silently | ❌ No |
+
+## SDK Commands
 
 ```bash
-# List metadata (compact, ~100 bytes/comment)
-bun run scripts/pr-comments.ts list owner/repo 42
+# Get unreplied root comments (start here)
+bun run scripts/pr-comments.ts unreplied owner/repo 42
 
-# Smart triage with priority sorting
-bun run scripts/pr-comments.ts triage owner/repo 42
-
-# Expand single comment body (when needed)
+# Evaluate: fetch body for specific comment
 bun run scripts/pr-comments.ts expand owner/repo 123456
 
-# Reply to comment
-bun run scripts/pr-comments.ts reply owner/repo 42 123456 "✅ Fixed"
+# Act: resolve without reply (preferred)
+bun run scripts/pr-comments.ts resolve owner/repo 42 123456
 
-# File-level summary
-bun run scripts/pr-comments.ts summary owner/repo 42
+# Act: reply then resolve (only when you fixed something)
+bun run scripts/pr-comments.ts reply owner/repo 42 123456 "✅ Fixed in abc123"
+
+# Helpers
+bun run scripts/pr-comments.ts summary owner/repo 42   # File-level overview
+bun run scripts/pr-comments.ts list owner/repo 42      # All metadata
 ```
 
-### Programmatic Usage
+## Quick Triage Pattern
 
 ```typescript
-import {
-  fetchMetadata,
-  fetchBody,
-  reply,
-  triage,
-  refineTriage,
-  extractSeverity,
-  templates,
-} from "./scripts/pr-comments.ts";
+import { fetchMetadata, fetchBody, resolveThread, reply, getThreadId } from "./scripts/pr-comments.ts";
 
-// 1. Fetch metadata (compact)
 const comments = await fetchMetadata("owner/repo", 42);
-// → 50 comments = ~5KB
 
-// 2. Smart triage (sorts by priority, flags needsBody)
-const triaged = triage(comments);
-const needBody = triaged.filter(c => c.needsBody);
-// → Usually 3-5 comments need body fetch
+// Find unreplied root comments
+const repliedTo = new Set(comments.filter(c => c.inReplyToId).map(c => c.inReplyToId));
+const unreplied = comments.filter(c => !c.inReplyToId && !repliedTo.has(c.id));
 
-// 3. Fetch bodies selectively
-for (const c of needBody) {
-  const full = await fetchBody("owner/repo", c.id);
-  const refined = refineTriage(c, full.body);
-  
-  if (refined.category === "fix-with-code") {
-    // Implement fix...
-    await reply("owner/repo", 42, c.id, templates.fixed("abc123"));
+for (const c of unreplied) {
+  // Skip metadata files - resolve silently
+  if (c.path.endsWith('.jsonl') || c.path.includes('.hive/')) {
+    const threadId = await getThreadId("owner/repo", 42, c.id);
+    if (threadId) await resolveThread("owner/repo", threadId);
+    continue;
   }
+
+  // Evaluate important files
+  const full = await fetchBody("owner/repo", c.id);
+  
+  if (full.body.includes('Critical') || full.body.includes('security')) {
+    // FIX IT, then reply
+    // ... implement fix ...
+    await reply("owner/repo", 42, c.id, "✅ Fixed in abc123");
+  }
+  
+  // Resolve either way
+  const threadId = await getThreadId("owner/repo", 42, c.id);
+  if (threadId) await resolveThread("owner/repo", threadId);
 }
 ```
 
-## Raw gh Commands (Fallback)
+## Skip These (Resolve Silently)
 
-```bash
-# Metadata only
-gh api repos/{owner}/{repo}/pulls/{pr}/comments \
-  --jq '.[] | {id, path, line, author: .user.login}'
+- `.hive/issues.jsonl` - auto-generated metadata
+- `.hive/memories.jsonl` - auto-generated metadata  
+- Changeset formatting suggestions
+- Import ordering nits
+- "Add tracking issue" for intentional skips
+- Style preferences you disagree with
 
-# Reply to comment (note: -F not -f, in_reply_to not in_reply_to_id)
-gh api repos/{owner}/{repo}/pulls/{pr}/comments \
-  --method POST \
-  -F body="✅ Fixed in abc123" \
-  -F in_reply_to={comment_id}
-```
+## Fix These (Reply + Resolve)
 
-## Triage Buckets
+- Security vulnerabilities
+- Correctness bugs
+- Missing error handling
+- Test coverage gaps (if valid)
+- Type safety issues
 
-### fix-with-code
-**Trigger:** Security/correctness issue with clear fix.
+## Context Budget
 
-```markdown
-✅ Fixed in {commit_sha}
+| Action | Context Cost |
+|--------|--------------|
+| `unreplied` | ~100 bytes/comment |
+| `expand` (1 comment) | ~5KB |
+| `resolve` | 0 (GraphQL mutation) |
+| `reply` | ~200 bytes |
 
-{brief explanation}
-```
-
-### won't-fix
-**Trigger:** Stylistic, out-of-scope, or disagree.
-
-```markdown
-Thanks for the suggestion! Not applying because {reason}.
-```
-
-### tracked-in-cell
-**Trigger:** Valid but outside PR scope.
-
-```markdown
-Good catch! Tracked in {cell_id}.
-
-Out of scope for this PR but we'll address it separately.
-```
-
-## Context Budget Rules
-
-| Scenario | Fetch Bodies? | Max |
-|----------|---------------|-----|
-| Initial scan | NO | Unlimited |
-| Human comments | YES | All |
-| Bot critical | YES | Top 5 |
-| Bot warnings | SELECTIVE | 1-2/file |
-| Bot suggestions | NO | Batch ack |
-
-**Rule:** If fetching >10 bodies, you're doing it wrong.
-
-## CodeRabbit Severity
-
-Markers in comment body:
-- `🛑 **Critical**:` - Fix before merge
-- `⚠️ **Warning**:` - Triage for fix vs defer
-- `💡 **Suggestion**:` - Skip unless trivial
-- `📝 **Informational**:` - Batch acknowledge
-
-## Anti-Patterns
-
-❌ `gh pr view --comments` - dumps everything, exhausts context
-
-❌ Read every bot suggestion body - 90% is noise
-
-❌ Reply individually to every comment - notification spam
-
-❌ Triage without metadata scan - can't prioritize
-
-## Pro Tips
-
-✅ Use `--jq` liberally - keeps responses compact
-
-✅ Group by file first - batch-address related comments
-
-✅ Create cells proactively - better to track than forget
-
-✅ Check `in_reply_to_id == null` - focus on root comments
+**Rule:** Fetch <10 bodies per triage session.
 
 ## References
 
-- `scripts/pr-comments.ts` - Type-safe SDK with Zod schemas
-- `references/gh-api-patterns.md` - Complete jq query library, pagination, GraphQL patterns
+- `scripts/pr-comments.ts` - Full SDK with Zod schemas
+- `references/gh-api-patterns.md` - Raw jq patterns, GraphQL, pagination

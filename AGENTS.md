@@ -353,34 +353,53 @@ Skills live in `.opencode/skills/` and provide reusable knowledge for agents.
 
 ### pr-triage
 
-Context-efficient PR comment handling. Prevents context exhaustion from verbose PR reviews (CodeRabbit, etc).
+Context-efficient PR comment handling. **Evaluate → Decide → Act.** Fix important issues, resolve the rest silently.
 
 **Location:** `.opencode/skills/pr-triage/`
 
-**SDK:** `scripts/pr-comments.ts` - Zod-validated TypeScript SDK with CLI
+**Philosophy:** Replies are SECONDARY to addressing concerns. Don't reply to every comment - that's noise.
+
+| Comment Type | Action | Reply? |
+|--------------|--------|--------|
+| Security/correctness bug | FIX → reply with commit | ✅ Yes |
+| Valid improvement, in scope | FIX → reply with commit | ✅ Yes |
+| Valid but out of scope | Create cell → resolve | ❌ No |
+| Style/formatting nit | Resolve silently | ❌ No |
+| Metadata file (.jsonl, etc) | Resolve silently | ❌ No |
+| Already fixed | Reply with commit → resolve | ✅ Yes |
+
+**SOP:**
 
 ```bash
-# List metadata (compact, ~100 bytes/comment)
-bun run .opencode/skills/pr-triage/scripts/pr-comments.ts list owner/repo 42
+# 1. Get unreplied comments (start here)
+bun run .opencode/skills/pr-triage/scripts/pr-comments.ts unreplied owner/repo 42
 
-# Smart triage with priority sorting
-bun run .opencode/skills/pr-triage/scripts/pr-comments.ts triage owner/repo 42
-
-# Expand single comment body
+# 2. Evaluate: fetch body for important files only
 bun run .opencode/skills/pr-triage/scripts/pr-comments.ts expand owner/repo 123456
 
-# Reply to comment
-bun run .opencode/skills/pr-triage/scripts/pr-comments.ts reply owner/repo 42 123456 "✅ Fixed"
+# 3. Decide & Act:
+#    - Important issue? FIX IT in code, then:
+bun run .opencode/skills/pr-triage/scripts/pr-comments.ts reply owner/repo 42 123456 "✅ Fixed in abc123"
+
+#    - Not important? Resolve silently:
+bun run .opencode/skills/pr-triage/scripts/pr-comments.ts resolve owner/repo 42 123456
 ```
 
-**Key functions:**
-- `fetchMetadata()` - compact list (~100 bytes/comment vs ~5KB with body)
-- `fetchBody()` - selective body fetch
-- `triage()` - prioritize human > bot root > bot reply
-- `refineTriage()` - categorize after body fetch (fix-with-code, won't-fix, tracked-in-cell)
-- `templates.fixed/wontFix/tracked/batchAck` - response templates
+**Skip these (resolve silently):**
+- `.hive/issues.jsonl`, `.hive/memories.jsonl` - auto-generated
+- Changeset formatting suggestions
+- Import ordering, style nits
+- Suggestions you disagree with
 
-**References:** `references/gh-api-patterns.md` for raw jq patterns
+**Fix these (reply + resolve):**
+- Security vulnerabilities
+- Correctness bugs
+- Missing error handling
+- Type safety issues
+
+**SDK:** `scripts/pr-comments.ts` - Zod-validated, pagination-aware
+
+**References:** `references/gh-api-patterns.md` for raw jq/GraphQL patterns
 
 ## Publishing (Changesets + Bun)
 

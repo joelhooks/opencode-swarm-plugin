@@ -129,6 +129,7 @@ function parseRepo(repo: string): { owner: string; name: string } {
 /**
  * Fetch comment metadata only (compact, ~100 bytes/comment)
  * Use this for initial triage - avoids loading full bodies
+ * Uses --paginate to handle PRs with >100 comments
  */
 export async function fetchMetadata(
 	repo: string,
@@ -147,13 +148,22 @@ export async function fetchMetadata(
 
 	const result = await gh([
 		"api",
+		"--paginate",
 		`repos/${owner}/${name}/pulls/${pr}/comments`,
 		"--jq",
 		`[${jq}]`,
 	]);
 
-	const parsed = JSON.parse(result as string);
-	return z.array(CommentMetadataSchema).parse(parsed);
+	// --paginate returns multiple JSON arrays, one per page
+	// Parse each line and flatten
+	const lines = (result as string).trim().split("\n").filter(Boolean);
+	const allComments: CommentMetadata[] = [];
+	for (const line of lines) {
+		const parsed = JSON.parse(line);
+		const validated = z.array(CommentMetadataSchema).parse(parsed);
+		allComments.push(...validated);
+	}
+	return allComments;
 }
 
 /**
@@ -191,6 +201,9 @@ export async function fetchBody(
 /**
  * Reply to a comment
  * Uses in_reply_to (not in_reply_to_id) per gh API quirk
+ * 
+ * NOTE: Prefer resolving conversations over replying when possible.
+ * Replies are for substantive responses; use resolve() for acknowledgments.
  */
 export async function reply(
 	repo: string,
@@ -218,30 +231,117 @@ export async function reply(
 }
 
 /**
+ * Resolve a review thread (conversation) without replying
+ * This is the preferred way to acknowledge comments that don't need a response.
+ * 
+ * NOTE: Requires the GraphQL thread ID, not the REST comment ID.
+ * Use getThreadId() to convert if needed.
+ */
+export async function resolveThread(
+	repo: string,
+	threadId: string,
+): Promise<{ resolved: boolean }> {
+	const { owner, name } = parseRepo(repo);
+
+	const mutation = `
+		mutation ResolveThread($threadId: ID!) {
+			resolveReviewThread(input: { threadId: $threadId }) {
+				thread { isResolved }
+			}
+		}
+	`;
+
+	const result = await gh([
+		"api",
+		"graphql",
+		"-f",
+		`query=${mutation}`,
+		"-f",
+		`threadId=${threadId}`,
+		"--jq",
+		".data.resolveReviewThread.thread.isResolved",
+	]);
+
+	return { resolved: (result as string).trim() === "true" };
+}
+
+/**
+ * Get GraphQL thread ID for a comment (needed for resolve)
+ */
+export async function getThreadId(
+	repo: string,
+	pr: number,
+	commentId: number,
+): Promise<string | null> {
+	const { owner, name } = parseRepo(repo);
+
+	const query = `
+		query GetThreadId($owner: String!, $name: String!, $pr: Int!) {
+			repository(owner: $owner, name: $name) {
+				pullRequest(number: $pr) {
+					reviewThreads(first: 100) {
+						nodes {
+							id
+							comments(first: 1) {
+								nodes { databaseId }
+							}
+						}
+					}
+				}
+			}
+		}
+	`;
+
+	const result = await gh([
+		"api",
+		"graphql",
+		"-f",
+		`query=${query}`,
+		"-f",
+		`owner=${owner}`,
+		"-f",
+		`name=${name}`,
+		"-F",
+		`pr=${pr}`,
+		"--jq",
+		".data.repository.pullRequest.reviewThreads.nodes",
+	]);
+
+	const threads = JSON.parse(result as string);
+	for (const thread of threads) {
+		if (thread.comments?.nodes?.[0]?.databaseId === commentId) {
+			return thread.id;
+		}
+	}
+	return null;
+}
+
+/**
  * Get file-level summary of comments
+ * Uses fetchMetadata internally to handle pagination
  */
 export async function summarizeByFile(
 	repo: string,
 	pr: number,
 ): Promise<FileSummary[]> {
-	const { owner, name } = parseRepo(repo);
+	const comments = await fetchMetadata(repo, pr);
 
-	const jq = `group_by(.path) | map({
-    file: .[0].path,
-    count: length,
-    authors: [.[].user.login] | unique,
-    hasHuman: ([.[].user.login] | map(select(. != "coderabbitai" and . != "github-actions[bot]")) | length > 0)
-  })`;
+	// Group by path manually since we already have the data
+	const byFile = new Map<string, CommentMetadata[]>();
+	for (const c of comments) {
+		const existing = byFile.get(c.path) || [];
+		existing.push(c);
+		byFile.set(c.path, existing);
+	}
 
-	const result = await gh([
-		"api",
-		`repos/${owner}/${name}/pulls/${pr}/comments`,
-		"--jq",
-		jq,
-	]);
+	const BOT_AUTHORS_SET = new Set(["coderabbitai[bot]", "github-actions[bot]", "dependabot[bot]"]);
 
-	const parsed = JSON.parse(result as string);
-	return z.array(FileSummarySchema).parse(parsed);
+	return Array.from(byFile.entries()).map(([file, fileComments]) => ({
+		file,
+		count: fileComments.length,
+		authors: [...new Set(fileComments.map((c) => c.author))],
+		hasHuman: fileComments.some((c) => !BOT_AUTHORS_SET.has(c.author)),
+	}));
 }
 
 // ============================================================================
@@ -420,21 +520,61 @@ async function main() {
 			break;
 		}
 
+		case "resolve": {
+			const [repo, pr, commentId] = args;
+			if (!repo || !pr || !commentId) {
+				console.error("Usage: pr-comments.ts resolve <owner/repo> <pr> <comment_id>");
+				process.exit(1);
+			}
+			const threadId = await getThreadId(repo, Number(pr), Number(commentId));
+			if (!threadId) {
+				console.error(`Could not find thread for comment ${commentId}`);
+				process.exit(1);
+			}
+			const result = await resolveThread(repo, threadId);
+			console.log(JSON.stringify(result, null, 2));
+			break;
+		}
+
+		case "unreplied": {
+			const [repo, pr] = args;
+			if (!repo || !pr) {
+				console.error("Usage: pr-comments.ts unreplied <owner/repo> <pr>");
+				process.exit(1);
+			}
+			const comments = await fetchMetadata(repo, Number(pr));
+			const repliedTo = new Set(
+				comments.filter((c) => c.inReplyToId !== null).map((c) => c.inReplyToId)
+			);
+			const unreplied = comments.filter(
+				(c) => c.inReplyToId === null && !repliedTo.has(c.id)
+			);
+			console.log(JSON.stringify(unreplied, null, 2));
+			break;
+		}
+
 		default:
 			console.log(`PR Comments SDK - Context-efficient PR comment triage
 
 Commands:
-  list <owner/repo> <pr>              List comment metadata (compact)
+  list <owner/repo> <pr>              List all comment metadata (compact, paginated)
   triage <owner/repo> <pr>            Smart triage with priority sorting
+  unreplied <owner/repo> <pr>         List root comments without replies
   expand <owner/repo> <comment_id>    Fetch single comment body
   reply <owner/repo> <pr> <id> <body> Reply to a comment
+  resolve <owner/repo> <pr> <id>      Resolve thread without replying (preferred)
   summary <owner/repo> <pr>           File-level summary
 
+Philosophy:
+  - RESOLVE is preferred over REPLY for acknowledgments
+  - Only REPLY when you have substantive feedback
+  - Address important concerns with code fixes, then resolve
+  - Batch-resolve noise (metadata files, style nits)
+
 Examples:
-  bun run pr-comments.ts list joelhooks/opencode-swarm-plugin 54
-  bun run pr-comments.ts triage joelhooks/opencode-swarm-plugin 54
-  bun run pr-comments.ts expand joelhooks/opencode-swarm-plugin 123456
-  bun run pr-comments.ts reply joelhooks/opencode-swarm-plugin 54 123456 "✅ Fixed"
+  bun run pr-comments.ts unreplied joelhooks/swarm-tools 54
+  bun run pr-comments.ts resolve joelhooks/swarm-tools 54 123456
+  bun run pr-comments.ts reply joelhooks/swarm-tools 54 123456 "✅ Fixed in abc123"
 `);
 	}
 }
