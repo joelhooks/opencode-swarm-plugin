@@ -224,3 +224,6 @@
 {"id":"mem_mjg6xqcv_4nbnupf","information":"Findable test memory with unique keyword xyztest123","created_at":"2025-12-21T20:39:44.815Z"}
 {"id":"mem_mjg7iixj_zdq1enx","information":"Test memory for tools integration","created_at":"2025-12-21T20:55:54.967Z","tags":"test"}
 {"id":"mem_mjg7imsa_7jlc6jq","information":"Findable test memory with unique keyword xyztest123","created_at":"2025-12-21T20:55:59.962Z"}
+{"id":"mem_mjgg4gau_4u0p1n2","information":"Test memory for adapter wiring verification","created_at":"2025-12-22T00:56:54.918Z","tags":"test,memory"}
+{"id":"mem_mjgg4ghm_dufh5fk","information":"OAuth refresh tokens need 5min buffer before expiry","created_at":"2025-12-22T00:56:55.162Z","metadata":"{\"raw\":\"auth,tokens,oauth\"}","tags":"auth,integration-test"}
+{"id":"mem_mjgg4gld_jcfjqld","information":"Smoke test verified full tool adapter wiring works end-to-end","created_at":"2025-12-22T00:56:55.297Z","tags":"test,verification"}
