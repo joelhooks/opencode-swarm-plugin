@@ -143,7 +143,9 @@ export async function migrateLegacyMemories(
   onProgress(`[migrate] Opening legacy database at ${legacyPath}`);
 
   // Dynamically import PGlite to avoid loading WASM at module import time
+  // @ts-ignore - PGlite is optional, loaded dynamically for migration only
   const { PGlite } = (await import("@electric-sql/pglite")) as any;
+  // @ts-ignore - PGlite vector extension
   const { vector } = (await import("@electric-sql/pglite/vector")) as any;
 
   // Open legacy database (read-only)
@@ -302,7 +304,9 @@ export async function getMigrationStatus(
   }
 
   // Dynamically import PGlite to avoid loading WASM at module import time
+  // @ts-ignore - PGlite is optional, loaded dynamically for migration only
   const { PGlite } = (await import("@electric-sql/pglite")) as any;
+  // @ts-ignore - PGlite vector extension
   const { vector } = (await import("@electric-sql/pglite/vector")) as any;
 
   let db: any;

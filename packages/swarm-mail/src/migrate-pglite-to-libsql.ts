@@ -90,7 +90,9 @@ export async function migratePGliteToLibSQL(
   onProgress(`[migrate] Opening PGlite database at ${pglitePath}`);
 
   // Import PGlite dynamically
+  // @ts-ignore - PGlite is optional, loaded dynamically for migration only
   const { PGlite } = (await import("@electric-sql/pglite")) as any;
+  // @ts-ignore - PGlite vector extension
   const { vector } = (await import("@electric-sql/pglite/vector")) as any;
 
   let pglite: any;
