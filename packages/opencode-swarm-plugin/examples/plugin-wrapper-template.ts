@@ -305,6 +305,34 @@ const hive_sync = tool({
   execute: (args, ctx) => execTool("hive_sync", args, ctx),
 });
 
+const hive_cells = tool({
+  description: `Query cells from the hive database with flexible filtering.
+
+USE THIS TOOL TO:
+- List all open cells: hive_cells()
+- Find cells by status: hive_cells({ status: "in_progress" })
+- Find cells by type: hive_cells({ type: "bug" })
+- Get a specific cell by partial ID: hive_cells({ id: "mjkmd" })
+- Get the next ready (unblocked) cell: hive_cells({ ready: true })
+- Combine filters: hive_cells({ status: "open", type: "task" })
+
+RETURNS: Array of cells with id, title, status, priority, type, parent_id, created_at, updated_at
+
+PREFER THIS OVER hive_query when you need to:
+- See what work is available
+- Check status of multiple cells
+- Find cells matching criteria
+- Look up a cell by partial ID`,
+  args: {
+    id: tool.schema.string().optional().describe("Partial or full cell ID to look up"),
+    status: tool.schema.enum(["open", "in_progress", "blocked", "closed"]).optional().describe("Filter by status"),
+    type: tool.schema.enum(["task", "bug", "feature", "epic", "chore"]).optional().describe("Filter by type"),
+    ready: tool.schema.boolean().optional().describe("If true, return only the next unblocked cell"),
+    limit: tool.schema.number().optional().describe("Max cells to return (default 20)"),
+  },
+  execute: (args, ctx) => execTool("hive_cells", args, ctx),
+});
+
 const beads_link_thread = tool({
   description: "Add metadata linking bead to Agent Mail thread",
   args: {
@@ -1896,6 +1924,7 @@ const SwarmPlugin: Plugin = async (
       hive_close,
       hive_start,
       hive_ready,
+      hive_cells,
       hive_sync,
       beads_link_thread,
       // Swarm Mail (Embedded)

@@ -535,11 +535,31 @@ export const swarm_decompose = tool({
  * Use this after the agent responds to swarm:decompose to validate the structure.
  */
 export const swarm_validate_decomposition = tool({
-  description: "Validate a decomposition response against CellTreeSchema",
+  description: "Validate a decomposition response against CellTreeSchema and capture for eval",
   args: {
     response: tool.schema
       .string()
       .describe("JSON response from agent (CellTree format)"),
+    project_path: tool.schema
+      .string()
+      .optional()
+      .describe("Project path for eval capture"),
+    task: tool.schema
+      .string()
+      .optional()
+      .describe("Original task description for eval capture"),
+    context: tool.schema
+      .string()
+      .optional()
+      .describe("Context provided for decomposition"),
+    strategy: tool.schema
+      .enum(["file-based", "feature-based", "risk-based", "auto"])
+      .optional()
+      .describe("Decomposition strategy used"),
+    epic_id: tool.schema
+      .string()
+      .optional()
+      .describe("Epic ID for eval capture"),
   },
   async execute(args) {
     try {
@@ -596,6 +616,37 @@ export const swarm_validate_decomposition = tool({
       const instructionConflicts = detectInstructionConflicts(
         validated.subtasks,
       );
+
+      // Capture decomposition for eval if all required params provided
+      if (
+        args.project_path &&
+        args.task &&
+        args.strategy &&
+        args.epic_id
+      ) {
+        try {
+          const { captureDecomposition } = await import("./eval-capture.js");
+          captureDecomposition({
+            epicId: args.epic_id,
+            projectPath: args.project_path,
+            task: args.task,
+            context: args.context,
+            strategy: args.strategy,
+            epicTitle: validated.epic.title,
+            epicDescription: validated.epic.description,
+            subtasks: validated.subtasks.map((s) => ({
+              title: s.title,
+              description: s.description,
+              files: s.files,
+              dependencies: s.dependencies,
+              estimated_complexity: s.estimated_complexity,
+            })),
+          });
+        } catch (error) {
+          // Non-fatal - don't block validation if capture fails
+          console.warn("[swarm_validate_decomposition] Failed to capture decomposition:", error);
+        }
+      }
 
       return JSON.stringify(
         {
