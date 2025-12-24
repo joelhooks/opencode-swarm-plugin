@@ -66,6 +66,18 @@ export {
   noRework,
 } from "./outcome-scorers.js";
 
+// ============================================================================
+// Compaction-specific scorers
+// ============================================================================
+
+export {
+  confidenceAccuracy,
+  contextInjectionCorrectness,
+  requiredPatternsPresent,
+  forbiddenPatternsAbsent,
+  compactionQuality,
+} from "./compaction-scorers.js";
+
 /**
  * Checks that subtasks cover the full task scope
  *

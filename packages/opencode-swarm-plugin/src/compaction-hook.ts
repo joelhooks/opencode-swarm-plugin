@@ -168,6 +168,57 @@ Include this in your summary:
 `;
 
 // ============================================================================
+// Dynamic Context Building
+// ============================================================================
+
+/**
+ * Build dynamic swarm state section from detected state
+ * 
+ * This injects SPECIFIC values instead of placeholders, making the context
+ * immediately actionable on resume.
+ */
+function buildDynamicSwarmState(state: SwarmState): string {
+  const parts: string[] = [];
+  
+  parts.push("## 🐝 Current Swarm State\n");
+  
+  if (state.epicId && state.epicTitle) {
+    parts.push(`**Epic:** ${state.epicId} - ${state.epicTitle}`);
+    
+    const totalSubtasks = state.subtasks.closed + state.subtasks.in_progress + 
+                          state.subtasks.open + state.subtasks.blocked;
+    
+    if (totalSubtasks > 0) {
+      parts.push(`**Subtasks:**`);
+      if (state.subtasks.closed > 0) parts.push(`  - ${state.subtasks.closed} closed`);
+      if (state.subtasks.in_progress > 0) parts.push(`  - ${state.subtasks.in_progress} in_progress`);
+      if (state.subtasks.open > 0) parts.push(`  - ${state.subtasks.open} open`);
+      if (state.subtasks.blocked > 0) parts.push(`  - ${state.subtasks.blocked} blocked`);
+    }
+  }
+  
+  parts.push(`**Project:** ${state.projectPath}`);
+  
+  if (state.epicId) {
+    parts.push(`\n## ⚠️ YOU ARE THE COORDINATOR - DO NOT DO WORK DIRECTLY`);
+    parts.push(``);
+    parts.push(`**Your role:** Orchestrate workers, review their output, unblock dependencies.`);
+    parts.push(`**NOT your role:** Run tests, edit files, fetch docs, or do implementation work.`);
+    parts.push(``);
+    parts.push(`**RESUME STEPS:**`);
+    parts.push(`1. Check swarm status: \`swarm_status(epic_id="${state.epicId}", project_key="${state.projectPath}")\``);
+    parts.push(`2. Check inbox for worker messages: \`swarmmail_inbox(limit=5)\``);
+    parts.push(`3. For any in_progress subtasks: Check if workers returned results, review with \`swarm_review\``);
+    parts.push(`4. For any open subtasks: Spawn workers with \`swarm_spawn_subtask\``);
+    parts.push(`5. For any blocked subtasks: Investigate blockers, unblock or reassign`);
+    parts.push(``);
+    parts.push(`**NEVER:** Run \`bun test\`, edit source files, or do worker tasks yourself.`);
+  }
+  
+  return parts.join("\n");
+}
+
+// ============================================================================
 // Swarm Detection
 // ============================================================================
 
@@ -178,6 +229,23 @@ interface SwarmDetection {
   detected: boolean;
   confidence: "high" | "medium" | "low" | "none";
   reasons: string[];
+  /** Specific swarm state data for context injection */
+  state?: SwarmState;
+}
+
+/**
+ * Specific swarm state captured during detection
+ */
+interface SwarmState {
+  epicId?: string;
+  epicTitle?: string;
+  projectPath: string;
+  subtasks: {
+    closed: number;
+    in_progress: number;
+    open: number;
+    blocked: number;
+  };
 }
 
 /**
@@ -195,9 +263,21 @@ async function detectSwarm(): Promise<SwarmDetection> {
   let highConfidence = false;
   let mediumConfidence = false;
   let lowConfidence = false;
+  let state: SwarmState | undefined;
 
   try {
     const projectKey = getHiveWorkingDirectory();
+    
+    // Initialize state with project path
+    state = {
+      projectPath: projectKey,
+      subtasks: {
+        closed: 0,
+        in_progress: 0,
+        open: 0,
+        blocked: 0,
+      },
+    };
 
     // Check 1: Active reservations in swarm-mail (HIGH confidence)
     const swarmMailStart = Date.now();
@@ -272,6 +352,32 @@ async function detectSwarm(): Promise<SwarmDetection> {
         if (openEpics.length > 0) {
           mediumConfidence = true;
           reasons.push(`${openEpics.length} unclosed epics`);
+          
+          // Capture in_progress epic data for state
+          const inProgressEpic = openEpics.find((c) => c.status === "in_progress");
+          if (inProgressEpic && state) {
+            state.epicId = inProgressEpic.id;
+            state.epicTitle = inProgressEpic.title;
+            
+            // Count subtasks for this epic
+            const epicSubtasks = cells.filter((c) => c.parent_id === inProgressEpic.id);
+            state.subtasks.closed = epicSubtasks.filter((c) => c.status === "closed").length;
+            state.subtasks.in_progress = epicSubtasks.filter((c) => c.status === "in_progress").length;
+            state.subtasks.open = epicSubtasks.filter((c) => c.status === "open").length;
+            state.subtasks.blocked = epicSubtasks.filter((c) => c.status === "blocked").length;
+            
+            getLog().debug(
+              {
+                epic_id: state.epicId,
+                epic_title: state.epicTitle,
+                subtasks_closed: state.subtasks.closed,
+                subtasks_in_progress: state.subtasks.in_progress,
+                subtasks_open: state.subtasks.open,
+                subtasks_blocked: state.subtasks.blocked,
+              },
+              "captured epic state for context",
+            );
+          }
         }
 
         // MEDIUM: Recently updated cells (last hour)
@@ -345,6 +451,7 @@ async function detectSwarm(): Promise<SwarmDetection> {
     detected: confidence !== "none",
     confidence,
     reasons,
+    state,
   };
 
   getLog().debug(
@@ -353,6 +460,7 @@ async function detectSwarm(): Promise<SwarmDetection> {
       confidence: result.confidence,
       reason_count: result.reasons.length,
       reasons: result.reasons,
+      has_state: !!result.state,
     },
     "swarm detection complete",
   );
@@ -409,7 +517,14 @@ export function createCompactionHook() {
       ) {
         // Definite or probable swarm - inject full context
         const header = `[Swarm detected: ${detection.reasons.join(", ")}]\n\n`;
-        const contextContent = header + SWARM_COMPACTION_CONTEXT;
+        
+        // Build dynamic state section if we have specific data
+        let dynamicState = "";
+        if (detection.state && detection.state.epicId) {
+          dynamicState = buildDynamicSwarmState(detection.state) + "\n\n";
+        }
+        
+        const contextContent = header + dynamicState + SWARM_COMPACTION_CONTEXT;
         output.context.push(contextContent);
 
         getLog().info(
@@ -418,6 +533,8 @@ export function createCompactionHook() {
             context_length: contextContent.length,
             context_type: "full",
             reasons: detection.reasons,
+            has_dynamic_state: !!dynamicState,
+            epic_id: detection.state?.epicId,
           },
           "injected swarm context",
         );

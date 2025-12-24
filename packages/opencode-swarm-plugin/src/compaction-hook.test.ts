@@ -136,6 +136,204 @@ describe("Compaction Hook", () => {
     });
   });
 
+  describe("Specific swarm state injection (TDD red phase)", () => {
+    it("includes specific epic ID when in_progress epic exists", async () => {
+      // Mock hive with an in_progress epic
+      mock.module("./hive", () => ({
+        getHiveWorkingDirectory: () => "/test/project",
+        getHiveAdapter: async () => ({
+          queryCells: async () => [
+            {
+              id: "bd-epic-123",
+              title: "Add authentication system",
+              type: "epic",
+              status: "in_progress",
+              parent_id: null,
+              updated_at: Date.now(),
+            },
+          ],
+        }),
+      }));
+
+      const hook = createCompactionHook();
+      const input = { sessionID: "test-session" };
+      const output = { context: [] as string[] };
+
+      await hook(input, output);
+
+      // Should inject context with the SPECIFIC epic ID, not a placeholder
+      expect(output.context.length).toBeGreaterThan(0);
+      const injectedContext = output.context[0];
+      expect(injectedContext).toContain("bd-epic-123");
+      expect(injectedContext).toContain("Add authentication system");
+    });
+
+    it("includes subtask status summary in injected context", async () => {
+      // Mock hive with epic + subtasks in various states
+      mock.module("./hive", () => ({
+        getHiveWorkingDirectory: () => "/test/project",
+        getHiveAdapter: async () => ({
+          queryCells: async () => [
+            {
+              id: "bd-epic-456",
+              title: "Refactor auth flow",
+              type: "epic",
+              status: "in_progress",
+              parent_id: null,
+              updated_at: Date.now(),
+            },
+            {
+              id: "bd-epic-456.1",
+              title: "Update schema",
+              type: "task",
+              status: "closed",
+              parent_id: "bd-epic-456",
+              updated_at: Date.now(),
+            },
+            {
+              id: "bd-epic-456.2",
+              title: "Implement service layer",
+              type: "task",
+              status: "in_progress",
+              parent_id: "bd-epic-456",
+              updated_at: Date.now(),
+            },
+            {
+              id: "bd-epic-456.3",
+              title: "Add tests",
+              type: "task",
+              status: "open",
+              parent_id: "bd-epic-456",
+              updated_at: Date.now(),
+            },
+          ],
+        }),
+      }));
+
+      const hook = createCompactionHook();
+      const input = { sessionID: "test-session" };
+      const output = { context: [] as string[] };
+
+      await hook(input, output);
+
+      expect(output.context.length).toBeGreaterThan(0);
+      const injectedContext = output.context[0];
+      
+      // Should show subtask counts: 1 closed, 1 in_progress, 1 open
+      expect(injectedContext).toMatch(/1.*closed/i);
+      expect(injectedContext).toMatch(/1.*in_progress/i);
+      expect(injectedContext).toMatch(/1.*open/i);
+    });
+
+    it("includes project path in context", async () => {
+      mock.module("./hive", () => ({
+        getHiveWorkingDirectory: () => "/Users/joel/test-project",
+        getHiveAdapter: async () => ({
+          queryCells: async () => [
+            {
+              id: "bd-epic-789",
+              title: "Feature work",
+              type: "epic",
+              status: "in_progress",
+              parent_id: null,
+              updated_at: Date.now(),
+            },
+          ],
+        }),
+      }));
+
+      const hook = createCompactionHook();
+      const input = { sessionID: "test-session" };
+      const output = { context: [] as string[] };
+
+      await hook(input, output);
+
+      expect(output.context.length).toBeGreaterThan(0);
+      const injectedContext = output.context[0];
+      
+      // Should include the actual project path, not a placeholder
+      expect(injectedContext).toContain("/Users/joel/test-project");
+    });
+
+    it("includes actionable swarm_status call with epic ID", async () => {
+      mock.module("./hive", () => ({
+        getHiveWorkingDirectory: () => "/test/project",
+        getHiveAdapter: async () => ({
+          queryCells: async () => [
+            {
+              id: "bd-epic-999",
+              title: "Critical fix",
+              type: "epic",
+              status: "in_progress",
+              parent_id: null,
+              updated_at: Date.now(),
+            },
+          ],
+        }),
+      }));
+
+      const hook = createCompactionHook();
+      const input = { sessionID: "test-session" };
+      const output = { context: [] as string[] };
+
+      await hook(input, output);
+
+      expect(output.context.length).toBeGreaterThan(0);
+      const injectedContext = output.context[0];
+      
+      // Should include actionable swarm_status call with the SPECIFIC epic ID
+      expect(injectedContext).toContain('swarm_status(epic_id="bd-epic-999"');
+      expect(injectedContext).toContain('project_key="/test/project"');
+    });
+
+    it("includes coordinator role reminder - NOT worker commands", async () => {
+      // Mock an in-progress epic with subtasks
+      mock.module("./hive", () => ({
+        getHiveWorkingDirectory: () => "/test/project",
+        getHiveAdapter: async () => ({
+          queryCells: async () => [
+            {
+              id: "bd-epic-123",
+              title: "Test Epic",
+              type: "epic",
+              status: "in_progress",
+              parent_id: null,
+              updated_at: Date.now(),
+            },
+            {
+              id: "bd-task-1",
+              type: "task",
+              status: "open",
+              parent_id: "bd-epic-123",
+              updated_at: Date.now(),
+            },
+          ],
+        }),
+      }));
+
+      const hook = createCompactionHook();
+      const input = { sessionID: "test-session" };
+      const output = { context: [] as string[] };
+
+      await hook(input, output);
+
+      expect(output.context.length).toBeGreaterThan(0);
+      const injectedContext = output.context[0];
+      
+      // Should remind coordinator of their ROLE
+      expect(injectedContext).toContain("YOU ARE THE COORDINATOR");
+      expect(injectedContext).toContain("DO NOT DO WORK DIRECTLY");
+      
+      // Should include coordinator commands
+      expect(injectedContext).toContain("swarm_spawn_subtask");
+      expect(injectedContext).toContain("swarm_review");
+      
+      // Should explicitly forbid worker tasks
+      expect(injectedContext).toContain("NEVER");
+      expect(injectedContext).toContain("bun test");
+    });
+  });
+
   describe("Logging instrumentation", () => {
     it("logs compaction start with session_id", async () => {
       const hook = createCompactionHook();
