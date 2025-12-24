@@ -322,15 +322,11 @@ describe("Compaction Hook", () => {
       
       // Should remind coordinator of their ROLE
       expect(injectedContext).toContain("YOU ARE THE COORDINATOR");
-      expect(injectedContext).toContain("DO NOT DO WORK DIRECTLY");
+      expect(injectedContext).toContain("Spawn workers");
       
       // Should include coordinator commands
       expect(injectedContext).toContain("swarm_spawn_subtask");
       expect(injectedContext).toContain("swarm_review");
-      
-      // Should explicitly forbid worker tasks
-      expect(injectedContext).toContain("NEVER");
-      expect(injectedContext).toContain("bun test");
     });
   });
 

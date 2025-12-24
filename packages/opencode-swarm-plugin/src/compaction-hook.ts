@@ -200,19 +200,17 @@ function buildDynamicSwarmState(state: SwarmState): string {
   parts.push(`**Project:** ${state.projectPath}`);
   
   if (state.epicId) {
-    parts.push(`\n## ⚠️ YOU ARE THE COORDINATOR - DO NOT DO WORK DIRECTLY`);
+    parts.push(`\n## 🎯 YOU ARE THE COORDINATOR`);
     parts.push(``);
-    parts.push(`**Your role:** Orchestrate workers, review their output, unblock dependencies.`);
-    parts.push(`**NOT your role:** Run tests, edit files, fetch docs, or do implementation work.`);
+    parts.push(`**Primary role:** Orchestrate workers, review their output, unblock dependencies.`);
+    parts.push(`**Spawn workers** for implementation tasks - don't do them yourself.`);
     parts.push(``);
     parts.push(`**RESUME STEPS:**`);
     parts.push(`1. Check swarm status: \`swarm_status(epic_id="${state.epicId}", project_key="${state.projectPath}")\``);
     parts.push(`2. Check inbox for worker messages: \`swarmmail_inbox(limit=5)\``);
-    parts.push(`3. For any in_progress subtasks: Check if workers returned results, review with \`swarm_review\``);
-    parts.push(`4. For any open subtasks: Spawn workers with \`swarm_spawn_subtask\``);
-    parts.push(`5. For any blocked subtasks: Investigate blockers, unblock or reassign`);
-    parts.push(``);
-    parts.push(`**NEVER:** Run \`bun test\`, edit source files, or do worker tasks yourself.`);
+    parts.push(`3. For in_progress subtasks: Review worker results with \`swarm_review\``);
+    parts.push(`4. For open subtasks: Spawn workers with \`swarm_spawn_subtask\``);
+    parts.push(`5. For blocked subtasks: Investigate and unblock`);
   }
   
   return parts.join("\n");
