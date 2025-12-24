@@ -1,5 +1,60 @@
 # swarm-mail
 
+## 1.5.1
+
+### Patch Changes
+
+- [`e0c422d`](https://github.com/joelhooks/swarm-tools/commit/e0c422de3f5e15c117cc0cc655c0b03242245be4) Thanks [@joelhooks](https://github.com/joelhooks)! - ## 🔍 Short IDs Finally Work
+
+  Cell ID resolution now matches **any unique substring**, not just the hash segment.
+
+  **Before:** `hive_start(id="mjkmdat26vq")` → ❌ "No cell found"
+  **After:** `hive_start(id="mjkmdat26vq")` → ✅ Works!
+
+  **What changed:**
+
+  - `resolvePartialId()` pattern: `%-hash%-%` → `%substring%`
+  - Matches project name, hash, OR timestamp+random segments
+  - Added 3 new tests for timestamp+random matching
+
+  **Cell ID anatomy:**
+
+  ```
+  opencode-swarm-monorepo-lf2p4u-mjkmdat26vq
+  │                       │      │
+  └── project name ───────┘      │
+                          └ hash ┘
+                                 └── timestamp+random (NOW MATCHABLE!)
+  ```
+
+  Users can now use the short, memorable end portion of cell IDs.
+
+- [`43c8c93`](https://github.com/joelhooks/swarm-tools/commit/43c8c93ef90b2f04ce59317192334f69d7c4204e) Thanks [@joelhooks](https://github.com/joelhooks)! - ## ⚠️ PGlite Deprecated - libSQL is the Future
+
+  PGlite support is now deprecated and will be removed in the next major version.
+
+  **What changed:**
+
+  - Added deprecation warnings to all PGlite-related functions
+  - `createInMemorySwarmMail()` now uses libSQL by default
+  - `getSwarmMailPGlite()` logs deprecation notice on first use
+
+  **Migration path:**
+
+  - New projects: Use `createInMemorySwarmMail()` or `getSwarmMailLibSQL()`
+  - Existing PGlite databases: Run `migratePGliteToLibSQL()` to migrate your data
+  - The migration utility preserves all events, projections, and metadata
+
+  **Why the change:**
+  libSQL (SQLite-compatible) provides better performance, stability, and ecosystem support. PGlite was experimental and is no longer actively maintained.
+
+  **Timeline:**
+
+  - Current (v0.x): PGlite works with deprecation warnings
+  - Next major (v1.0): PGlite support removed entirely
+
+  Start migrating now to avoid breaking changes in v1.0.
+
 ## 1.5.0
 
 ### Minor Changes

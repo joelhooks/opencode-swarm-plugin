@@ -1,5 +1,76 @@
 # opencode-swarm-plugin
 
+## 0.36.1
+
+### Patch Changes
+
+- [`9c1f3f3`](https://github.com/joelhooks/swarm-tools/commit/9c1f3f3e7204f02c133c4a036fa34e83d8376a8c) Thanks [@joelhooks](https://github.com/joelhooks)! - ## 🐝 Coordinator Discipline: Prohibition-First Enforcement
+
+  Coordinators kept "just doing it themselves" after compaction. Now they can't.
+
+  **The Problem:**
+  After context compaction, coordinators would ignore their own instructions to "spawn workers for remaining subtasks" and edit files directly. The compaction context was narrative ("do this") rather than prescriptive ("NEVER do that").
+
+  **The Fix:**
+
+  ### 1. Prohibition-First Compaction Context
+
+  The `SWARM_COMPACTION_CONTEXT` now leads with explicit anti-patterns:
+
+  ```markdown
+  ### ⛔ NEVER DO THESE (Coordinator Anti-Patterns)
+
+  - ❌ **NEVER** use `edit` or `write` tools - SPAWN A WORKER
+  - ❌ **NEVER** run tests with `bash` - SPAWN A WORKER
+  - ❌ **NEVER** implement features yourself - SPAWN A WORKER
+  - ❌ **NEVER** "just do it myself to save time" - NO. SPAWN A WORKER.
+  ```
+
+  ### 2. Runtime Violation Detection
+
+  `detectCoordinatorViolation()` is now wired up in `tool.execute.before`:
+
+  - Detects when coordinators call `edit`, `write`, or test commands
+  - Emits warnings to help coordinators self-correct
+  - Captures VIOLATION events for post-hoc analysis
+
+  ### 3. Coordinator Context Tracking
+
+  New functions track when we're in coordinator mode:
+
+  - `setCoordinatorContext()` - Activated when `hive_create_epic` or `swarm_decompose` is called
+  - `isInCoordinatorContext()` - Checks if we're currently coordinating
+  - `clearCoordinatorContext()` - Cleared when epic is closed
+
+  **Why This Matters:**
+
+  Coordinators that do implementation work burn context, create conflicts, and defeat the purpose of swarm coordination. This fix makes the anti-pattern visible and provides guardrails to prevent it.
+
+  **Validation:**
+
+  - Check `~/.config/swarm-tools/sessions/` for VIOLATION events
+  - Run `coordinator-behavior.eval.ts` to score coordinator discipline
+
+- [`4c23c7a`](https://github.com/joelhooks/swarm-tools/commit/4c23c7a31013bc6537d83a9294b51540056cde93) Thanks [@joelhooks](https://github.com/joelhooks)! - ## Fix Double Hook Registration
+
+  The compaction hook was firing twice per compaction event because OpenCode's plugin loader
+  calls ALL exports as plugin functions. We were exporting `SwarmPlugin` as both:
+
+  1. Named export: `export const SwarmPlugin`
+  2. Default export: `export default SwarmPlugin`
+
+  This caused the plugin to register twice, doubling all hook invocations.
+
+  **Fix:** Changed to default-only export pattern:
+
+  - `src/index.ts`: `const SwarmPlugin` (no export keyword)
+  - `src/plugin.ts`: `export default SwarmPlugin` (no named re-export)
+
+  **Impact:** Compaction hooks now fire once. LLM calls during compaction reduced by 50%.
+
+- Updated dependencies [[`e0c422d`](https://github.com/joelhooks/swarm-tools/commit/e0c422de3f5e15c117cc0cc655c0b03242245be4), [`43c8c93`](https://github.com/joelhooks/swarm-tools/commit/43c8c93ef90b2f04ce59317192334f69d7c4204e)]:
+  - swarm-mail@1.5.1
+
 ## 0.36.0
 
 ### Minor Changes
