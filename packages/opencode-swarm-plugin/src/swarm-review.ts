@@ -18,6 +18,7 @@ import { tool } from "@opencode-ai/plugin";
 import { z } from "zod";
 import { sendSwarmMessage, type HiveAdapter } from "swarm-mail";
 import { getHiveAdapter } from "./hive";
+import { captureCoordinatorEvent } from "./eval-capture.js";
 
 // ============================================================================
 // Types & Schemas
@@ -508,6 +509,25 @@ export const swarm_review_feedback = tool({
       // Mark as approved and clear attempts
       markReviewApproved(args.task_id);
 
+      // Capture review approval decision
+      try {
+        captureCoordinatorEvent({
+          session_id: process.env.OPENCODE_SESSION_ID || "unknown",
+          epic_id: epicId,
+          timestamp: new Date().toISOString(),
+          event_type: "DECISION",
+          decision_type: "review_completed",
+          payload: {
+            task_id: args.task_id,
+            status: "approved",
+            retry_count: 0,
+          },
+        });
+      } catch (error) {
+        // Non-fatal - don't block approval if capture fails
+        console.warn("[swarm_review_feedback] Failed to capture review_completed:", error);
+      }
+
       // Send approval message
       await sendSwarmMessage({
         projectPath: args.project_key,
@@ -538,6 +558,27 @@ You may now complete the task with \`swarm_complete\`.`,
     // Handle needs_changes
     const attemptNumber = incrementAttempt(args.task_id);
     const remaining = MAX_REVIEW_ATTEMPTS - attemptNumber;
+
+    // Capture review rejection decision
+    try {
+      captureCoordinatorEvent({
+        session_id: process.env.OPENCODE_SESSION_ID || "unknown",
+        epic_id: epicId,
+        timestamp: new Date().toISOString(),
+        event_type: "DECISION",
+        decision_type: "review_completed",
+        payload: {
+          task_id: args.task_id,
+          status: "needs_changes",
+          retry_count: attemptNumber,
+          remaining_attempts: remaining,
+          issues_count: parsedIssues.length,
+        },
+      });
+    } catch (error) {
+      // Non-fatal - don't block feedback if capture fails
+      console.warn("[swarm_review_feedback] Failed to capture review_completed:", error);
+    }
 
     // Check if task should fail
     if (remaining <= 0) {

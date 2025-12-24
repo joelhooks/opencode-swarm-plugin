@@ -983,7 +983,7 @@ function getPluginWrapper(): string {
       `[swarm] Could not read plugin template from ${templatePath}, using minimal wrapper`,
     );
     return `// Minimal fallback - install opencode-swarm-plugin globally for full functionality
-import { SwarmPlugin } from "opencode-swarm-plugin"
+import SwarmPlugin from "opencode-swarm-plugin"
 export default SwarmPlugin
 `;
   }
@@ -1709,7 +1709,7 @@ async function doctor() {
   if (updateInfo) showUpdateNotification(updateInfo);
 }
 
-async function setup() {
+async function setup(forceReinstall = false, nonInteractive = false) {
   console.clear();
   console.log(yellow(BANNER));
   console.log(getDecoratedBee());
@@ -1783,7 +1783,7 @@ async function setup() {
     legacyWorkerPath,
   ].filter((f) => existsSync(f));
 
-  if (existingFiles.length > 0) {
+  if (existingFiles.length > 0 && !forceReinstall) {
     p.log.success("Swarm is already configured!");
     p.log.message(dim("  Found " + existingFiles.length + "/5 config files"));
 
@@ -1903,7 +1903,8 @@ async function setup() {
     p.log.step("Missing " + requiredMissing.length + " required dependencies");
 
     for (const { dep } of requiredMissing) {
-      const shouldInstall = await p.confirm({
+      // In non-interactive mode, auto-install required deps
+      const shouldInstall = nonInteractive ? true : await p.confirm({
         message: "Install " + dep.name + "? (" + dep.description + ")",
         initialValue: true,
       });
@@ -1931,8 +1932,8 @@ async function setup() {
     }
   }
 
-  // Only prompt for optional deps if there are missing ones
-  if (optionalMissing.length > 0) {
+  // Only prompt for optional deps if there are missing ones (skip in non-interactive mode)
+  if (optionalMissing.length > 0 && !nonInteractive) {
     const installable = optionalMissing.filter(
       (r) => r.dep.installType !== "manual",
     );
@@ -2099,135 +2100,157 @@ async function setup() {
     p.log.message(dim('  No OpenCode config found (skipping MCP check)'));
   }
 
-  // Model selection
-  p.log.step("Configuring swarm agents...");
-  p.log.message(dim("  Coordinator handles orchestration, worker executes tasks"));
+  // Model defaults: opus for coordinator, sonnet for worker, haiku for lite
+  const DEFAULT_COORDINATOR = "anthropic/claude-opus-4-5";
+  const DEFAULT_WORKER = "anthropic/claude-sonnet-4-5";
+  const DEFAULT_LITE = "anthropic/claude-haiku-4-5";
 
-  const coordinatorModel = await p.select({
-    message: "Select coordinator model (for orchestration/planning):",
-    options: [
-      {
-        value: "anthropic/claude-sonnet-4-5",
-        label: "Claude Sonnet 4.5",
-        hint: "Best balance of speed and capability (recommended)",
-      },
-      {
-        value: "anthropic/claude-haiku-4-5",
-        label: "Claude Haiku 4.5",
-        hint: "Fast and cost-effective",
-      },
-      {
-        value: "anthropic/claude-opus-4-5",
-        label: "Claude Opus 4.5",
-        hint: "Most capable, slower",
-      },
-      {
-        value: "openai/gpt-4o",
-        label: "GPT-4o",
-        hint: "Fast, good for most tasks",
-      },
-      {
-        value: "openai/gpt-4-turbo",
-        label: "GPT-4 Turbo",
-        hint: "Powerful, more expensive",
-      },
-      {
-        value: "google/gemini-2.0-flash",
-        label: "Gemini 2.0 Flash",
-        hint: "Fast and capable",
-      },
-      {
-        value: "google/gemini-1.5-pro",
-        label: "Gemini 1.5 Pro",
-        hint: "More capable",
-      },
-    ],
-    initialValue: "anthropic/claude-sonnet-4-5",
-  });
+  // Model selection (skip if non-interactive)
+  let coordinatorModel: string;
+  let workerModel: string;
+  let liteModel: string;
 
-  if (p.isCancel(coordinatorModel)) {
-    p.cancel("Setup cancelled");
-    process.exit(0);
-  }
+  if (nonInteractive) {
+    coordinatorModel = DEFAULT_COORDINATOR;
+    workerModel = DEFAULT_WORKER;
+    liteModel = DEFAULT_LITE;
+    p.log.step("Using default models:");
+    p.log.message(dim(`  Coordinator: ${coordinatorModel}`));
+    p.log.message(dim(`  Worker: ${workerModel}`));
+    p.log.message(dim(`  Lite: ${liteModel}`));
+  } else {
+    p.log.step("Configuring swarm agents...");
+    p.log.message(dim("  Coordinator handles orchestration, worker executes tasks"));
 
-  const workerModel = await p.select({
-    message: "Select worker model (for task execution):",
-    options: [
-      {
-        value: "anthropic/claude-haiku-4-5",
-        label: "Claude Haiku 4.5",
-        hint: "Fast and cost-effective (recommended)",
-      },
-      {
-        value: "anthropic/claude-sonnet-4-5",
-        label: "Claude Sonnet 4.5",
-        hint: "Best balance of speed and capability",
-      },
-      {
-        value: "anthropic/claude-opus-4-5",
-        label: "Claude Opus 4.5",
-        hint: "Most capable, slower",
-      },
-      {
-        value: "openai/gpt-4o",
-        label: "GPT-4o",
-        hint: "Fast, good for most tasks",
-      },
-      {
-        value: "openai/gpt-4-turbo",
-        label: "GPT-4 Turbo",
-        hint: "Powerful, more expensive",
-      },
-      {
-        value: "google/gemini-2.0-flash",
-        label: "Gemini 2.0 Flash",
-        hint: "Fast and capable",
-      },
-      {
-        value: "google/gemini-1.5-pro",
-        label: "Gemini 1.5 Pro",
-        hint: "More capable",
-      },
-    ],
-    initialValue: "anthropic/claude-haiku-4-5",
-  });
+    const selectedCoordinator = await p.select({
+      message: "Select coordinator model (for orchestration/planning):",
+      options: [
+        {
+          value: "anthropic/claude-opus-4-5",
+          label: "Claude Opus 4.5",
+          hint: "Most capable, best for complex orchestration (recommended)",
+        },
+        {
+          value: "anthropic/claude-sonnet-4-5",
+          label: "Claude Sonnet 4.5",
+          hint: "Good balance of speed and capability",
+        },
+        {
+          value: "anthropic/claude-haiku-4-5",
+          label: "Claude Haiku 4.5",
+          hint: "Fast and cost-effective",
+        },
+        {
+          value: "openai/gpt-4o",
+          label: "GPT-4o",
+          hint: "Fast, good for most tasks",
+        },
+        {
+          value: "openai/gpt-4-turbo",
+          label: "GPT-4 Turbo",
+          hint: "Powerful, more expensive",
+        },
+        {
+          value: "google/gemini-2.0-flash",
+          label: "Gemini 2.0 Flash",
+          hint: "Fast and capable",
+        },
+        {
+          value: "google/gemini-1.5-pro",
+          label: "Gemini 1.5 Pro",
+          hint: "More capable",
+        },
+      ],
+      initialValue: DEFAULT_COORDINATOR,
+    });
 
-  if (p.isCancel(workerModel)) {
-    p.cancel("Setup cancelled");
-    process.exit(0);
-  }
+    if (p.isCancel(selectedCoordinator)) {
+      p.cancel("Setup cancelled");
+      process.exit(0);
+    }
+    coordinatorModel = selectedCoordinator;
 
-  // Lite model selection for simple tasks (docs, tests)
-  const liteModel = await p.select({
-    message: "Select lite model (for docs, tests, simple edits):",
-    options: [
-      {
-        value: "anthropic/claude-haiku-4-5",
-        label: "Claude Haiku 4.5",
-        hint: "Fast and cost-effective (recommended)",
-      },
-      {
-        value: "anthropic/claude-sonnet-4-5",
-        label: "Claude Sonnet 4.5",
-        hint: "More capable, slower",
-      },
-      {
-        value: "openai/gpt-4o-mini",
-        label: "GPT-4o Mini",
-        hint: "Fast and cheap",
-      },
-      {
-        value: "google/gemini-2.0-flash",
-        label: "Gemini 2.0 Flash",
-        hint: "Fast and capable",
-      },
-    ],
-    initialValue: "anthropic/claude-haiku-4-5",
-  });
+    const selectedWorker = await p.select({
+      message: "Select worker model (for task execution):",
+      options: [
+        {
+          value: "anthropic/claude-sonnet-4-5",
+          label: "Claude Sonnet 4.5",
+          hint: "Best balance of speed and capability (recommended)",
+        },
+        {
+          value: "anthropic/claude-haiku-4-5",
+          label: "Claude Haiku 4.5",
+          hint: "Fast and cost-effective",
+        },
+        {
+          value: "anthropic/claude-opus-4-5",
+          label: "Claude Opus 4.5",
+          hint: "Most capable, slower",
+        },
+        {
+          value: "openai/gpt-4o",
+          label: "GPT-4o",
+          hint: "Fast, good for most tasks",
+        },
+        {
+          value: "openai/gpt-4-turbo",
+          label: "GPT-4 Turbo",
+          hint: "Powerful, more expensive",
+        },
+        {
+          value: "google/gemini-2.0-flash",
+          label: "Gemini 2.0 Flash",
+          hint: "Fast and capable",
+        },
+        {
+          value: "google/gemini-1.5-pro",
+          label: "Gemini 1.5 Pro",
+          hint: "More capable",
+        },
+      ],
+      initialValue: DEFAULT_WORKER,
+    });
 
-  if (p.isCancel(liteModel)) {
-    p.cancel("Setup cancelled");
-    process.exit(0);
+    if (p.isCancel(selectedWorker)) {
+      p.cancel("Setup cancelled");
+      process.exit(0);
+    }
+    workerModel = selectedWorker;
+
+    // Lite model selection for simple tasks (docs, tests)
+    const selectedLite = await p.select({
+      message: "Select lite model (for docs, tests, simple edits):",
+      options: [
+        {
+          value: "anthropic/claude-haiku-4-5",
+          label: "Claude Haiku 4.5",
+          hint: "Fast and cost-effective (recommended)",
+        },
+        {
+          value: "anthropic/claude-sonnet-4-5",
+          label: "Claude Sonnet 4.5",
+          hint: "More capable, slower",
+        },
+        {
+          value: "openai/gpt-4o-mini",
+          label: "GPT-4o Mini",
+          hint: "Fast and cheap",
+        },
+        {
+          value: "google/gemini-2.0-flash",
+          label: "Gemini 2.0 Flash",
+          hint: "Fast and capable",
+        },
+      ],
+      initialValue: DEFAULT_LITE,
+    });
+
+    if (p.isCancel(selectedLite)) {
+      p.cancel("Setup cancelled");
+      process.exit(0);
+    }
+    liteModel = selectedLite;
   }
 
   p.log.success("Selected models:");
@@ -2249,7 +2272,8 @@ async function setup() {
 
   // Write plugin and command files
   p.log.step("Writing configuration files...");
-  stats[writeFileWithStatus(pluginPath, getPluginWrapper(), "Plugin")]++;
+  const pluginContent = getPluginWrapper().replace(/__SWARM_LITE_MODEL__/g, liteModel);
+  stats[writeFileWithStatus(pluginPath, pluginContent, "Plugin")]++;
   stats[writeFileWithStatus(commandPath, SWARM_COMMAND, "Command")]++;
 
   // Write nested agent files (swarm/planner.md, swarm/worker.md, swarm/researcher.md)
@@ -2288,21 +2312,8 @@ async function setup() {
     );
 
     if (missingBundled.length > 0 || managedBundled.length > 0) {
-      const shouldSync = await p.confirm({
-        message:
-          "Sync bundled skills into your global skills directory? " +
-          (missingBundled.length > 0
-            ? `(${missingBundled.length} missing)`
-            : "(update managed skills)"),
-        initialValue: isReinstall || missingBundled.length > 0,
-      });
-
-      if (p.isCancel(shouldSync)) {
-        p.cancel("Setup cancelled");
-        process.exit(0);
-      }
-
-      if (shouldSync) {
+      // Always sync bundled skills - no prompt needed
+      {
         const syncSpinner = p.spinner();
         syncSpinner.start("Syncing bundled skills...");
         try {
@@ -2339,15 +2350,10 @@ async function setup() {
     }
   }
 
-  // Offer to update AGENTS.md with skill awareness
+  // Always update AGENTS.md with skill awareness - no prompt needed
   const agentsPath = join(configDir, "AGENTS.md");
   if (existsSync(agentsPath)) {
-    const updateAgents = await p.confirm({
-      message: "Update AGENTS.md with skill awareness?",
-      initialValue: true,
-    });
-
-    if (!p.isCancel(updateAgents) && updateAgents) {
+    {
       const s = p.spinner();
       s.start("Updating AGENTS.md...");
 
@@ -2708,8 +2714,10 @@ async function help() {
   console.log(magenta("  " + getRandomMessage()));
   console.log(`
 ${cyan("Commands:")}
-  swarm setup     Interactive installer - checks and installs dependencies
-  swarm doctor    Health check - shows status of all dependencies
+  swarm setup           Interactive installer - checks and installs dependencies
+    --reinstall, -r     Skip prompt, go straight to reinstall
+    --yes, -y           Non-interactive with defaults (opus/sonnet/haiku)
+  swarm doctor          Health check - shows status of all dependencies
   swarm init      Initialize beads in current project
   swarm config    Show paths to generated config files
   swarm agents    Update AGENTS.md with skill awareness
@@ -3101,17 +3109,43 @@ interface LogLine {
   time: string;
   module: string;
   msg: string;
+  data?: Record<string, unknown>; // Extra structured data
 }
 
-function parseLogLine(line: string): LogLine | null {
+function parseLogLine(line: string, sourceFile?: string): LogLine | null {
   try {
     const parsed = JSON.parse(line);
-    if (typeof parsed.level === "number" && parsed.time && parsed.msg) {
+    if (parsed.time && parsed.msg) {
+      // Handle both pino format (level: number) and plugin wrapper format (level: string)
+      let level: number;
+      if (typeof parsed.level === "number") {
+        level = parsed.level;
+      } else if (typeof parsed.level === "string") {
+        level = levelNameToNumber(parsed.level);
+      } else {
+        level = 30; // default to info
+      }
+      
+      // Derive module from: explicit field, or source filename (e.g., "compaction.log" -> "compaction")
+      let module = parsed.module;
+      if (!module && sourceFile) {
+        // Extract module from filename: "compaction.log" -> "compaction", "swarm.1log" -> "swarm"
+        const match = sourceFile.match(/([^/]+?)(?:\.\d+)?\.?log$/);
+        if (match) {
+          module = match[1];
+        }
+      }
+      
+      // Extract extra data (everything except core fields)
+      const { level: _l, time: _t, module: _m, msg: _msg, ...extraData } = parsed;
+      const hasExtraData = Object.keys(extraData).length > 0;
+      
       return {
-        level: parsed.level,
+        level,
         time: parsed.time,
-        module: parsed.module || "unknown",
+        module: module || "unknown",
         msg: parsed.msg,
+        data: hasExtraData ? extraData : undefined,
       };
     }
   } catch {
@@ -3164,36 +3198,51 @@ function parseDuration(duration: string): number | null {
   return value * multipliers[unit];
 }
 
-function formatLogLine(log: LogLine, useColor = true): string {
+function formatLogLine(log: LogLine, useColor = true, verbose = false): string {
   const timestamp = new Date(log.time).toLocaleTimeString();
   const levelName = levelToName(log.level);
   const module = log.module.padEnd(12);
   const levelStr = useColor ? levelToColor(log.level)(levelName) : levelName;
   
-  return `${timestamp} ${levelStr} ${module} ${log.msg}`;
+  let output = `${timestamp} ${levelStr} ${module} ${log.msg}`;
+  
+  // In verbose mode, pretty print the structured data
+  if (verbose && log.data) {
+    output += `\n${dim(JSON.stringify(log.data, null, 2))}`;
+  }
+  
+  return output;
 }
 
-function readLogFiles(dir: string): string[] {
+interface LogEntry {
+  line: string;
+  file: string;
+}
+
+function readLogFiles(dir: string): LogEntry[] {
   if (!existsSync(dir)) return [];
   
   const allFiles = readdirSync(dir);
+  // Match both pino-roll format (*.1log, *.2log) AND plain *.log files
   const logFiles = allFiles
-    .filter((f: string) => /\.\d+log$/.test(f))
+    .filter((f: string) => /\.\d+log$/.test(f) || /\.log$/.test(f))
     .sort()
     .map((f: string) => join(dir, f));
   
-  const lines: string[] = [];
+  const entries: LogEntry[] = [];
   for (const file of logFiles) {
     try {
       const content = readFileSync(file, "utf-8");
       const fileLines = content.split("\n").filter((line: string) => line.trim());
-      lines.push(...fileLines);
+      for (const line of fileLines) {
+        entries.push({ line, file });
+      }
     } catch {
       // Skip unreadable files
     }
   }
   
-  return lines;
+  return entries;
 }
 
 async function logs() {
@@ -3207,6 +3256,7 @@ async function logs() {
   let limit = 50;
   let watchMode = false;
   let pollInterval = 1000; // 1 second default
+  let verbose = false;
   
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -3231,6 +3281,8 @@ async function logs() {
       }
     } else if (arg === "--watch" || arg === "-w") {
       watchMode = true;
+    } else if (arg === "--verbose" || arg === "-v") {
+      verbose = true;
     } else if (arg === "--interval" && i + 1 < args.length) {
       pollInterval = parseInt(args[++i], 10);
       if (isNaN(pollInterval) || pollInterval < 100) {
@@ -3290,7 +3342,7 @@ async function logs() {
     // Initialize positions from current file sizes
     const initializePositions = () => {
       if (!existsSync(logsDir)) return;
-      const files = readdirSync(logsDir).filter((f: string) => /\.\d+log$/.test(f));
+      const files = readdirSync(logsDir).filter((f: string) => /\.\d+log$/.test(f) || /\.log$/.test(f));
       for (const file of files) {
         const filePath = join(logsDir, file);
         try {
@@ -3327,14 +3379,14 @@ async function logs() {
     };
     
     // Print initial logs (last N lines)
-    const rawLines = readLogFiles(logsDir);
-    let logs: LogLine[] = rawLines
-      .map(parseLogLine)
+    const rawEntries = readLogFiles(logsDir);
+    let logs: LogLine[] = rawEntries
+      .map(entry => parseLogLine(entry.line, entry.file))
       .filter((log): log is LogLine => log !== null);
     logs = filterLogs(logs).slice(-limit);
     
     for (const log of logs) {
-      console.log(formatLogLine(log));
+      console.log(formatLogLine(log, true, verbose));
     }
     
     // Initialize positions after printing initial logs
@@ -3344,18 +3396,18 @@ async function logs() {
     const pollForNewLogs = () => {
       if (!existsSync(logsDir)) return;
       
-      const files = readdirSync(logsDir).filter((f: string) => /\.\d+log$/.test(f));
+      const files = readdirSync(logsDir).filter((f: string) => /\.\d+log$/.test(f) || /\.log$/.test(f));
       
       for (const file of files) {
         const filePath = join(logsDir, file);
         const newLines = readNewLines(filePath);
         
         for (const line of newLines) {
-          const parsed = parseLogLine(line);
+          const parsed = parseLogLine(line, filePath);
           if (parsed) {
             const filtered = filterLogs([parsed]);
             if (filtered.length > 0) {
-              console.log(formatLogLine(filtered[0]));
+              console.log(formatLogLine(filtered[0], true, verbose));
             }
           }
         }
@@ -3381,11 +3433,11 @@ async function logs() {
   }
   
   // Non-watch mode - one-shot output
-  const rawLines = readLogFiles(logsDir);
+  const rawEntries = readLogFiles(logsDir);
   
   // Parse and filter
-  let logs: LogLine[] = rawLines
-    .map(parseLogLine)
+  let logs: LogLine[] = rawEntries
+    .map(entry => parseLogLine(entry.line, entry.file))
     .filter((log): log is LogLine => log !== null);
   
   logs = filterLogs(logs);
@@ -3410,7 +3462,7 @@ async function logs() {
     console.log();
     
     for (const log of logs) {
-      console.log(formatLogLine(log));
+      console.log(formatLogLine(log, true, verbose));
     }
     console.log();
   }
@@ -3522,9 +3574,12 @@ async function db() {
 const command = process.argv[2];
 
 switch (command) {
-  case "setup":
-    await setup();
+  case "setup": {
+    const reinstallFlag = process.argv.includes("--reinstall") || process.argv.includes("-r");
+    const yesFlag = process.argv.includes("--yes") || process.argv.includes("-y");
+    await setup(reinstallFlag || yesFlag, yesFlag);
     break;
+  }
   case "doctor":
     await doctor();
     break;

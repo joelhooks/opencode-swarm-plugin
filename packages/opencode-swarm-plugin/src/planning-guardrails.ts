@@ -7,6 +7,8 @@
  * @module planning-guardrails
  */
 
+import { captureCoordinatorEvent } from "./eval-capture.js";
+
 /**
  * Patterns that suggest file modification work
  * These indicate the todo is about implementation, not tracking
@@ -146,4 +148,206 @@ Swarm workers can complete these ${fileModificationCount} tasks in parallel.
  */
 export function shouldAnalyzeTool(toolName: string): boolean {
   return toolName === "todowrite" || toolName === "TodoWrite";
+}
+
+/**
+ * Violation patterns for coordinator behavior detection
+ *
+ * These patterns identify when a coordinator is performing work
+ * that should be delegated to worker agents.
+ *
+ * @example
+ * ```ts
+ * // Bad: Coordinator editing files
+ * if (VIOLATION_PATTERNS.FILE_MODIFICATION_TOOLS.includes("edit")) { ... }
+ *
+ * // Good: Worker editing files
+ * // (no violation when agentContext === "worker")
+ * ```
+ */
+export const VIOLATION_PATTERNS = {
+  /**
+   * Tool names that modify files
+   *
+   * Coordinators should NEVER call these tools directly.
+   * Workers reserve files and make modifications.
+   */
+  FILE_MODIFICATION_TOOLS: ["edit", "write"],
+
+  /**
+   * Tool names for file reservations
+   *
+   * Coordinators don't reserve files - workers do this
+   * before editing to prevent conflicts.
+   */
+  RESERVATION_TOOLS: ["swarmmail_reserve", "agentmail_reserve"],
+
+  /**
+   * Regex patterns that indicate test execution in bash commands
+   *
+   * Coordinators review test results, workers run tests.
+   * Matches common test runners and test file patterns.
+   */
+  TEST_EXECUTION_PATTERNS: [
+    /\bbun\s+test\b/i,
+    /\bnpm\s+(run\s+)?test/i,
+    /\byarn\s+(run\s+)?test/i,
+    /\bpnpm\s+(run\s+)?test/i,
+    /\bjest\b/i,
+    /\bvitest\b/i,
+    /\bmocha\b/i,
+    /\bava\b/i,
+    /\btape\b/i,
+    /\.test\.(ts|js|tsx|jsx)\b/i,
+    /\.spec\.(ts|js|tsx|jsx)\b/i,
+  ],
+} as const;
+
+/**
+ * Result of violation detection
+ */
+export interface ViolationDetectionResult {
+  /** Whether a violation was detected */
+  isViolation: boolean;
+
+  /** Type of violation if detected */
+  violationType?:
+    | "coordinator_edited_file"
+    | "coordinator_ran_tests"
+    | "coordinator_reserved_files"
+    | "no_worker_spawned";
+
+  /** Human-readable message */
+  message?: string;
+
+  /** Payload data for the violation */
+  payload?: Record<string, unknown>;
+}
+
+/**
+ * Detect coordinator violations in real-time
+ *
+ * Checks for patterns that indicate a coordinator is doing work
+ * that should be delegated to workers:
+ * 1. Edit/Write tool calls (coordinators plan, workers implement)
+ * 2. Test execution (workers verify, coordinators review)
+ * 3. File reservations (workers reserve before editing)
+ * 4. No worker spawned after decomposition (coordinators must delegate)
+ *
+ * When a violation is detected, captures it via captureCoordinatorEvent().
+ *
+ * @param params - Detection parameters
+ * @returns Violation detection result
+ */
+export function detectCoordinatorViolation(params: {
+  sessionId: string;
+  epicId: string;
+  toolName: string;
+  toolArgs: Record<string, unknown>;
+  agentContext: "coordinator" | "worker";
+  checkNoSpawn?: boolean;
+}): ViolationDetectionResult {
+  const { sessionId, epicId, toolName, toolArgs, agentContext, checkNoSpawn = false } = params;
+
+  // Only check coordinator violations
+  if (agentContext !== "coordinator") {
+    return { isViolation: false };
+  }
+
+  // Check for file modification violation
+  if (VIOLATION_PATTERNS.FILE_MODIFICATION_TOOLS.includes(toolName as any)) {
+    const file = (toolArgs.filePath as string) || "";
+    const payload = { tool: toolName, file };
+
+    captureCoordinatorEvent({
+      session_id: sessionId,
+      epic_id: epicId,
+      timestamp: new Date().toISOString(),
+      event_type: "VIOLATION",
+      violation_type: "coordinator_edited_file",
+      payload,
+    });
+
+    return {
+      isViolation: true,
+      violationType: "coordinator_edited_file",
+      message: `⚠️ Coordinator should not edit files directly. Coordinators should spawn workers to implement changes.`,
+      payload,
+    };
+  }
+
+  // Check for test execution violation
+  if (toolName === "bash") {
+    const command = (toolArgs.command as string) || "";
+    const isTestCommand = VIOLATION_PATTERNS.TEST_EXECUTION_PATTERNS.some((pattern) =>
+      pattern.test(command),
+    );
+
+    if (isTestCommand) {
+      const payload = { tool: toolName, command };
+
+      captureCoordinatorEvent({
+        session_id: sessionId,
+        epic_id: epicId,
+        timestamp: new Date().toISOString(),
+        event_type: "VIOLATION",
+        violation_type: "coordinator_ran_tests",
+        payload,
+      });
+
+      return {
+        isViolation: true,
+        violationType: "coordinator_ran_tests",
+        message: `⚠️ Coordinator should not run tests directly. Workers run tests as part of their implementation verification.`,
+        payload,
+      };
+    }
+  }
+
+  // Check for file reservation violation
+  if (VIOLATION_PATTERNS.RESERVATION_TOOLS.includes(toolName as any)) {
+    const paths = (toolArgs.paths as string[]) || [];
+    const payload = { tool: toolName, paths };
+
+    captureCoordinatorEvent({
+      session_id: sessionId,
+      epic_id: epicId,
+      timestamp: new Date().toISOString(),
+      event_type: "VIOLATION",
+      violation_type: "coordinator_reserved_files",
+      payload,
+    });
+
+    return {
+      isViolation: true,
+      violationType: "coordinator_reserved_files",
+      message: `⚠️ Coordinator should not reserve files. Workers reserve files before editing to prevent conflicts.`,
+      payload,
+    };
+  }
+
+  // Check for no worker spawned after decomposition
+  if (toolName === "hive_create_epic" && checkNoSpawn) {
+    const epicTitle = (toolArgs.epic_title as string) || "";
+    const subtasks = (toolArgs.subtasks as unknown[]) || [];
+    const payload = { epic_title: epicTitle, subtask_count: subtasks.length };
+
+    captureCoordinatorEvent({
+      session_id: sessionId,
+      epic_id: epicId,
+      timestamp: new Date().toISOString(),
+      event_type: "VIOLATION",
+      violation_type: "no_worker_spawned",
+      payload,
+    });
+
+    return {
+      isViolation: true,
+      violationType: "no_worker_spawned",
+      message: `⚠️ Coordinator created decomposition without spawning workers. After hive_create_epic, use swarm_spawn_subtask for each task.`,
+      payload,
+    };
+  }
+
+  return { isViolation: false };
 }

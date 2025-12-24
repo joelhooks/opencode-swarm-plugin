@@ -83,6 +83,7 @@ import {
   isReviewApproved,
   getReviewStatus,
 } from "./swarm-review";
+import { captureCoordinatorEvent } from "./eval-capture.js";
 
 // ============================================================================
 // Helper Functions
@@ -1709,6 +1710,28 @@ Files touched: ${args.files_touched?.join(", ") || "none recorded"}`,
             },
       };
 
+      // Capture subtask completion outcome
+      try {
+        const durationMs = args.start_time ? Date.now() - args.start_time : 0;
+        captureCoordinatorEvent({
+          session_id: process.env.OPENCODE_SESSION_ID || "unknown",
+          epic_id: epicId,
+          timestamp: new Date().toISOString(),
+          event_type: "OUTCOME",
+          outcome_type: "subtask_success",
+          payload: {
+            bead_id: args.bead_id,
+            duration_ms: durationMs,
+            files_touched: args.files_touched || [],
+            verification_passed: verificationResult?.passed ?? false,
+            verification_skipped: args.skip_verification ?? false,
+          },
+        });
+      } catch (error) {
+        // Non-fatal - don't block completion if capture fails
+        console.warn("[swarm_complete] Failed to capture subtask_success:", error);
+      }
+
       return JSON.stringify(response, null, 2);
     } catch (error) {
       // CRITICAL: Notify coordinator of failure via swarm mail
@@ -1794,6 +1817,27 @@ Files touched: ${args.files_touched?.join(", ") || "none recorded"}`,
           mailError,
         );
         console.error(`[swarm_complete] Original error:`, error);
+      }
+
+      // Capture subtask failure outcome
+      try {
+        const durationMs = args.start_time ? Date.now() - args.start_time : 0;
+        captureCoordinatorEvent({
+          session_id: process.env.OPENCODE_SESSION_ID || "unknown",
+          epic_id: epicId,
+          timestamp: new Date().toISOString(),
+          event_type: "OUTCOME",
+          outcome_type: "subtask_failed",
+          payload: {
+            bead_id: args.bead_id,
+            duration_ms: durationMs,
+            failed_step: failedStep,
+            error_message: errorMessage.slice(0, 500),
+          },
+        });
+      } catch (captureError) {
+        // Non-fatal - don't block error return if capture fails
+        console.warn("[swarm_complete] Failed to capture subtask_failed:", captureError);
       }
 
       // Return structured error instead of throwing

@@ -14,6 +14,7 @@
  * - SWARM_PROJECT_DIR: Project directory (critical for database path)
  */
 import type { Plugin, PluginInput, Hooks } from "@opencode-ai/plugin";
+import type { ToolPart } from "@opencode-ai/sdk";
 import { tool } from "@opencode-ai/plugin";
 import { spawn } from "child_process";
 import { appendFileSync, mkdirSync, existsSync } from "node:fs";
@@ -67,6 +68,10 @@ function logCompaction(
 // Module-level project directory - set during plugin initialization
 // This is CRITICAL: without it, the CLI uses process.cwd() which may be wrong
 let projectDirectory: string = process.cwd();
+
+// Module-level SDK client - set during plugin initialization
+// Used for scanning session messages during compaction
+let sdkClient: any = null;
 
 // =============================================================================
 // CLI Execution Helper
@@ -1039,7 +1044,9 @@ async function querySwarmState(sessionID: string): Promise<SwarmStateSnapshot> {
     let cells: any[] = [];
     if (cellsResult.exitCode === 0) {
       try {
-        cells = JSON.parse(cellsResult.stdout);
+        const parsed = JSON.parse(cellsResult.stdout);
+        // Handle wrapped response: { success: true, data: [...] }
+        cells = Array.isArray(parsed) ? parsed : (parsed?.data ?? []);
       } catch (parseErr) {
         logCompaction("error", "query_swarm_state_parse_failed", {
           session_id: sessionID,
@@ -1175,7 +1182,7 @@ async function generateCompactionPrompt(
   snapshot: SwarmStateSnapshot,
 ): Promise<string | null> {
   const startTime = Date.now();
-  const liteModel = process.env.OPENCODE_LITE_MODEL || "claude-3-5-haiku-20241022";
+  const liteModel = process.env.OPENCODE_LITE_MODEL || "__SWARM_LITE_MODEL__";
 
   logCompaction("debug", "generate_compaction_prompt_start", {
     session_id: snapshot.sessionID,
@@ -1321,6 +1328,226 @@ Keep the prompt concise but actionable. Use actual data from the snapshot, not p
       duration_ms: totalDuration,
     });
     return null;
+  }
+}
+
+/**
+ * Session message scan result
+ */
+interface SessionScanResult {
+  messageCount: number;
+  toolCalls: Array<{
+    toolName: string;
+    args: Record<string, unknown>;
+    output?: string;
+  }>;
+  swarmDetected: boolean;
+  reasons: string[];
+}
+
+/**
+ * Scan session messages for swarm tool calls
+ * 
+ * Uses SDK client to fetch messages and look for swarm activity.
+ * This can detect swarm work even if no cells exist yet.
+ */
+async function scanSessionMessages(sessionID: string): Promise<SessionScanResult> {
+  const startTime = Date.now();
+  const result: SessionScanResult = {
+    messageCount: 0,
+    toolCalls: [],
+    swarmDetected: false,
+    reasons: [],
+  };
+
+  logCompaction("debug", "session_scan_start", {
+    session_id: sessionID,
+    has_sdk_client: !!sdkClient,
+  });
+
+  if (!sdkClient) {
+    logCompaction("warn", "session_scan_no_sdk_client", {
+      session_id: sessionID,
+    });
+    return result;
+  }
+
+  try {
+    // Fetch session messages
+    const messagesStart = Date.now();
+    const rawResponse = await sdkClient.session.messages({ path: { id: sessionID } });
+    const messagesDuration = Date.now() - messagesStart;
+
+    // Log the RAW response to understand its shape
+    logCompaction("debug", "session_scan_raw_response", {
+      session_id: sessionID,
+      response_type: typeof rawResponse,
+      is_array: Array.isArray(rawResponse),
+      is_null: rawResponse === null,
+      is_undefined: rawResponse === undefined,
+      keys: rawResponse && typeof rawResponse === 'object' ? Object.keys(rawResponse) : [],
+      raw_preview: JSON.stringify(rawResponse)?.slice(0, 500),
+    });
+
+    // The response might be wrapped - check common patterns
+    const messages = Array.isArray(rawResponse) 
+      ? rawResponse 
+      : rawResponse?.data 
+      ? rawResponse.data 
+      : rawResponse?.messages 
+      ? rawResponse.messages 
+      : rawResponse?.items
+      ? rawResponse.items
+      : [];
+
+    result.messageCount = messages?.length ?? 0;
+
+    logCompaction("debug", "session_scan_messages_fetched", {
+      session_id: sessionID,
+      duration_ms: messagesDuration,
+      message_count: result.messageCount,
+      extraction_method: Array.isArray(rawResponse) ? 'direct_array' : rawResponse?.data ? 'data_field' : rawResponse?.messages ? 'messages_field' : rawResponse?.items ? 'items_field' : 'fallback_empty',
+    });
+
+    if (!Array.isArray(messages) || messages.length === 0) {
+      logCompaction("debug", "session_scan_no_messages", {
+        session_id: sessionID,
+      });
+      return result;
+    }
+
+    // Swarm-related tool patterns
+    const swarmTools = [
+      // High confidence - active swarm coordination
+      "hive_create_epic",
+      "swarm_decompose",
+      "swarm_spawn_subtask",
+      "swarm_complete",
+      "swarmmail_init",
+      "swarmmail_reserve",
+      // Medium confidence - swarm activity
+      "hive_start",
+      "hive_close",
+      "swarm_status",
+      "swarm_progress",
+      "swarmmail_send",
+      // Low confidence - possible swarm
+      "hive_create",
+      "hive_query",
+    ];
+
+    const highConfidenceTools = new Set([
+      "hive_create_epic",
+      "swarm_decompose",
+      "swarm_spawn_subtask",
+      "swarmmail_init",
+      "swarmmail_reserve",
+    ]);
+
+    // Scan messages for tool calls
+    let swarmToolCount = 0;
+    let highConfidenceCount = 0;
+    
+    // Debug: collect part types to understand message structure
+    const partTypeCounts: Record<string, number> = {};
+    let messagesWithParts = 0;
+    let messagesWithoutParts = 0;
+    let samplePartTypes: string[] = [];
+
+    for (const message of messages) {
+      if (!message.parts || !Array.isArray(message.parts)) {
+        messagesWithoutParts++;
+        continue;
+      }
+      messagesWithParts++;
+
+      for (const part of message.parts) {
+        const partType = part.type || "unknown";
+        partTypeCounts[partType] = (partTypeCounts[partType] || 0) + 1;
+        
+        // Collect first 10 unique part types for debugging
+        if (samplePartTypes.length < 10 && !samplePartTypes.includes(partType)) {
+          samplePartTypes.push(partType);
+        }
+        
+        // Check if this is a tool call part
+        // OpenCode SDK: ToolPart has type="tool", tool=<string name>, state={...}
+        if (part.type === "tool") {
+          const toolPart = part as ToolPart;
+          const toolName = toolPart.tool; // tool name is a string directly
+          
+          if (toolName && swarmTools.includes(toolName)) {
+            swarmToolCount++;
+            
+            if (highConfidenceTools.has(toolName)) {
+              highConfidenceCount++;
+            }
+
+            // Extract args/output from state if available
+            const state = toolPart.state;
+            const args = state && "input" in state ? state.input : {};
+            const output = state && "output" in state ? state.output : undefined;
+
+            result.toolCalls.push({
+              toolName,
+              args,
+              output,
+            });
+
+            logCompaction("debug", "session_scan_tool_found", {
+              session_id: sessionID,
+              tool_name: toolName,
+              is_high_confidence: highConfidenceTools.has(toolName),
+            });
+          }
+        }
+      }
+    }
+
+    // Determine if swarm detected based on tool calls
+    if (highConfidenceCount > 0) {
+      result.swarmDetected = true;
+      result.reasons.push(`${highConfidenceCount} high-confidence swarm tools (${Array.from(new Set(result.toolCalls.filter(tc => highConfidenceTools.has(tc.toolName)).map(tc => tc.toolName))).join(", ")})`);
+    }
+    
+    if (swarmToolCount > 0 && !result.swarmDetected) {
+      result.swarmDetected = true;
+      result.reasons.push(`${swarmToolCount} swarm-related tools used`);
+    }
+
+    const totalDuration = Date.now() - startTime;
+    
+    // Debug: log part type distribution to understand message structure
+    logCompaction("debug", "session_scan_part_types", {
+      session_id: sessionID,
+      messages_with_parts: messagesWithParts,
+      messages_without_parts: messagesWithoutParts,
+      part_type_counts: partTypeCounts,
+      sample_part_types: samplePartTypes,
+    });
+    
+    logCompaction("info", "session_scan_complete", {
+      session_id: sessionID,
+      duration_ms: totalDuration,
+      message_count: result.messageCount,
+      tool_call_count: result.toolCalls.length,
+      swarm_tool_count: swarmToolCount,
+      high_confidence_count: highConfidenceCount,
+      swarm_detected: result.swarmDetected,
+      reasons: result.reasons,
+      unique_tools: Array.from(new Set(result.toolCalls.map(tc => tc.toolName))),
+    });
+
+    return result;
+  } catch (err) {
+    const totalDuration = Date.now() - startTime;
+    logCompaction("error", "session_scan_exception", {
+      session_id: sessionID,
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+      duration_ms: totalDuration,
+    });
+    return result;
   }
 }
 
@@ -1647,12 +1874,17 @@ type ExtendedHooks = Hooks & {
   ) => Promise<void>;
 };
 
-export const SwarmPlugin: Plugin = async (
+// NOTE: Only default export - named exports cause double registration!
+// OpenCode's plugin loader calls ALL exports as functions.
+const SwarmPlugin: Plugin = async (
   input: PluginInput,
 ): Promise<ExtendedHooks> => {
   // CRITICAL: Set project directory from OpenCode input
   // Without this, CLI uses wrong database path
   projectDirectory = input.directory;
+  
+  // Store SDK client for session message scanning during compaction
+  sdkClient = input.client;
   
   return {
     tool: {
@@ -1751,7 +1983,23 @@ export const SwarmPlugin: Plugin = async (
       });
 
       // =======================================================================
-      // STEP 1: Detect swarm state from hive
+      // STEP 1: Scan session messages for swarm tool calls
+      // =======================================================================
+      const sessionScanStart = Date.now();
+      const sessionScan = await scanSessionMessages(input.sessionID);
+      const sessionScanDuration = Date.now() - sessionScanStart;
+
+      logCompaction("info", "session_scan_results", {
+        session_id: input.sessionID,
+        duration_ms: sessionScanDuration,
+        message_count: sessionScan.messageCount,
+        tool_call_count: sessionScan.toolCalls.length,
+        swarm_detected_from_messages: sessionScan.swarmDetected,
+        reasons: sessionScan.reasons,
+      });
+
+      // =======================================================================
+      // STEP 2: Detect swarm state from hive cells
       // =======================================================================
       const detectionStart = Date.now();
       const detection = await detectSwarm();
@@ -1764,6 +2012,57 @@ export const SwarmPlugin: Plugin = async (
         confidence: detection.confidence,
         reasons: detection.reasons,
         reason_count: detection.reasons.length,
+      });
+
+      // =======================================================================
+      // STEP 3: Merge session scan with hive detection for final confidence
+      // =======================================================================
+      // If session messages show high-confidence swarm tools, boost confidence
+      if (sessionScan.swarmDetected && sessionScan.reasons.some(r => r.includes("high-confidence"))) {
+        if (detection.confidence === "none" || detection.confidence === "low") {
+          detection.confidence = "high";
+          detection.detected = true;
+          detection.reasons.push(...sessionScan.reasons);
+          
+          logCompaction("info", "confidence_boost_from_session_scan", {
+            session_id: input.sessionID,
+            original_confidence: detection.confidence,
+            boosted_to: "high",
+            session_reasons: sessionScan.reasons,
+          });
+        }
+      } else if (sessionScan.swarmDetected) {
+        // Medium boost for any swarm tools found
+        if (detection.confidence === "none") {
+          detection.confidence = "medium";
+          detection.detected = true;
+          detection.reasons.push(...sessionScan.reasons);
+
+          logCompaction("info", "confidence_boost_from_session_scan", {
+            session_id: input.sessionID,
+            original_confidence: "none",
+            boosted_to: "medium",
+            session_reasons: sessionScan.reasons,
+          });
+        } else if (detection.confidence === "low") {
+          detection.confidence = "medium";
+          detection.reasons.push(...sessionScan.reasons);
+
+          logCompaction("info", "confidence_boost_from_session_scan", {
+            session_id: input.sessionID,
+            original_confidence: "low",
+            boosted_to: "medium",
+            session_reasons: sessionScan.reasons,
+          });
+        }
+      }
+
+      logCompaction("info", "final_swarm_detection", {
+        session_id: input.sessionID,
+        confidence: detection.confidence,
+        detected: detection.detected,
+        combined_reasons: detection.reasons,
+        message_scan_contributed: sessionScan.swarmDetected,
       });
 
       if (detection.confidence === "high" || detection.confidence === "medium") {

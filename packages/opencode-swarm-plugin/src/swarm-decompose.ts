@@ -20,6 +20,7 @@ import {
   NEGATIVE_MARKERS,
   type DecompositionStrategy,
 } from "./swarm-strategies";
+import { captureCoordinatorEvent } from "./eval-capture.js";
 
 // ============================================================================
 // Decomposition Prompt (temporary - will be moved to swarm-prompts.ts)
@@ -720,6 +721,25 @@ export const swarm_delegate_planning = tool({
       const selection = selectStrategy(args.task);
       selectedStrategy = selection.strategy;
       strategyReasoning = selection.reasoning;
+    }
+
+    // Capture strategy selection decision
+    try {
+      captureCoordinatorEvent({
+        session_id: process.env.OPENCODE_SESSION_ID || "unknown",
+        epic_id: "planning", // No epic ID yet - this is pre-decomposition
+        timestamp: new Date().toISOString(),
+        event_type: "DECISION",
+        decision_type: "strategy_selected",
+        payload: {
+          strategy: selectedStrategy,
+          reasoning: strategyReasoning,
+          task_preview: args.task.slice(0, 100),
+        },
+      });
+    } catch (error) {
+      // Non-fatal - don't block planning if capture fails
+      console.warn("[swarm_delegate_planning] Failed to capture strategy_selected:", error);
     }
 
     // Query CASS for similar past tasks

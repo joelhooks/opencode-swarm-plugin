@@ -9,12 +9,15 @@
  * 2. swarm_complete captures: outcome signals per subtask
  * 3. swarm_record_outcome captures: learning signals
  * 4. Human feedback (optional): accept/reject/modify
+ * 5. Coordinator events: decisions, violations, outcomes
+ * 6. Session capture: full coordinator session to ~/.config/swarm-tools/sessions/
  *
  * @module eval-capture
  */
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { z } from "zod";
-import * as fs from "fs";
-import * as path from "path";
 
 // ============================================================================
 // Schemas
@@ -119,6 +122,67 @@ export type PartialEvalRecord = Partial<EvalRecord> & {
   task: string;
 };
 
+/**
+ * Coordinator Event - captures coordinator decisions, violations, and outcomes
+ */
+export const CoordinatorEventSchema = z.discriminatedUnion("event_type", [
+  // DECISION events
+  z.object({
+    session_id: z.string(),
+    epic_id: z.string(),
+    timestamp: z.string(),
+    event_type: z.literal("DECISION"),
+    decision_type: z.enum([
+      "strategy_selected",
+      "worker_spawned",
+      "review_completed",
+      "decomposition_complete",
+    ]),
+    payload: z.any(),
+  }),
+  // VIOLATION events
+  z.object({
+    session_id: z.string(),
+    epic_id: z.string(),
+    timestamp: z.string(),
+    event_type: z.literal("VIOLATION"),
+    violation_type: z.enum([
+      "coordinator_edited_file",
+      "coordinator_ran_tests",
+      "coordinator_reserved_files",
+      "no_worker_spawned",
+    ]),
+    payload: z.any(),
+  }),
+  // OUTCOME events
+  z.object({
+    session_id: z.string(),
+    epic_id: z.string(),
+    timestamp: z.string(),
+    event_type: z.literal("OUTCOME"),
+    outcome_type: z.enum([
+      "subtask_success",
+      "subtask_retry",
+      "subtask_failed",
+      "epic_complete",
+    ]),
+    payload: z.any(),
+  }),
+]);
+export type CoordinatorEvent = z.infer<typeof CoordinatorEventSchema>;
+
+/**
+ * Coordinator Session - wraps a full coordinator session
+ */
+export const CoordinatorSessionSchema = z.object({
+  session_id: z.string(),
+  epic_id: z.string(),
+  start_time: z.string(),
+  end_time: z.string().optional(),
+  events: z.array(CoordinatorEventSchema),
+});
+export type CoordinatorSession = z.infer<typeof CoordinatorSessionSchema>;
+
 // ============================================================================
 // Storage
 // ============================================================================
@@ -155,7 +219,7 @@ export function appendEvalRecord(
 ): void {
   ensureEvalDataDir(projectPath);
   const evalPath = getEvalDataPath(projectPath);
-  const line = JSON.stringify(record) + "\n";
+  const line = `${JSON.stringify(record)}\n`;
   fs.appendFileSync(evalPath, line, "utf-8");
 }
 
@@ -211,7 +275,7 @@ export function updateEvalRecord(
 
   // Rewrite the file
   const evalPath = getEvalDataPath(projectPath);
-  const content = records.map((r) => JSON.stringify(r)).join("\n") + "\n";
+  const content = `${records.map((r) => JSON.stringify(r)).join("\n")}\n`;
   fs.writeFileSync(evalPath, content, "utf-8");
 
   return true;
@@ -483,4 +547,99 @@ export function getEvalDataStats(projectPath: string): {
     avgScopeAccuracy,
     avgTimeBalance,
   };
+}
+
+// ============================================================================
+// Coordinator Session Capture
+// ============================================================================
+
+/**
+ * Get the session directory path
+ */
+export function getSessionDir(): string {
+  return path.join(os.homedir(), ".config", "swarm-tools", "sessions");
+}
+
+/**
+ * Get the session file path for a session ID
+ */
+export function getSessionPath(sessionId: string): string {
+  return path.join(getSessionDir(), `${sessionId}.jsonl`);
+}
+
+/**
+ * Ensure the session directory exists
+ */
+export function ensureSessionDir(): void {
+  const sessionDir = getSessionDir();
+  if (!fs.existsSync(sessionDir)) {
+    fs.mkdirSync(sessionDir, { recursive: true });
+  }
+}
+
+/**
+ * Capture a coordinator event to the session file
+ *
+ * Appends the event as a JSONL line to ~/.config/swarm-tools/sessions/{session_id}.jsonl
+ */
+export function captureCoordinatorEvent(event: CoordinatorEvent): void {
+  // Validate event
+  CoordinatorEventSchema.parse(event);
+
+  // Ensure directory exists
+  ensureSessionDir();
+
+  // Append to session file
+  const sessionPath = getSessionPath(event.session_id);
+  const line = `${JSON.stringify(event)}\n`;
+  fs.appendFileSync(sessionPath, line, "utf-8");
+}
+
+/**
+ * Read all events from a session file
+ */
+export function readSessionEvents(sessionId: string): CoordinatorEvent[] {
+  const sessionPath = getSessionPath(sessionId);
+  if (!fs.existsSync(sessionPath)) {
+    return [];
+  }
+
+  const content = fs.readFileSync(sessionPath, "utf-8");
+  const lines = content.trim().split("\n").filter(Boolean);
+
+  return lines.map((line) => {
+    const parsed = JSON.parse(line);
+    return CoordinatorEventSchema.parse(parsed);
+  });
+}
+
+/**
+ * Save a session - wraps all events in a CoordinatorSession structure
+ *
+ * Reads all events from the session file and wraps them in a session object.
+ * Returns null if the session file doesn't exist.
+ */
+export function saveSession(params: {
+  session_id: string;
+  epic_id: string;
+}): CoordinatorSession | null {
+  const events = readSessionEvents(params.session_id);
+  if (events.length === 0) {
+    return null;
+  }
+
+  // Get timestamps from events
+  const timestamps = events.map((e) => new Date(e.timestamp).getTime());
+  const startTime = new Date(Math.min(...timestamps)).toISOString();
+  const endTime = new Date(Math.max(...timestamps)).toISOString();
+
+  const session: CoordinatorSession = {
+    session_id: params.session_id,
+    epic_id: params.epic_id,
+    start_time: startTime,
+    end_time: endTime,
+    events,
+  };
+
+  return session;
 }

@@ -107,6 +107,44 @@ See `fixtures/decomposition-cases.ts` for example test cases covering:
 - Memory leak debugging
 - Feature flag system
 
+## Coordinator Session Eval
+
+### coordinator-session.eval.ts
+
+Scores coordinator discipline during swarm sessions.
+
+**Data Sources:**
+- Real captured sessions from `~/.config/swarm-tools/sessions/*.jsonl`
+- Synthetic fixtures from `fixtures/coordinator-sessions.ts`
+
+**Scorers:**
+- `violationCount` - Protocol violations (edit files, run tests, reserve files)
+- `spawnEfficiency` - Workers spawned / subtasks planned
+- `reviewThoroughness` - Reviews completed / workers finished
+- `timeToFirstSpawn` - Speed from decomposition to first worker spawn
+- `overallDiscipline` - Weighted composite score
+
+**Fixtures:**
+- `perfectCoordinator` - 0 violations, 100% spawn, 100% review, 30s to spawn
+- `badCoordinator` - 5 violations, 33% spawn, 0% review, 10min to spawn
+- `decentCoordinator` - 1 violation, 100% spawn, 50% review, 45s to spawn
+
+**Run:**
+```bash
+bunx evalite run evals/coordinator-session.eval.ts
+```
+
+## Data Loaders
+
+### lib/data-loader.ts
+
+Loads eval data from multiple sources:
+
+- `loadEvalCases()` - PGlite eval_records table
+- `loadCapturedSessions()` - Real coordinator sessions from `~/.config/swarm-tools/sessions/`
+- `hasRealEvalData()` - Check if enough real data exists
+- `getEvalDataSummary()` - Stats about available eval data
+
 ## Notes
 
 - Evalite v1.0.0-beta.15 installed

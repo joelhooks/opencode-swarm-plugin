@@ -14,6 +14,7 @@
 
 import { tool } from "@opencode-ai/plugin";
 import { generateWorkerHandoff } from "./swarm-orchestrate";
+import { captureCoordinatorEvent } from "./eval-capture.js";
 
 // ============================================================================
 // Prompt Templates
@@ -1106,6 +1107,25 @@ export const swarm_spawn_subtask = tool({
       .replace(/{task_id}/g, args.bead_id)
       .replace(/{files_touched}/g, filesJoined)
       .replace(/{worker_id}/g, "worker");  // Will be filled by actual worker name
+
+    // Capture worker spawn decision
+    try {
+      captureCoordinatorEvent({
+        session_id: process.env.OPENCODE_SESSION_ID || "unknown",
+        epic_id: args.epic_id,
+        timestamp: new Date().toISOString(),
+        event_type: "DECISION",
+        decision_type: "worker_spawned",
+        payload: {
+          bead_id: args.bead_id,
+          files: args.files,
+          worker_model: selectedModel,
+        },
+      });
+    } catch (error) {
+      // Non-fatal - don't block spawn if capture fails
+      console.warn("[swarm_spawn_subtask] Failed to capture worker_spawned:", error);
+    }
 
     return JSON.stringify(
       {

@@ -78,6 +78,18 @@ export {
   compactionQuality,
 } from "./compaction-scorers.js";
 
+// ============================================================================
+// Coordinator discipline scorers
+// ============================================================================
+
+export {
+  violationCount,
+  spawnEfficiency,
+  reviewThoroughness,
+  timeToFirstSpawn,
+  overallDiscipline,
+} from "./coordinator-discipline.js";
+
 /**
  * Checks that subtasks cover the full task scope
  *

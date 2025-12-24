@@ -130,6 +130,22 @@ export {
 } from "./streams/swarm-mail";
 
 // ============================================================================
+// Durable Streams (real-time event streaming via SSE)
+// ============================================================================
+
+export {
+	createDurableStreamAdapter,
+	type DurableStreamAdapter,
+	type StreamEvent,
+} from "./streams/durable-adapter.js";
+
+export {
+	createDurableStreamServer,
+	type DurableStreamServer,
+	type DurableStreamServerConfig,
+} from "./streams/durable-server.js";
+
+// ============================================================================
 // Analytics Module Exports
 // ============================================================================
 

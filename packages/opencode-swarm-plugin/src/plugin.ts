@@ -1,23 +1,23 @@
 /**
  * OpenCode Plugin Entry Point
  *
- * CRITICAL: Only export the plugin function from this file.
+ * CRITICAL: Only export the plugin function as DEFAULT from this file.
  *
  * OpenCode's plugin loader calls ALL exports as functions during initialization.
- * Exporting classes, constants, or non-function values will cause the plugin
- * to fail to load with cryptic errors.
+ * If you export both named AND default pointing to the same function, the plugin
+ * gets registered TWICE, causing hooks to fire multiple times.
  *
  * If you need to export utilities for external use, add them to src/index.ts instead.
  *
  * @example
- * // ✅ CORRECT - only export the plugin function
+ * // ✅ CORRECT - only default export
  * export default SwarmPlugin;
  *
- * // ❌ WRONG - will break plugin loading
- * export const VERSION = "1.0.0";
- * export class Helper {}
+ * // ❌ WRONG - causes double registration
+ * export { SwarmPlugin };
+ * export default SwarmPlugin;
  */
-import { SwarmPlugin } from "./index";
+import SwarmPlugin from "./index";
 
-// Only export the plugin function - nothing else!
-export { SwarmPlugin };
+// Only default export - no named exports!
+export default SwarmPlugin;

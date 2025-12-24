@@ -78,7 +78,7 @@ import { createCompactionHook } from "./compaction-hook";
  * @param input - Plugin context from OpenCode
  * @returns Plugin hooks including tools, events, and tool execution hooks
  */
-export const SwarmPlugin: Plugin = async (
+const SwarmPlugin: Plugin = async (
   input: PluginInput,
 ): Promise<Hooks> => {
   const { $, directory, client } = input;
