@@ -1,5 +1,103 @@
 # opencode-swarm-plugin
 
+## 0.34.0
+
+### Minor Changes
+
+- [`704c366`](https://github.com/joelhooks/swarm-tools/commit/704c36690fb6fd52cfb9222ddeef3b663dfdb9ed) Thanks [@joelhooks](https://github.com/joelhooks)! - ## 🪵 Pino Logging Infrastructure
+
+  > "You can't improve what you can't measure." — Peter Drucker
+
+  Finally, visibility into what the swarm is actually doing.
+
+  ### What's New
+
+  **Structured Logging with Pino**
+
+  - Daily log rotation via `pino-roll` (14-day retention)
+  - Logs to `~/.config/swarm-tools/logs/`
+  - Module-specific log files (e.g., `compaction.1log`, `swarm.1log`)
+  - Pretty mode for development: `SWARM_LOG_PRETTY=1`
+
+  **Compaction Hook Instrumented**
+
+  - 14 strategic log points across all phases
+  - START: session context, trigger reason
+  - GATHER: per-source timing (hive, swarm-mail, skills)
+  - DETECT/INJECT: confidence scores, context decisions
+  - COMPLETE: duration, success, what was injected
+
+  **New CLI: `swarm log`**
+
+  ```bash
+  swarm log                    # Tail recent logs
+  swarm log compaction         # Filter by module
+  swarm log --level warn       # Filter by severity
+  swarm log --since 1h         # Last hour only
+  swarm log --json | jq        # Pipe to jq for analysis
+  ```
+
+  ### Why This Matters
+
+  The compaction hook does a LOT of work with zero visibility:
+
+  - Context injection decisions
+  - Data gathering from multiple sources
+  - Template rendering and size calculations
+
+  Now you can answer: "What did compaction do on the last run?"
+
+  ### Technical Details
+
+  - Pino + pino-roll for async, non-blocking file writes
+  - Child loggers for module namespacing
+  - Lazy initialization pattern for test isolation
+  - 56 new tests (10 logger + 18 compaction + 28 CLI)
+
+  Complements existing `DEBUG=swarm:*` env var approach — Pino for structured file logs, debug for stderr filtering.
+
+### Patch Changes
+
+- [`b5792bd`](https://github.com/joelhooks/swarm-tools/commit/b5792bd5f6aa4bf3ad9757fe351bc144e84f09af) Thanks [@joelhooks](https://github.com/joelhooks)! - ## 🎯 Coordinators Remember Who They Are
+
+  Fixed the compaction bug where coordinators lost their identity after context compression.
+
+  **The Problem:**
+  After compaction, coordinators would wake up and start doing worker tasks directly (running tests, editing files) instead of spawning workers. The injected context said "you are a coordinator" but gave worker-style resume commands.
+
+  **The Fix:**
+  `buildDynamicSwarmState()` now generates coordinator-focused context:
+
+  ```
+  ## 🎯 YOU ARE THE COORDINATOR
+
+  **Primary role:** Orchestrate workers, review their output, unblock dependencies.
+  **Spawn workers** for implementation tasks - don't do them yourself.
+
+  **RESUME STEPS:**
+  1. Check swarm status: `swarm_status(epic_id="bd-actual-id", ...)`
+  2. Check inbox: `swarmmail_inbox(limit=5)`
+  3. For in_progress subtasks: Review with `swarm_review`
+  4. For open subtasks: Spawn workers with `swarm_spawn_subtask`
+  5. For blocked subtasks: Investigate and unblock
+  ```
+
+  Also captures specific swarm state during detection:
+
+  - Epic ID and title (not placeholders)
+  - Subtask counts by status
+  - Actual project path
+
+  **New eval infrastructure:**
+
+  - `coordinator-behavior.eval.ts` - LLM-as-judge eval testing whether Claude actually behaves like a coordinator given the injected context
+  - Scorers for coordinator tools, avoiding worker behaviors, and coordinator mindset
+
+  > "The coordinator's job is to keep the swarm cooking, not to cook themselves."
+
+- Updated dependencies [[`a78a40d`](https://github.com/joelhooks/swarm-tools/commit/a78a40de32eb34d1738b208f2a36929a4ab6cb81), [`5a7c084`](https://github.com/joelhooks/swarm-tools/commit/5a7c084514297b5b9ca5df9459a74f18eb805b8a)]:
+  - swarm-mail@1.5.0
+
 ## 0.33.0
 
 ### Minor Changes

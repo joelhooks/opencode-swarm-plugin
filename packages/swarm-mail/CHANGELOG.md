@@ -1,5 +1,83 @@
 # swarm-mail
 
+## 1.5.0
+
+### Minor Changes
+
+- [`a78a40d`](https://github.com/joelhooks/swarm-tools/commit/a78a40de32eb34d1738b208f2a36929a4ab6cb81) Thanks [@joelhooks](https://github.com/joelhooks)! - ## 📊 Analytics Queries: Four Golden Signals for Swarms
+
+  > "Without data, you're just another person with an opinion." — W. Edwards Deming
+
+  Five pre-built analytics queries based on Google's SRE Four Golden Signals:
+
+  ### The Queries
+
+  1. **Latency** - Task duration by strategy (avg/P95 completion times)
+  2. **Traffic** - Events per hour (time-series with bucketing)
+  3. **Errors** - Failed tasks by agent (failure tracking)
+  4. **Saturation** - Active reservations (resource usage)
+  5. **Conflicts** - Most contested files (hotspot detection)
+
+  ### Usage
+
+  ```typescript
+  import { runAnalyticsQuery, ANALYTICS_QUERIES } from "swarm-mail";
+
+  // List available queries
+  ANALYTICS_QUERIES.forEach((q) => console.log(q.name, q.description));
+
+  // Run a query
+  const result = await runAnalyticsQuery(db, "latency", {
+    since: new Date(Date.now() - 24 * 60 * 60 * 1000), // last 24h
+    format: "table", // or 'json', 'csv'
+  });
+  ```
+
+  ### Why This Matters
+
+  Event sourcing gives us the data. These queries give us the answers:
+
+  - Which decomposition strategies are fastest?
+  - Which agents fail most often?
+  - Which files cause the most contention?
+  - How busy is the swarm right now?
+
+  All queries use parameterized SQL (security) and support time filtering.
+
+### Patch Changes
+
+- [`5a7c084`](https://github.com/joelhooks/swarm-tools/commit/5a7c084514297b5b9ca5df9459a74f18eb805b8a) Thanks [@joelhooks](https://github.com/joelhooks)! - ## 🐝 SSE Streams Now Actually Stream
+
+  Fixed a subtle bug where SSE connections would hang indefinitely when requesting live events from the current head offset.
+
+  **The Problem:**
+  When a client connects with `?live=true&offset=N` where N equals the current head (meaning "only send me NEW events"), the server had nothing to send immediately. Bun's `fetch()` would block waiting for the first byte, and the connection would timeout.
+
+  **The Fix:**
+  Send an SSE comment (`: connected\n\n`) at stream start to flush headers. SSE comments are ignored by clients but establish the connection immediately.
+
+  ```typescript
+  // Before: fetch() hangs waiting for first byte
+  const stream = new ReadableStream({
+    async start(controller) {
+      // If no existing events, nothing gets enqueued
+      // Client's fetch() blocks forever
+    },
+  });
+
+  // After: connection established immediately
+  const stream = new ReadableStream({
+    async start(controller) {
+      controller.enqueue(encoder.encode(": connected\n\n"));
+      // Client receives headers, can start reading
+    },
+  });
+  ```
+
+  **Bonus fix:** Added `startOffset` parameter to `subscribe()` to eliminate async initialization race condition.
+
+  All 18 durable-server tests now pass (was 17/18).
+
 ## 1.4.0
 
 ### Minor Changes
