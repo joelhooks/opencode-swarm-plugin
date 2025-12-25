@@ -1,5 +1,13 @@
 # opencode-swarm-plugin
 
+## 0.42.2
+
+### Patch Changes
+
+- [`9ded2a0`](https://github.com/joelhooks/swarm-tools/commit/9ded2a0929f430a3297e3b62858aa1143179542f) Thanks [@joelhooks](https://github.com/joelhooks)! - ## Tweet Bot Learns to Speak Swarm
+
+  Release tweets now use a manyshot prompt with examples that match the project's voice: terse, technical, slightly cheeky. Focus on what devs can DO, not what we shipped.
+
 ## 0.42.1
 
 ### Patch Changes
