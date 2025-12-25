@@ -38,3 +38,4 @@ npm-debug.log*
 .opencode/node_modules/
 .opencode/bun.lock
 .npmrc
+.opencode/eval-history.jsonl

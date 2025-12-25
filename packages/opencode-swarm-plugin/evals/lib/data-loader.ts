@@ -112,23 +112,85 @@ export async function getEvalDataSummary(
 }
 
 /**
+ * Check if a session meets quality criteria
+ */
+function meetsQualityCriteria(
+  session: import("../../src/eval-capture.js").CoordinatorSession,
+  criteria: {
+    minEvents: number;
+    requireWorkerSpawn: boolean;
+    requireReview: boolean;
+  },
+): boolean {
+  // Filter 1: minEvents
+  if (session.events.length < criteria.minEvents) {
+    return false;
+  }
+
+  // Filter 2: requireWorkerSpawn
+  if (
+    criteria.requireWorkerSpawn &&
+    !session.events.some(
+      (e) => e.event_type === "DECISION" && e.decision_type === "worker_spawned",
+    )
+  ) {
+    return false;
+  }
+
+  // Filter 3: requireReview
+  if (
+    criteria.requireReview &&
+    !session.events.some(
+      (e) =>
+        e.event_type === "DECISION" && e.decision_type === "review_completed",
+    )
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
  * Load captured coordinator sessions from ~/.config/swarm-tools/sessions/
  *
  * Reads all JSONL session files and returns CoordinatorSession objects.
  *
+ * Quality filters are applied to focus on high-signal coordinator sessions:
+ * - minEvents: Filter out incomplete/aborted sessions (default: 3)
+ * - requireWorkerSpawn: Ensure session delegated to workers (default: true)
+ * - requireReview: Ensure coordinator reviewed work (default: true)
+ *
+ * Filters are applied BEFORE the limit for accurate sampling.
+ *
  * @param options - Filter options
- * @returns Array of coordinator sessions
+ * @returns Array of coordinator sessions that meet quality criteria
  */
 export async function loadCapturedSessions(options?: {
   sessionIds?: string[];
   limit?: number;
+  /** Minimum number of events required (default: 3) */
+  minEvents?: number;
+  /** Require at least one worker_spawned event (default: true) */
+  requireWorkerSpawn?: boolean;
+  /** Require at least one review_completed event (default: true) */
+  requireReview?: boolean;
+  /** Override session directory for testing */
+  sessionDir?: string;
 }): Promise<
   Array<{ session: import("../../src/eval-capture.js").CoordinatorSession }>
 > {
   const { getSessionDir, readSessionEvents, saveSession } = await import(
     "../../src/eval-capture.js"
   );
-  const sessionDir = getSessionDir();
+  const sessionDir = options?.sessionDir ?? getSessionDir();
+
+  // Default quality filters
+  const qualityCriteria = {
+    minEvents: options?.minEvents ?? 3,
+    requireWorkerSpawn: options?.requireWorkerSpawn ?? true,
+    requireReview: options?.requireReview ?? true,
+  };
 
   // If session dir doesn't exist, return empty
   if (!fs.existsSync(sessionDir)) {
@@ -149,31 +211,70 @@ export async function loadCapturedSessions(options?: {
   const sessions: Array<{
     session: import("../../src/eval-capture.js").CoordinatorSession;
   }> = [];
+  let filteredOutCount = 0;
 
   for (const file of targetFiles) {
     const sessionId = file.replace(".jsonl", "");
 
     try {
-      const events = readSessionEvents(sessionId);
+      let events: import("../../src/eval-capture.js").CoordinatorEvent[];
+
+      // If custom sessionDir, read directly; otherwise use eval-capture functions
+      if (options?.sessionDir) {
+        const sessionPath = `${sessionDir}/${sessionId}.jsonl`;
+        if (!fs.existsSync(sessionPath)) continue;
+
+        const content = fs.readFileSync(sessionPath, "utf-8");
+        const lines = content.trim().split("\n").filter(Boolean);
+        const { CoordinatorEventSchema } = await import(
+          "../../src/eval-capture.js"
+        );
+        events = lines.map((line) => {
+          const parsed = JSON.parse(line);
+          return CoordinatorEventSchema.parse(parsed);
+        });
+      } else {
+        events = readSessionEvents(sessionId);
+      }
+
       if (events.length === 0) continue;
 
       // Find epic_id from first event
       const epicId = events[0]?.epic_id;
       if (!epicId) continue;
 
-      const session = saveSession({ session_id: sessionId, epic_id: epicId });
-      if (session) {
+      // Build session object
+      const session: import("../../src/eval-capture.js").CoordinatorSession = {
+        session_id: sessionId,
+        epic_id: epicId,
+        start_time: events[0]?.timestamp ?? new Date().toISOString(),
+        end_time: events[events.length - 1]?.timestamp,
+        events,
+      };
+      if (!session) continue;
+
+      // Apply quality filters BEFORE limit
+      if (meetsQualityCriteria(session, qualityCriteria)) {
         sessions.push({ session });
+      } else {
+        filteredOutCount++;
       }
     } catch (error) {
       // Skip invalid sessions
       console.warn(`Failed to load session ${sessionId}:`, error);
     }
 
-    // Apply limit if specified
+    // Apply limit AFTER filtering
     if (options?.limit && sessions.length >= options.limit) {
       break;
     }
+  }
+
+  // Log filtering stats for visibility
+  if (filteredOutCount > 0) {
+    console.log(
+      `Filtered out ${filteredOutCount} sessions (minEvents=${qualityCriteria.minEvents}, requireWorkerSpawn=${qualityCriteria.requireWorkerSpawn}, requireReview=${qualityCriteria.requireReview})`,
+    );
   }
 
   return sessions;
