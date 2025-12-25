@@ -39,6 +39,8 @@ import type { DatabaseAdapter } from "../types/database.js";
  * - reservations (file locks)
  * - locks (distributed mutex)
  * - cursors (stream positions)
+ * - eval_records (decomposition eval tracking)
+ * - swarm_contexts (swarm checkpoint tracking)
  *
  * Idempotent - safe to call multiple times.
  *
@@ -282,6 +284,57 @@ export async function createLibSQLStreamsSchema(db: DatabaseAdapter): Promise<vo
     CREATE INDEX IF NOT EXISTS idx_cursors_updated 
     ON cursors(updated_at)
   `);
+
+  // ========================================================================
+  // Eval Records Table (decomposition eval tracking)
+  // ========================================================================
+  // IMPORTANT: This table structure MUST match db/schema/streams.ts (evalRecordsTable)
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS eval_records (
+      id TEXT PRIMARY KEY,
+      project_key TEXT NOT NULL,
+      task TEXT NOT NULL,
+      context TEXT,
+      strategy TEXT NOT NULL,
+      epic_title TEXT NOT NULL,
+      subtasks TEXT NOT NULL,
+      outcomes TEXT,
+      overall_success INTEGER,
+      total_duration_ms INTEGER,
+      total_errors INTEGER,
+      human_accepted INTEGER,
+      human_modified INTEGER,
+      human_notes TEXT,
+      file_overlap_count INTEGER,
+      scope_accuracy REAL,
+      time_balance_ratio REAL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+
+  // ========================================================================
+  // Swarm Contexts Table (swarm checkpoint tracking)
+  // ========================================================================
+  // IMPORTANT: This table structure MUST match db/schema/streams.ts (swarmContextsTable)
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS swarm_contexts (
+      id TEXT PRIMARY KEY,
+      project_key TEXT NOT NULL,
+      epic_id TEXT NOT NULL,
+      bead_id TEXT NOT NULL,
+      strategy TEXT NOT NULL,
+      files TEXT NOT NULL,
+      dependencies TEXT NOT NULL,
+      directives TEXT NOT NULL,
+      recovery TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      checkpointed_at INTEGER NOT NULL,
+      recovered_at INTEGER,
+      recovered_from_checkpoint INTEGER,
+      updated_at INTEGER NOT NULL
+    )
+  `);
 }
 
 /**
@@ -294,6 +347,8 @@ export async function createLibSQLStreamsSchema(db: DatabaseAdapter): Promise<vo
  */
 export async function dropLibSQLStreamsSchema(db: DatabaseAdapter): Promise<void> {
   // Drop in reverse dependency order
+  await db.exec("DROP TABLE IF EXISTS swarm_contexts");
+  await db.exec("DROP TABLE IF EXISTS eval_records");
   await db.exec("DROP TABLE IF EXISTS cursors");
   await db.exec("DROP TABLE IF EXISTS locks");
   await db.exec("DROP TABLE IF EXISTS message_recipients");
@@ -319,10 +374,10 @@ export async function validateLibSQLStreamsSchema(db: DatabaseAdapter): Promise<
     // Check all required tables exist
     const tables = await db.query(`
       SELECT name FROM sqlite_master 
-      WHERE type='table' AND name IN ('events', 'agents', 'messages', 'message_recipients', 'reservations', 'locks', 'cursors')
+      WHERE type='table' AND name IN ('events', 'agents', 'messages', 'message_recipients', 'reservations', 'locks', 'cursors', 'eval_records', 'swarm_contexts')
     `);
 
-    if (tables.rows.length !== 7) return false;
+    if (tables.rows.length !== 9) return false;
 
     // Check events table has required columns
     // Use table_xinfo to include generated columns (like sequence)

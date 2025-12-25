@@ -65,6 +65,42 @@ function logCompaction(
   }
 }
 
+/**
+ * Capture compaction event for evals (non-fatal dynamic import)
+ * 
+ * Uses dynamic import to avoid circular dependencies and keep the plugin wrapper
+ * self-contained. Captures COMPACTION events to session JSONL for eval analysis.
+ * 
+ * @param sessionID - Session ID
+ * @param epicID - Epic ID (or "unknown" if not detected)
+ * @param compactionType - Event type (detection_complete, prompt_generated, context_injected)
+ * @param payload - Event-specific data (full prompts, detection results, etc.)
+ */
+async function captureCompaction(
+  sessionID: string,
+  epicID: string,
+  compactionType: "detection_complete" | "prompt_generated" | "context_injected",
+  payload: any,
+): Promise<void> {
+  try {
+    // Dynamic import to avoid circular deps (plugin wrapper → src → plugin wrapper)
+    const { captureCompactionEvent } = await import("../src/eval-capture");
+    captureCompactionEvent({
+      session_id: sessionID,
+      epic_id: epicID,
+      compaction_type: compactionType,
+      payload,
+    });
+  } catch (err) {
+    // Non-fatal - capture failures shouldn't break compaction
+    logCompaction("warn", "compaction_capture_failed", {
+      session_id: sessionID,
+      compaction_type: compactionType,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 // Module-level project directory - set during plugin initialization
 // This is CRITICAL: without it, the CLI uses process.cwd() which may be wrong
 let projectDirectory: string = process.cwd();
@@ -2152,6 +2188,25 @@ const SwarmPlugin: Plugin = async (
             full_snapshot: snapshot, // Log the entire snapshot
           });
 
+          // =======================================================================
+          // CAPTURE POINT 1: Detection complete - record confidence and reasons
+          // =======================================================================
+          await captureCompaction(
+            input.sessionID,
+            snapshot.epic?.id || "unknown",
+            "detection_complete",
+            {
+              confidence: snapshot.detection.confidence,
+              detected: detection.detected,
+              reasons: snapshot.detection.reasons,
+              session_scan_contributed: sessionScan.swarmDetected,
+              session_scan_reasons: sessionScan.reasons,
+              epic_id: snapshot.epic?.id,
+              epic_title: snapshot.epic?.title,
+              subtask_count: snapshot.epic?.subtasks?.length ?? 0,
+            },
+          );
+
           // Level 2: Generate prompt with LLM
           const llmStart = Date.now();
           const llmPrompt = await generateCompactionPrompt(snapshot);
@@ -2164,6 +2219,23 @@ const SwarmPlugin: Plugin = async (
             prompt_length: llmPrompt?.length ?? 0,
             prompt_preview: llmPrompt?.substring(0, 500),
           });
+
+          // =======================================================================
+          // CAPTURE POINT 2: Prompt generated - record FULL prompt content
+          // =======================================================================
+          if (llmPrompt) {
+            await captureCompaction(
+              input.sessionID,
+              snapshot.epic?.id || "unknown",
+              "prompt_generated",
+              {
+                prompt_length: llmPrompt.length,
+                full_prompt: llmPrompt, // FULL content, not truncated
+                context_type: "llm_generated",
+                duration_ms: llmDuration,
+              },
+            );
+          }
 
           if (llmPrompt) {
             // SUCCESS: Use LLM-generated prompt
@@ -2187,6 +2259,21 @@ const SwarmPlugin: Plugin = async (
                 context_count_after: output.context.length,
               });
             }
+
+            // =======================================================================
+            // CAPTURE POINT 3a: Context injected (LLM path) - record FULL content
+            // =======================================================================
+            await captureCompaction(
+              input.sessionID,
+              snapshot.epic?.id || "unknown",
+              "context_injected",
+              {
+                full_content: fullContent, // FULL content, not truncated
+                content_length: fullContent.length,
+                injection_method: "prompt" in output ? "output.prompt" : "output.context.push",
+                context_type: "llm_generated",
+              },
+            );
 
             const totalDuration = Date.now() - startTime;
             logCompaction("info", "compaction_complete_llm_success", {
@@ -2223,6 +2310,21 @@ const SwarmPlugin: Plugin = async (
         const staticContent = header + SWARM_COMPACTION_CONTEXT;
         output.context.push(staticContent);
 
+        // =======================================================================
+        // CAPTURE POINT 3b: Context injected (static fallback) - record FULL content
+        // =======================================================================
+        await captureCompaction(
+          input.sessionID,
+          "unknown", // No snapshot available in this path
+          "context_injected",
+          {
+            full_content: staticContent,
+            content_length: staticContent.length,
+            injection_method: "output.context.push",
+            context_type: "static_swarm_context",
+          },
+        );
+
         const totalDuration = Date.now() - startTime;
         logCompaction("info", "compaction_complete_static_fallback", {
           session_id: input.sessionID,
@@ -2237,6 +2339,21 @@ const SwarmPlugin: Plugin = async (
         const header = `[Possible swarm: ${detection.reasons.join(", ")}]\n\n`;
         const fallbackContent = header + SWARM_DETECTION_FALLBACK;
         output.context.push(fallbackContent);
+
+        // =======================================================================
+        // CAPTURE POINT 3c: Context injected (detection fallback) - record FULL content
+        // =======================================================================
+        await captureCompaction(
+          input.sessionID,
+          "unknown", // No snapshot for low confidence
+          "context_injected",
+          {
+            full_content: fallbackContent,
+            content_length: fallbackContent.length,
+            injection_method: "output.context.push",
+            context_type: "detection_fallback",
+          },
+        );
 
         const totalDuration = Date.now() - startTime;
         logCompaction("info", "compaction_complete_detection_fallback", {

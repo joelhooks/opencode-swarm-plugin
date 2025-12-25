@@ -9,8 +9,14 @@
  * 2. swarm_complete captures: outcome signals per subtask
  * 3. swarm_record_outcome captures: learning signals
  * 4. Human feedback (optional): accept/reject/modify
- * 5. Coordinator events: decisions, violations, outcomes
+ * 5. Coordinator events: decisions, violations, outcomes, compaction
  * 6. Session capture: full coordinator session to ~/.config/swarm-tools/sessions/
+ *
+ * Event types:
+ * - DECISION: strategy_selected, worker_spawned, review_completed, decomposition_complete
+ * - VIOLATION: coordinator_edited_file, coordinator_ran_tests, coordinator_reserved_files, no_worker_spawned
+ * - OUTCOME: subtask_success, subtask_retry, subtask_failed, epic_complete
+ * - COMPACTION: detection_complete, prompt_generated, context_injected, resumption_started, tool_call_tracked
  *
  * @module eval-capture
  */
@@ -123,7 +129,7 @@ export type PartialEvalRecord = Partial<EvalRecord> & {
 };
 
 /**
- * Coordinator Event - captures coordinator decisions, violations, and outcomes
+ * Coordinator Event - captures coordinator decisions, violations, outcomes, and compaction
  */
 export const CoordinatorEventSchema = z.discriminatedUnion("event_type", [
   // DECISION events
@@ -165,6 +171,21 @@ export const CoordinatorEventSchema = z.discriminatedUnion("event_type", [
       "subtask_retry",
       "subtask_failed",
       "epic_complete",
+    ]),
+    payload: z.any(),
+  }),
+  // COMPACTION events
+  z.object({
+    session_id: z.string(),
+    epic_id: z.string(),
+    timestamp: z.string(),
+    event_type: z.literal("COMPACTION"),
+    compaction_type: z.enum([
+      "detection_complete",
+      "prompt_generated",
+      "context_injected",
+      "resumption_started",
+      "tool_call_tracked",
     ]),
     payload: z.any(),
   }),
@@ -593,6 +614,77 @@ export function captureCoordinatorEvent(event: CoordinatorEvent): void {
   const sessionPath = getSessionPath(event.session_id);
   const line = `${JSON.stringify(event)}\n`;
   fs.appendFileSync(sessionPath, line, "utf-8");
+}
+
+/**
+ * Capture a compaction event to the session file
+ *
+ * Helper for capturing COMPACTION events with automatic timestamp generation.
+ * Tracks compaction hook lifecycle: detection → prompt generation → context injection → resumption.
+ *
+ * **Part of eval-driven development pipeline:** Compaction events are used by `compaction-prompt.eval.ts`
+ * to score prompt quality (ID specificity, actionability, coordinator identity).
+ *
+ * **Lifecycle stages:**
+ * - `detection_complete` - Compaction detected (confidence level, context type)
+ * - `prompt_generated` - Continuation prompt created (FULL content stored for eval)
+ * - `context_injected` - Prompt injected into OpenCode context
+ * - `resumption_started` - Coordinator resumed from checkpoint
+ * - `tool_call_tracked` - First tool called post-compaction (measures discipline)
+ *
+ * @param params - Compaction event parameters
+ * @param params.session_id - Coordinator session ID
+ * @param params.epic_id - Epic ID being coordinated
+ * @param params.compaction_type - Stage of compaction lifecycle
+ * @param params.payload - Event-specific data (full prompt content, detection results, etc.)
+ *
+ * @example
+ * // Capture detection complete
+ * captureCompactionEvent({
+ *   session_id: "session-123",
+ *   epic_id: "bd-456",
+ *   compaction_type: "detection_complete",
+ *   payload: {
+ *     confidence: "high",
+ *     context_type: "full",
+ *     epic_id: "bd-456",
+ *   },
+ * });
+ *
+ * @example
+ * // Capture prompt generated (with full content for eval)
+ * captureCompactionEvent({
+ *   session_id: "session-123",
+ *   epic_id: "bd-456",
+ *   compaction_type: "prompt_generated",
+ *   payload: {
+ *     prompt_length: 5000,
+ *     full_prompt: "You are a coordinator...", // Full prompt, not truncated - used for quality scoring
+ *     context_type: "full",
+ *   },
+ * });
+ */
+export function captureCompactionEvent(params: {
+  session_id: string;
+  epic_id: string;
+  compaction_type:
+    | "detection_complete"
+    | "prompt_generated"
+    | "context_injected"
+    | "resumption_started"
+    | "tool_call_tracked";
+  payload: any;
+}): void {
+  const event: CoordinatorEvent = {
+    session_id: params.session_id,
+    epic_id: params.epic_id,
+    timestamp: new Date().toISOString(),
+    event_type: "COMPACTION",
+    compaction_type: params.compaction_type,
+    payload: params.payload,
+  };
+
+  captureCoordinatorEvent(event);
 }
 
 /**

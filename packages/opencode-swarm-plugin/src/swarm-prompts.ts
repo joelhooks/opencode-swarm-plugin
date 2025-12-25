@@ -1358,7 +1358,7 @@ export const swarm_spawn_subtask = tool({
       .optional()
       .describe("Optional explicit model override (auto-selected if not provided)"),
   },
-  async execute(args) {
+  async execute(args, _ctx) {
     const prompt = formatSubtaskPromptV2({
       bead_id: args.bead_id,
       epic_id: args.epic_id,
@@ -1404,7 +1404,7 @@ export const swarm_spawn_subtask = tool({
     // Capture worker spawn decision
     try {
       captureCoordinatorEvent({
-        session_id: process.env.OPENCODE_SESSION_ID || "unknown",
+        session_id: _ctx.sessionID || "unknown",
         epic_id: args.epic_id,
         timestamp: new Date().toISOString(),
         event_type: "DECISION",

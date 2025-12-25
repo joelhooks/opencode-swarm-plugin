@@ -1,0 +1,12 @@
+# Bun configuration for opencode-swarm-plugin
+# See: https://bun.sh/docs/runtime/bunfig
+
+[test]
+# Only scan src/ for tests - evals/ uses evalite runner, not bun test
+root = "src"
+
+# Default timeout for tests
+timeout = 10000
+
+# Preload scripts (if needed)
+# preload = ["./test-setup.ts"]

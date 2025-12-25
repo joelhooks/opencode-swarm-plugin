@@ -12,7 +12,7 @@ import {
 } from "./coordinator-discipline.js";
 
 describe("violationCount", () => {
-	it("scores 1.0 for zero violations", () => {
+	it("scores 1.0 for zero violations", async () => {
 		const session: CoordinatorSession = {
 			session_id: "test-session",
 			epic_id: "test-epic",
@@ -30,9 +30,10 @@ describe("violationCount", () => {
 			],
 		};
 
-		const result = violationCount.scorer({
+		const result = await violationCount({
 			output: JSON.stringify(session),
 			expected: {},
+			input: undefined,
 		});
 
 		expect(result.score).toBe(1.0);

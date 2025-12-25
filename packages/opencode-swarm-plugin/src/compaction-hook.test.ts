@@ -85,6 +85,48 @@ describe("Compaction Hook", () => {
       expect(SWARM_COMPACTION_CONTEXT).toContain("Blocked:");
       expect(SWARM_COMPACTION_CONTEXT).toContain("Completed:");
     });
+
+    // NEW: Full coordinator workflow must be present post-compaction
+    it("contains FULL coordinator workflow phases", () => {
+      // Phase 1.5: Research Phase
+      expect(SWARM_COMPACTION_CONTEXT).toContain("swarm_spawn_researcher");
+      
+      // Phase 3: Decompose
+      expect(SWARM_COMPACTION_CONTEXT).toContain("swarm_select_strategy");
+      expect(SWARM_COMPACTION_CONTEXT).toContain("swarm_plan_prompt");
+      expect(SWARM_COMPACTION_CONTEXT).toContain("swarm_validate_decomposition");
+      
+      // Phase 4: Create Cells
+      expect(SWARM_COMPACTION_CONTEXT).toContain("hive_create_epic");
+      
+      // Phase 6: Spawn Workers
+      expect(SWARM_COMPACTION_CONTEXT).toContain("swarm_spawn_subtask");
+      
+      // Phase 7: Review Loop
+      expect(SWARM_COMPACTION_CONTEXT).toContain("swarm_review");
+      expect(SWARM_COMPACTION_CONTEXT).toContain("swarm_review_feedback");
+      expect(SWARM_COMPACTION_CONTEXT).toContain("swarm_spawn_retry");
+    });
+
+    it("contains forbidden tools section with ALL forbidden tools", () => {
+      // Repository fetching
+      expect(SWARM_COMPACTION_CONTEXT).toContain("repo-crawl_file");
+      expect(SWARM_COMPACTION_CONTEXT).toContain("repo-autopsy");
+      
+      // Web/documentation fetching
+      expect(SWARM_COMPACTION_CONTEXT).toContain("webfetch");
+      expect(SWARM_COMPACTION_CONTEXT).toContain("fetch_fetch");
+      expect(SWARM_COMPACTION_CONTEXT).toContain("context7");
+      
+      // Knowledge base
+      expect(SWARM_COMPACTION_CONTEXT).toContain("pdf-brain");
+    });
+
+    it("contains strategy reference table", () => {
+      expect(SWARM_COMPACTION_CONTEXT).toContain("file-based");
+      expect(SWARM_COMPACTION_CONTEXT).toContain("feature-based");
+      expect(SWARM_COMPACTION_CONTEXT).toContain("risk-based");
+    });
   });
 
   describe("SWARM_DETECTION_FALLBACK", () => {

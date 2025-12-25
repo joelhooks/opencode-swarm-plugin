@@ -30,9 +30,11 @@
     "test:all": "bun test --timeout 60000 src/",
     "test:watch": "bun test --watch src/",
     "typecheck": "tsc --noEmit",
-    "eval:run": "bunx evalite run evals/",
-    "eval:decomposition": "bunx evalite run evals/swarm-decomposition.eval.ts",
-    "eval:coordinator": "bunx evalite run evals/coordinator-session.eval.ts",
+    "eval:run": "bun --env-file=.env run bunx evalite run evals/",
+    "eval:decomposition": "bun --env-file=.env run bunx evalite run evals/swarm-decomposition.eval.ts",
+    "eval:coordinator": "bun --env-file=.env run bunx evalite run evals/coordinator-session.eval.ts",
+    "eval:compaction": "bun --env-file=.env run bunx evalite run evals/compaction-prompt.eval.ts",
+    "migrate:sessions": "bun run scripts/migrate-unknown-sessions.ts",
     "postinstall": "node -e \"console.log('\\n\\x1b[33m  Run \\x1b[36mswarm setup\\x1b[33m to configure OpenCode integration\\x1b[0m\\n')\""
   },
   "dependencies": {

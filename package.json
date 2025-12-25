@@ -9,7 +9,8 @@
   "scripts": {
     "ci:version": "changeset version && bun update",
     "ci:publish": "for dir in packages/*; do (cd \"$dir\" && bun publish --access public || true); done && changeset tag",
-    "test:integration": "bun --filter=opencode-swarm-plugin test:integration"
+    "test:integration": "bun --filter=opencode-swarm-plugin test:integration",
+    "eval:ci": "cd packages/opencode-swarm-plugin && bun run swarm eval run --ci"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.5.2",

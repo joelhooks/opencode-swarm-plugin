@@ -187,20 +187,20 @@ export const coordinatorMindset = createScorer({
 export const overallCoordinatorBehavior = createScorer({
   name: "Overall Coordinator Behavior",
   description: "Composite score: does the LLM behave like a coordinator?",
-  scorer: ({ output }) => {
-    const toolsResult = mentionsCoordinatorTools.scorer({ output, expected: undefined });
-    const avoidsResult = avoidsWorkerBehaviors.scorer({ output, expected: undefined });
-    const mindsetResult = coordinatorMindset.scorer({ output, expected: undefined });
+  scorer: async ({ output, expected, input }) => {
+    const toolsResult = await mentionsCoordinatorTools({ output, expected, input });
+    const avoidsResult = await avoidsWorkerBehaviors({ output, expected, input });
+    const mindsetResult = await coordinatorMindset({ output, expected, input });
     
     // Weighted average: avoiding worker behavior is most important
     const score = 
-      toolsResult.score * 0.3 +
-      avoidsResult.score * 0.4 +
-      mindsetResult.score * 0.3;
+      (toolsResult.score ?? 0) * 0.3 +
+      (avoidsResult.score ?? 0) * 0.4 +
+      (mindsetResult.score ?? 0) * 0.3;
     
     return {
       score,
-      message: `Tools: ${(toolsResult.score * 100).toFixed(0)}%, Avoids Worker: ${(avoidsResult.score * 100).toFixed(0)}%, Mindset: ${(mindsetResult.score * 100).toFixed(0)}%`,
+      message: `Tools: ${((toolsResult.score ?? 0) * 100).toFixed(0)}%, Avoids Worker: ${((avoidsResult.score ?? 0) * 100).toFixed(0)}%, Mindset: ${((mindsetResult.score ?? 0) * 100).toFixed(0)}%`,
     };
   },
 });

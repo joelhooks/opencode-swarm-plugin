@@ -213,7 +213,7 @@ const SwarmPlugin: Plugin = async (
       if (isInCoordinatorContext()) {
         const ctx = getCoordinatorContext();
         const violation = detectCoordinatorViolation({
-          sessionId: ctx.sessionId || "unknown",
+          sessionId: input.sessionID || "unknown",
           epicId: ctx.epicId || "unknown",
           toolName,
           toolArgs: output.args as Record<string, unknown>,
@@ -770,6 +770,66 @@ export {
   type OperationResult,
 } from "./memory-tools";
 export type { Memory, SearchResult, SearchOptions } from "swarm-mail";
+
+/**
+ * Re-export eval-history module
+ *
+ * Includes:
+ * - recordEvalRun - Record eval run to JSONL history
+ * - getScoreHistory - Get score history for a specific eval
+ * - getPhase - Get current phase based on run count and variance
+ * - calculateVariance - Calculate statistical variance of scores
+ * - ensureEvalHistoryDir - Ensure history directory exists
+ * - getEvalHistoryPath - Get path to eval history file
+ *
+ * Constants:
+ * - DEFAULT_EVAL_HISTORY_PATH - Default path (.opencode/eval-history.jsonl)
+ * - VARIANCE_THRESHOLD - Variance threshold for production phase (0.1)
+ * - BOOTSTRAP_THRESHOLD - Run count for bootstrap phase (10)
+ * - STABILIZATION_THRESHOLD - Run count for stabilization phase (50)
+ *
+ * Types:
+ * - Phase - Progressive phases (bootstrap | stabilization | production)
+ * - EvalRunRecord - Single eval run record
+ */
+export {
+  recordEvalRun,
+  getScoreHistory,
+  getPhase,
+  calculateVariance,
+  ensureEvalHistoryDir,
+  getEvalHistoryPath,
+  DEFAULT_EVAL_HISTORY_PATH,
+  VARIANCE_THRESHOLD,
+  BOOTSTRAP_THRESHOLD,
+  STABILIZATION_THRESHOLD,
+  type Phase,
+  type EvalRunRecord,
+} from "./eval-history";
+
+/**
+ * Re-export eval-gates module
+ *
+ * Includes:
+ * - checkGate - Check if current score passes quality gate
+ * - DEFAULT_THRESHOLDS - Default regression thresholds by phase
+ *
+ * Types:
+ * - GateResult - Result from gate check
+ * - GateConfig - Configuration for gate thresholds
+ *
+ * Features:
+ * - Phase-based regression thresholds (Bootstrap: none, Stabilization: 10%, Production: 5%)
+ * - Configurable thresholds via GateConfig
+ * - Clear pass/fail messages with baseline comparison
+ * - Handles edge cases (division by zero, no history)
+ */
+export {
+  checkGate,
+  DEFAULT_THRESHOLDS,
+  type GateResult,
+  type GateConfig,
+} from "./eval-gates";
 
 /**
  * Re-export logger infrastructure

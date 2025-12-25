@@ -26,3 +26,47 @@ jobs:
         run: bun turbo test
         # Integration tests skipped in CI - PGLite WASM has issues in GitHub Actions
         # Run locally with: bun run test:integration
+
+      - name: Run eval gates
+        id: evals
+        run: bun run eval:ci
+        continue-on-error: true
+        env:
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+
+      - name: Post eval results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const evalResultsPath = 'packages/opencode-swarm-plugin/.hive/eval-results.json';
+            
+            if (!fs.existsSync(evalResultsPath)) {
+              console.log('No eval results found');
+              return;
+            }
+            
+            const results = JSON.parse(fs.readFileSync(evalResultsPath, 'utf-8'));
+            
+            // Format results as markdown table
+            let body = '## 🐝 Eval Gate Results\n\n';
+            body += '| Eval | Phase | Score | Status | Message |\n';
+            body += '|------|-------|-------|--------|----------|\n';
+            
+            for (const [evalName, result] of Object.entries(results)) {
+              const statusEmoji = result.passed ? '✅' : '❌';
+              const phaseEmoji = result.phase === 'bootstrap' ? '🌱' : 
+                                result.phase === 'stabilization' ? '⚡' : '🏆';
+              body += `| ${evalName} | ${phaseEmoji} ${result.phase} | ${result.currentScore.toFixed(2)} | ${statusEmoji} | ${result.message} |\n`;
+            }
+            
+            body += '\n---\n';
+            body += '*Progressive gates: Bootstrap (always pass) → Stabilization (warn) → Production (enforce)*';
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });

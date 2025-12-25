@@ -753,7 +753,7 @@ export const swarm_delegate_planning = tool({
       .default(true)
       .describe("Query CASS for similar past tasks (default: true)"),
   },
-  async execute(args) {
+  async execute(args, _ctx) {
     // Import needed modules
     const { selectStrategy, formatStrategyGuidelines } =
       await import("./swarm-strategies");
@@ -777,7 +777,7 @@ export const swarm_delegate_planning = tool({
     // Capture strategy selection decision
     try {
       captureCoordinatorEvent({
-        session_id: process.env.OPENCODE_SESSION_ID || "unknown",
+        session_id: _ctx.sessionID || "unknown",
         epic_id: "planning", // No epic ID yet - this is pre-decomposition
         timestamp: new Date().toISOString(),
         event_type: "DECISION",

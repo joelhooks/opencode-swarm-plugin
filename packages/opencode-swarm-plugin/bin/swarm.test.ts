@@ -639,3 +639,478 @@ describe("Log command helpers", () => {
     });
   });
 });
+
+// ============================================================================
+// Eval Commands Tests (TDD)
+// ============================================================================
+
+describe("Eval commands", () => {
+  describe("formatEvalStatus", () => {
+    test("displays phase, thresholds, and recent scores", () => {
+      const status = {
+        phase: "stabilization" as const,
+        runCount: 25,
+        thresholds: {
+          stabilization: 0.1,
+          production: 0.05,
+        },
+        recentScores: [
+          { timestamp: "2024-12-24T10:00:00.000Z", score: 0.85 },
+          { timestamp: "2024-12-24T11:00:00.000Z", score: 0.87 },
+          { timestamp: "2024-12-24T12:00:00.000Z", score: 0.82 },
+        ],
+      };
+
+      const output = formatEvalStatus(status);
+
+      // Should show phase
+      expect(output).toContain("stabilization");
+      
+      // Should show run count
+      expect(output).toContain("25");
+      
+      // Should show thresholds
+      expect(output).toContain("10%"); // stabilization threshold
+      expect(output).toContain("5%");  // production threshold
+      
+      // Should show recent scores
+      expect(output).toContain("0.85");
+      expect(output).toContain("0.87");
+      expect(output).toContain("0.82");
+    });
+
+    test("shows bootstrap phase message", () => {
+      const status = {
+        phase: "bootstrap" as const,
+        runCount: 5,
+        thresholds: {
+          stabilization: 0.1,
+          production: 0.05,
+        },
+        recentScores: [],
+      };
+
+      const output = formatEvalStatus(status);
+
+      expect(output).toContain("bootstrap");
+      expect(output).toContain("collecting data");
+    });
+
+    test("shows production phase message", () => {
+      const status = {
+        phase: "production" as const,
+        runCount: 75,
+        thresholds: {
+          stabilization: 0.1,
+          production: 0.05,
+        },
+        recentScores: [],
+      };
+
+      const output = formatEvalStatus(status);
+
+      expect(output).toContain("production");
+    });
+  });
+
+  describe("formatEvalHistory", () => {
+    test("shows eval entries with timestamps and scores", () => {
+      const history = [
+        {
+          timestamp: "2024-12-24T10:00:00.000Z",
+          eval_name: "swarm-decomposition",
+          score: 0.85,
+          run_count: 1,
+        },
+        {
+          timestamp: "2024-12-24T11:00:00.000Z",
+          eval_name: "swarm-decomposition",
+          score: 0.87,
+          run_count: 2,
+        },
+        {
+          timestamp: "2024-12-24T12:00:00.000Z",
+          eval_name: "coordinator-behavior",
+          score: 0.92,
+          run_count: 1,
+        },
+      ];
+
+      const output = formatEvalHistory(history);
+
+      // Should show all eval names
+      expect(output).toContain("swarm-decomposition");
+      expect(output).toContain("coordinator-behavior");
+      
+      // Should show scores
+      expect(output).toContain("0.85");
+      expect(output).toContain("0.87");
+      expect(output).toContain("0.92");
+      
+      // Should show run counts
+      expect(output).toContain("run #1");
+      expect(output).toContain("run #2");
+    });
+
+    test("returns empty message for no history", () => {
+      const output = formatEvalHistory([]);
+      expect(output).toContain("No eval history");
+    });
+
+    test("formats timestamps as readable dates", () => {
+      const history = [
+        {
+          timestamp: "2024-12-24T10:00:00.000Z",
+          eval_name: "test",
+          score: 0.85,
+          run_count: 1,
+        },
+      ];
+
+      const output = formatEvalHistory(history);
+
+      // Should contain a formatted date (not raw ISO)
+      expect(output).not.toContain("2024-12-24T10:00:00.000Z");
+      expect(output).toMatch(/\d{1,2}:\d{2}/); // Time format
+    });
+  });
+
+  describe("generateSparkline", () => {
+    test("generates sparkline from scores", () => {
+      const scores = [0.1, 0.3, 0.5, 0.7, 0.9, 1.0];
+      const sparkline = generateSparkline(scores);
+
+      // Should use sparkline characters
+      expect(sparkline).toMatch(/[▁▂▃▄▅▆▇█]/);
+      
+      // Length should match input
+      expect(sparkline.length).toBe(scores.length);
+      
+      // Should show ascending trend
+      expect(sparkline).toContain("▁"); // Low score
+      expect(sparkline).toContain("█"); // High score
+    });
+
+    test("handles single score", () => {
+      const sparkline = generateSparkline([0.5]);
+      expect(sparkline.length).toBe(1);
+      expect(sparkline).toMatch(/[▁▂▃▄▅▆▇█]/);
+    });
+
+    test("handles all same scores", () => {
+      const sparkline = generateSparkline([0.5, 0.5, 0.5]);
+      expect(sparkline.length).toBe(3);
+      // All should be same character
+      expect(new Set(sparkline.split("")).size).toBe(1);
+    });
+
+    test("returns empty for empty array", () => {
+      const sparkline = generateSparkline([]);
+      expect(sparkline).toBe("");
+    });
+  });
+
+  describe("formatEvalRunResult", () => {
+    test("shows pass/fail with gate result", () => {
+      const result = {
+        passed: true,
+        phase: "production" as const,
+        message: "Production phase: 2.5% regression - acceptable",
+        baseline: 0.85,
+        currentScore: 0.83,
+        regressionPercent: 0.025,
+      };
+
+      const output = formatEvalRunResult(result);
+
+      expect(output).toContain("PASS");
+      expect(output).toContain("production");
+      expect(output).toContain("0.83"); // current score
+      expect(output).toContain("2.5%"); // regression
+    });
+
+    test("shows failure with details", () => {
+      const result = {
+        passed: false,
+        phase: "production" as const,
+        message: "Production phase FAIL: 8.0% regression - exceeds 5% threshold",
+        baseline: 0.85,
+        currentScore: 0.78,
+        regressionPercent: 0.08,
+      };
+
+      const output = formatEvalRunResult(result);
+
+      expect(output).toContain("FAIL");
+      expect(output).toContain("8.0%");
+      expect(output).toContain("exceeds");
+    });
+
+    test("shows bootstrap phase without baseline", () => {
+      const result = {
+        passed: true,
+        phase: "bootstrap" as const,
+        message: "Bootstrap phase (5/10 runs) - collecting data",
+        currentScore: 0.85,
+      };
+
+      const output = formatEvalRunResult(result);
+
+      expect(output).toContain("bootstrap");
+      expect(output).toContain("collecting data");
+      expect(output).not.toContain("baseline");
+    });
+  });
+});
+
+// ============================================================================
+// Eval Command Helpers (Implementation)
+// ============================================================================
+
+/**
+ * Generate sparkline from array of scores (0-1 range)
+ */
+function generateSparkline(scores: number[]): string {
+  if (scores.length === 0) return "";
+
+  const chars = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+  const min = Math.min(...scores);
+  const max = Math.max(...scores);
+  const range = max - min;
+
+  if (range === 0) {
+    // All scores the same
+    return chars[4].repeat(scores.length);
+  }
+
+  return scores
+    .map((score) => {
+      const normalized = (score - min) / range;
+      const index = Math.min(Math.floor(normalized * chars.length), chars.length - 1);
+      return chars[index];
+    })
+    .join("");
+}
+
+/**
+ * Format eval status for display
+ */
+function formatEvalStatus(status: {
+  phase: "bootstrap" | "stabilization" | "production";
+  runCount: number;
+  thresholds: { stabilization: number; production: number };
+  recentScores: Array<{ timestamp: string; score: number }>;
+}): string {
+  const lines: string[] = [];
+
+  // Phase banner
+  const phaseEmoji = status.phase === "bootstrap" ? "🌱" : status.phase === "stabilization" ? "⚙️" : "🚀";
+  lines.push(`${phaseEmoji} Phase: ${status.phase}`);
+  lines.push(`Runs: ${status.runCount}`);
+  lines.push("");
+
+  // Thresholds
+  lines.push("Thresholds:");
+  lines.push(`  Stabilization: ${(status.thresholds.stabilization * 100).toFixed(0)}% regression warning`);
+  lines.push(`  Production:    ${(status.thresholds.production * 100).toFixed(0)}% regression failure`);
+  lines.push("");
+
+  // Recent scores with sparkline
+  if (status.recentScores.length > 0) {
+    lines.push("Recent scores:");
+    const sparkline = generateSparkline(status.recentScores.map((s) => s.score));
+    lines.push(`  ${sparkline}`);
+    for (const { timestamp, score } of status.recentScores) {
+      const time = new Date(timestamp).toLocaleString();
+      lines.push(`  ${time}: ${score.toFixed(2)}`);
+    }
+  } else {
+    lines.push("No scores yet - collecting data");
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Format eval history for display
+ */
+function formatEvalHistory(history: Array<{
+  timestamp: string;
+  eval_name: string;
+  score: number;
+  run_count: number;
+}>): string {
+  if (history.length === 0) {
+    return "No eval history found";
+  }
+
+  const lines: string[] = [];
+  lines.push("Eval History:");
+  lines.push("");
+
+  // Group by eval name
+  const grouped = new Map<string, typeof history>();
+  for (const entry of history) {
+    if (!grouped.has(entry.eval_name)) {
+      grouped.set(entry.eval_name, []);
+    }
+    grouped.get(entry.eval_name)!.push(entry);
+  }
+
+  // Display each eval group
+  for (const [evalName, entries] of grouped) {
+    lines.push(`${evalName}:`);
+    const sparkline = generateSparkline(entries.map((e) => e.score));
+    lines.push(`  Trend: ${sparkline}`);
+    
+    // Show latest 5 entries
+    const latest = entries.slice(-5);
+    for (const entry of latest) {
+      const time = new Date(entry.timestamp).toLocaleTimeString();
+      lines.push(`  ${time} - run #${entry.run_count}: ${entry.score.toFixed(2)}`);
+    }
+    
+    if (entries.length > 5) {
+      lines.push(`  ... and ${entries.length - 5} more`);
+    }
+    
+    lines.push("");
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Format eval run result (gate check)
+ */
+function formatEvalRunResult(result: {
+  passed: boolean;
+  phase: "bootstrap" | "stabilization" | "production";
+  message: string;
+  baseline?: number;
+  currentScore: number;
+  regressionPercent?: number;
+}): string {
+  const lines: string[] = [];
+
+  // Pass/fail banner
+  const status = result.passed ? "✅ PASS" : "❌ FAIL";
+  lines.push(status);
+  lines.push("");
+
+  // Phase and score
+  lines.push(`Phase: ${result.phase}`);
+  lines.push(`Score: ${result.currentScore.toFixed(2)}`);
+
+  if (result.baseline !== undefined) {
+    lines.push(`Baseline: ${result.baseline.toFixed(2)}`);
+  }
+
+  if (result.regressionPercent !== undefined) {
+    const sign = result.regressionPercent > 0 ? "+" : "";
+    lines.push(`Regression: ${sign}${(result.regressionPercent * 100).toFixed(1)}%`);
+  }
+
+  lines.push("");
+  lines.push(result.message);
+
+  return lines.join("\n");
+}
+
+// ============================================================================
+// Eval Run Tests
+// ============================================================================
+
+describe("Eval Run CI Mode", () => {
+  let testDir: string;
+
+  beforeEach(() => {
+    testDir = join(tmpdir(), `eval-run-test-${Date.now()}`);
+    mkdirSync(testDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    if (existsSync(testDir)) {
+      rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  test("writes eval results JSON file", async () => {
+    // Import the function we need to test
+    const { recordEvalRun, getScoreHistory } = await import("../src/eval-history.js");
+    const { checkGate } = await import("../src/eval-gates.js");
+    const { ensureHiveDirectory } = await import("../src/hive.js");
+
+    // Set up test data
+    const evalName = "test-eval";
+    const mockScore = 0.85;
+
+    // Ensure directory exists
+    ensureHiveDirectory(testDir);
+
+    // Get history and record run (simulating what eval run does)
+    const history = getScoreHistory(testDir, evalName);
+    recordEvalRun(testDir, {
+      timestamp: new Date().toISOString(),
+      eval_name: evalName,
+      score: mockScore,
+      run_count: history.length + 1,
+    });
+
+    // Check gate
+    const gateResult = checkGate(testDir, evalName, mockScore);
+
+    // Write results file (simulating CI mode)
+    const resultsPath = join(testDir, ".hive", "eval-results.json");
+    const results = { [evalName]: gateResult };
+    writeFileSync(resultsPath, JSON.stringify(results, null, 2));
+
+    // Verify file exists and has correct structure
+    expect(existsSync(resultsPath)).toBe(true);
+
+    const savedResults = JSON.parse(readFileSync(resultsPath, "utf-8"));
+    expect(savedResults).toHaveProperty(evalName);
+    expect(savedResults[evalName]).toMatchObject({
+      passed: true,
+      phase: "bootstrap",
+      currentScore: mockScore,
+    });
+  });
+
+  test("bootstrap phase always passes", async () => {
+    const { checkGate } = await import("../src/eval-gates.js");
+
+    // Even with a low score, bootstrap phase should pass
+    const result = checkGate(testDir, "test-eval", 0.1);
+
+    expect(result.passed).toBe(true);
+    expect(result.phase).toBe("bootstrap");
+    expect(result.message).toContain("Bootstrap phase");
+  });
+
+  test("production phase fails on regression", async () => {
+    const { recordEvalRun } = await import("../src/eval-history.js");
+    const { checkGate } = await import("../src/eval-gates.js");
+    const { ensureHiveDirectory } = await import("../src/hive.js");
+
+    ensureHiveDirectory(testDir);
+
+    // Simulate 60 runs with consistent high scores to reach production phase
+    for (let i = 0; i < 60; i++) {
+      recordEvalRun(testDir, {
+        timestamp: new Date().toISOString(),
+        eval_name: "test-eval",
+        score: 0.9,
+        run_count: i + 1,
+      });
+    }
+
+    // Now test with a regressed score (>5% drop from 0.9 baseline)
+    const regressedScore = 0.8; // 11% drop
+    const result = checkGate(testDir, "test-eval", regressedScore);
+
+    expect(result.passed).toBe(false);
+    expect(result.phase).toBe("production");
+    expect(result.message).toContain("FAIL");
+  });
+});

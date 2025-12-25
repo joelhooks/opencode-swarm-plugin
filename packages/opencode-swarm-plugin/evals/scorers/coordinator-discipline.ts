@@ -270,14 +270,14 @@ export const timeToFirstSpawn = createScorer({
 export const overallDiscipline = createScorer({
   name: "Overall Coordinator Discipline",
   description: "Composite score for coordinator protocol adherence",
-  scorer: ({ output, expected }) => {
+  scorer: async ({ output, expected, input }) => {
     try {
       // Run all scorers
       const scores = {
-        violations: violationCount.scorer({ output, expected }),
-        spawn: spawnEfficiency.scorer({ output, expected }),
-        review: reviewThoroughness.scorer({ output, expected }),
-        speed: timeToFirstSpawn.scorer({ output, expected }),
+        violations: await violationCount({ output, expected, input }),
+        spawn: await spawnEfficiency({ output, expected, input }),
+        review: await reviewThoroughness({ output, expected, input }),
+        speed: await timeToFirstSpawn({ output, expected, input }),
       };
 
       // Weighted average
@@ -289,16 +289,16 @@ export const overallDiscipline = createScorer({
       };
 
       const totalScore =
-        scores.violations.score * weights.violations +
-        scores.spawn.score * weights.spawn +
-        scores.review.score * weights.review +
-        scores.speed.score * weights.speed;
+        (scores.violations.score ?? 0) * weights.violations +
+        (scores.spawn.score ?? 0) * weights.spawn +
+        (scores.review.score ?? 0) * weights.review +
+        (scores.speed.score ?? 0) * weights.speed;
 
       const details = [
-        `Violations: ${(scores.violations.score * 100).toFixed(0)}%`,
-        `Spawn: ${(scores.spawn.score * 100).toFixed(0)}%`,
-        `Review: ${(scores.review.score * 100).toFixed(0)}%`,
-        `Speed: ${(scores.speed.score * 100).toFixed(0)}%`,
+        `Violations: ${((scores.violations.score ?? 0) * 100).toFixed(0)}%`,
+        `Spawn: ${((scores.spawn.score ?? 0) * 100).toFixed(0)}%`,
+        `Review: ${((scores.review.score ?? 0) * 100).toFixed(0)}%`,
+        `Speed: ${((scores.speed.score ?? 0) * 100).toFixed(0)}%`,
       ].join(", ");
 
       return {

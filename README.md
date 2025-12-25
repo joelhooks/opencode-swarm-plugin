@@ -172,6 +172,7 @@ Want to understand the internals? Here's the deep dive:
 - **[🏗️ Architecture](#architecture-deep-dive)** - event sourcing, durable primitives
 - **[🐝 Swarm Mail](#swarm-mail-actor-model-coordination)** - actor-model coordination
 - **[🧠 Learning System](#learning-from-outcomes)** - confidence decay, pattern maturity
+- **[🧪 Eval System](#eval-driven-development)** - progressive gates, automatic learning
 - **[🔧 Monorepo Guide](./AGENTS.md)** - for contributors
 
 ---
@@ -445,6 +446,46 @@ This feeds back into the decomposition strategy:
 - `deprecated` → >60% failure rate (auto-inverted to anti-pattern)
 
 **Confidence decay:** Patterns fade over 90 days unless revalidated. Prevents stale knowledge from dominating.
+
+---
+
+## Eval-Driven Development
+
+Every swarm run generates eval data. Quality gates prevent regressions.
+
+```
+CAPTURE → SCORE → STORE → GATE → LEARN → IMPROVE
+```
+
+### Progressive Gates
+
+```
+Phase             Runs    Gate Behavior
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Bootstrap         <10     ✅ Always pass (collect data)
+Stabilization     10-50   ⚠️  Warn on >10% regression
+Production        >50     ❌ Fail on >5% regression
+```
+
+**What gets evaluated:**
+
+- **Decomposition quality** - file conflicts, complexity balance, coverage
+- **Coordinator discipline** - violation count, spawn efficiency, review thoroughness
+- **Compaction prompts** - ID specificity, actionability, identity reinforcement
+
+**CLI:**
+
+```bash
+swarm eval status              # Check current phase and gates
+swarm eval history             # View score trends with sparklines
+bun run eval:run               # Run all evals (in package)
+```
+
+**Learning loop:**
+
+When eval scores drop >15% from baseline, context is automatically stored to semantic memory with tags. Future prompts query these failures for context.
+
+**Full docs:** [packages/opencode-swarm-plugin/evals/README.md](packages/opencode-swarm-plugin/evals/README.md)
 
 ---
 

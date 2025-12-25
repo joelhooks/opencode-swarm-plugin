@@ -558,3 +558,127 @@ CLI bin scripts need their imports in `dependencies`, not `devDependencies`. If 
 **Tracking:** 
 - Bun native npm token support: https://github.com/oven-sh/bun/issues/15601
 - When resolved, can switch to `bun publish` directly
+
+## Environment Variables
+
+### Required Keys
+
+| Key | Purpose | Used By |
+|-----|---------|---------|
+| `AI_GATEWAY_API_KEY` | Vercel AI Gateway authentication | Evals, LLM calls |
+
+### .env File Location
+
+The `.env` file lives at **monorepo root** (`/.env`). For packages that need it:
+
+```bash
+# Copy to package that needs env vars
+cp .env packages/opencode-swarm-plugin/.env
+```
+
+**Why copy instead of reference?** `bunx` and some tools don't traverse up to find `.env` files. Each package that needs env vars should have its own copy.
+
+**gitignore:** All `.env` files are gitignored. Don't commit secrets.
+
+### Loading in Scripts
+
+For scripts that need env vars (like evals), use `bun --env-file`:
+
+```json
+{
+  "scripts": {
+    "eval:run": "bun --env-file=.env run bunx evalite run evals/"
+  }
+}
+```
+
+This loads `.env` before spawning the subprocess.
+
+## Evalite Eval Rig
+
+The plugin includes an evaluation system using [Evalite](https://evalite.dev) to score coordinator behavior, decomposition quality, and compaction.
+
+### Running Evals
+
+```bash
+cd packages/opencode-swarm-plugin
+
+# Run all evals
+bun run eval:run
+
+# Run specific eval suites
+bun run eval:decomposition    # Task decomposition quality
+bun run eval:coordinator      # Coordinator protocol adherence
+```
+
+### Eval Files
+
+| File | What It Tests | Data Source |
+|------|---------------|-------------|
+| `coordinator-session.eval.ts` | Real coordinator protocol adherence | `~/.config/swarm-tools/sessions/*.jsonl` |
+| `coordinator-behavior.eval.ts` | LLM coordinator mindset | Synthetic prompts → LLM |
+| `swarm-decomposition.eval.ts` | Task decomposition quality | Fixtures + LLM |
+| `compaction-resumption.eval.ts` | Context compaction correctness | Fixtures |
+| `example.eval.ts` | Sanity check | Static |
+
+### Data Sources
+
+**Real sessions** are captured during swarm runs to `~/.config/swarm-tools/sessions/`. These are actual coordinator decisions (worker spawns, reviews, etc.) that get scored.
+
+**Synthetic fixtures** in `evals/fixtures/` provide known-good and known-bad examples for baseline validation.
+
+### Scorers
+
+Scorers live in `evals/scorers/` and measure specific aspects:
+
+- **violationCount** - Protocol violations (editing files directly, skipping reviews)
+- **spawnEfficiency** - Did coordinator spawn workers vs do work itself?
+- **reviewThoroughness** - Did coordinator review worker output?
+- **timeToFirstSpawn** - How fast did coordinator delegate?
+- **overallDiscipline** - Weighted composite of above
+
+### Adding New Evals
+
+1. Create `evals/your-eval.eval.ts`
+2. Use `evalite()` from evalite package
+3. Define `data`, `task`, and `scorers`
+4. Scorers use `createScorer()` - returns async function, NOT object with `.scorer`
+
+```typescript
+import { evalite } from "evalite";
+import { createScorer } from "evalite";
+
+const myScorer = createScorer({
+  name: "My Scorer",
+  description: "What it measures",
+  scorer: async ({ output, expected, input }) => {
+    // Return 0-1 score
+    return { score: 0.8, message: "Details" };
+  },
+});
+
+evalite("My Eval", {
+  data: async () => [{ input: "...", expected: "..." }],
+  task: async (input) => "output",
+  scorers: [myScorer],
+});
+```
+
+### Composite Scorers
+
+When combining multiple scorers, call them directly with `await`:
+
+```typescript
+// CORRECT - scorers are async functions
+const result = await childScorer({ output, expected, input });
+const score = result.score ?? 0;
+
+// WRONG - .scorer property doesn't exist
+const result = childScorer.scorer({ output, expected });  // ❌
+```
+
+### Troubleshooting
+
+**"GatewayAuthenticationError"** - Missing `AI_GATEWAY_API_KEY`. Copy `.env` to package folder.
+
+**"no such table: eval_records"** - Run any swarm-mail operation to trigger schema creation. Tables are created lazily with `CREATE TABLE IF NOT EXISTS`.

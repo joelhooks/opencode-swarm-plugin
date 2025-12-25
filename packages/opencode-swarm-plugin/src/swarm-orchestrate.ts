@@ -1740,7 +1740,7 @@ Files touched: ${args.files_touched?.join(", ") || "none recorded"}`,
       try {
         const durationMs = args.start_time ? Date.now() - args.start_time : 0;
         captureCoordinatorEvent({
-          session_id: process.env.OPENCODE_SESSION_ID || "unknown",
+          session_id: _ctx.sessionID || "unknown",
           epic_id: epicId,
           timestamp: new Date().toISOString(),
           event_type: "OUTCOME",
@@ -1849,7 +1849,7 @@ Files touched: ${args.files_touched?.join(", ") || "none recorded"}`,
       try {
         const durationMs = args.start_time ? Date.now() - args.start_time : 0;
         captureCoordinatorEvent({
-          session_id: process.env.OPENCODE_SESSION_ID || "unknown",
+          session_id: _ctx.sessionID || "unknown",
           epic_id: epicId,
           timestamp: new Date().toISOString(),
           event_type: "OUTCOME",

@@ -470,7 +470,7 @@ export const swarm_review_feedback = tool({
       .optional()
       .describe("JSON array of ReviewIssue objects (for needs_changes)"),
   },
-  async execute(args): Promise<string> {
+  async execute(args, _ctx): Promise<string> {
     // Parse issues if provided
     let parsedIssues: ReviewIssue[] = [];
     if (args.issues) {
@@ -512,7 +512,7 @@ export const swarm_review_feedback = tool({
       // Capture review approval decision
       try {
         captureCoordinatorEvent({
-          session_id: process.env.OPENCODE_SESSION_ID || "unknown",
+          session_id: _ctx.sessionID || "unknown",
           epic_id: epicId,
           timestamp: new Date().toISOString(),
           event_type: "DECISION",
@@ -562,7 +562,7 @@ You may now complete the task with \`swarm_complete\`.`,
     // Capture review rejection decision
     try {
       captureCoordinatorEvent({
-        session_id: process.env.OPENCODE_SESSION_ID || "unknown",
+        session_id: _ctx.sessionID || "unknown",
         epic_id: epicId,
         timestamp: new Date().toISOString(),
         event_type: "DECISION",

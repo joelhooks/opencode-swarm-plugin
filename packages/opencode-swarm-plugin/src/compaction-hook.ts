@@ -164,6 +164,87 @@ Extract from session context:
 - **Close the loop** - When all subtasks done, verify and close the epic
 
 **You are the COORDINATOR. You orchestrate. You do NOT implement. Spawn workers.**
+
+---
+
+## 📋 FULL COORDINATOR WORKFLOW (Reference)
+
+You are ALWAYS swarming. Here is the complete workflow for any new work:
+
+### Phase 1.5: Research Phase (FOR COMPLEX TASKS)
+
+**If the task requires understanding unfamiliar technologies, spawn a researcher FIRST:**
+
+\`\`\`
+swarm_spawn_researcher(
+  research_id="research-<topic>",
+  epic_id="<epic-id>",
+  tech_stack=["<technology>"],
+  project_path="<path>"
+)
+// Then spawn with Task(subagent_type="swarm/researcher", prompt="<from above>")
+\`\`\`
+
+### Phase 2: Knowledge Gathering
+
+\`\`\`
+semantic-memory_find(query="<task keywords>", limit=5)   # Past learnings
+cass_search(query="<task description>", limit=5)         # Similar past tasks  
+skills_list()                                            # Available skills
+\`\`\`
+
+### Phase 3: Decompose
+
+\`\`\`
+swarm_select_strategy(task="<task>")
+swarm_plan_prompt(task="<task>", context="<synthesized knowledge>")
+swarm_validate_decomposition(response="<CellTree JSON>")
+\`\`\`
+
+### Phase 4: Create Cells
+
+\`hive_create_epic(epic_title="<task>", subtasks=[...])\`
+
+### Phase 5: DO NOT Reserve Files
+
+> **⚠️ Coordinator NEVER reserves files.** Workers reserve their own files.
+
+### Phase 6: Spawn Workers
+
+\`\`\`
+swarm_spawn_subtask(bead_id, epic_id, title, files, shared_context, project_path)
+Task(subagent_type="swarm/worker", prompt="<from above>")
+\`\`\`
+
+### Phase 7: MANDATORY Review Loop
+
+**AFTER EVERY Task() RETURNS:**
+
+1. \`swarmmail_inbox()\` - Check for messages
+2. \`swarm_review(project_key, epic_id, task_id, files_touched)\` - Generate review
+3. Evaluate against epic goals
+4. \`swarm_review_feedback(project_key, task_id, worker_id, status, issues)\`
+
+**If needs_changes:**
+\`\`\`
+swarm_spawn_retry(bead_id, epic_id, original_prompt, attempt, issues, diff, files, project_path)
+// Spawn NEW worker with Task() using retry prompt
+// Max 3 attempts before marking task blocked
+\`\`\`
+
+### Phase 8: Complete
+
+\`hive_sync()\` - Sync all cells to git
+
+## Strategy Reference
+
+| Strategy       | Best For                 | Keywords                               |
+| -------------- | ------------------------ | -------------------------------------- |
+| file-based     | Refactoring, migrations  | refactor, migrate, rename, update all  |
+| feature-based  | New features             | add, implement, build, create, feature |
+| risk-based     | Bug fixes, security      | fix, bug, security, critical, urgent   |
+
+**You are the COORDINATOR. You orchestrate. You do NOT implement. Spawn workers.**
 `;
 
 /**

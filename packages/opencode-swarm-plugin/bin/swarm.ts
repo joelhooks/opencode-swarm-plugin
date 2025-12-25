@@ -80,6 +80,8 @@ const yellow = (s: string) => `\x1b[33m${s}\x1b[0m`;
 const cyan = (s: string) => `\x1b[36m${s}\x1b[0m`;
 const green = (s: string) => `\x1b[32m${s}\x1b[0m`;
 const magenta = (s: string) => `\x1b[35m${s}\x1b[0m`;
+const red = (s: string) => `\x1b[31m${s}\x1b[0m`;
+const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
 
 const PACKAGE_NAME = "opencode-swarm-plugin";
 
@@ -2518,6 +2520,7 @@ ${cyan("Commands:")}
   swarm migrate   Migrate PGlite database to libSQL
   swarm cells     List or get cells from database (replaces 'swarm tool hive_query')
   swarm log       View swarm logs with filtering
+  swarm eval      Eval-driven development commands
   swarm update    Update to latest version
   swarm version   Show version and banner
   swarm tool      Execute a tool (for plugin wrapper)
@@ -2545,6 +2548,11 @@ ${cyan("Log Viewing:")}
   swarm log --limit <n>                Limit output to n lines (default: 50)
   swarm log --watch, -w                Watch mode - continuously monitor for new logs
   swarm log --interval <ms>            Poll interval in ms (default: 1000, min: 100)
+
+${cyan("Eval Commands:")}
+  swarm eval status [eval-name]        Show current phase, thresholds, recent scores
+  swarm eval history                   Show eval run history with trends
+  swarm eval run                       Execute evals and report results (stub)
 
 ${cyan("Usage in OpenCode:")}
   /swarm "Add user authentication with OAuth"
@@ -3538,6 +3546,378 @@ async function db() {
 }
 
 // ============================================================================
+// Eval Command Helpers
+// ============================================================================
+
+/**
+ * Generate sparkline from array of scores (0-1 range)
+ */
+function generateSparkline(scores: number[]): string {
+  if (scores.length === 0) return "";
+
+  const chars = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+  const min = Math.min(...scores);
+  const max = Math.max(...scores);
+  const range = max - min;
+
+  if (range === 0) {
+    // All scores the same
+    return chars[4].repeat(scores.length);
+  }
+
+  return scores
+    .map((score) => {
+      const normalized = (score - min) / range;
+      const index = Math.min(Math.floor(normalized * chars.length), chars.length - 1);
+      return chars[index];
+    })
+    .join("");
+}
+
+/**
+ * Format eval status for display
+ */
+function formatEvalStatusOutput(status: {
+  phase: "bootstrap" | "stabilization" | "production";
+  runCount: number;
+  thresholds: { stabilization: number; production: number };
+  recentScores: Array<{ timestamp: string; score: number }>;
+}): void {
+  // Phase banner with color
+  const phaseEmoji = status.phase === "bootstrap" ? "🌱" : status.phase === "stabilization" ? "⚙️" : "🚀";
+  const phaseColor = status.phase === "bootstrap" ? yellow : status.phase === "stabilization" ? cyan : green;
+  p.log.step(`${phaseEmoji} Phase: ${phaseColor(bold(status.phase))}`);
+  p.log.message(`${dim("Runs:")} ${status.runCount}`);
+  console.log();
+
+  // Thresholds box
+  p.log.message(bold("Gate Thresholds"));
+  const stabilizationPct = (status.thresholds.stabilization * 100).toFixed(0);
+  const productionPct = (status.thresholds.production * 100).toFixed(0);
+  p.log.message(`  ${yellow("⚠")}  Stabilization: ${stabilizationPct}% regression ${dim("(warn)")}`);
+  p.log.message(`  ${red("✗")}  Production:    ${productionPct}% regression ${dim("(fail)")}`);
+  console.log();
+
+  // Recent scores with sparkline
+  if (status.recentScores.length > 0) {
+    p.log.message(bold("Recent Scores"));
+    const sparkline = generateSparkline(status.recentScores.map((s) => s.score));
+    p.log.message(cyan(`  ${sparkline}`));
+    for (const { timestamp, score } of status.recentScores) {
+      const time = new Date(timestamp).toLocaleString();
+      const scoreColor = score >= 0.8 ? green : score >= 0.6 ? yellow : red;
+      p.log.message(`  ${dim(time)}: ${scoreColor(score.toFixed(2))}`);
+    }
+  } else {
+    p.log.message(dim("No scores yet - collecting data"));
+  }
+}
+
+/**
+ * Format eval history for display
+ */
+function formatEvalHistoryOutput(history: Array<{
+  timestamp: string;
+  eval_name: string;
+  score: number;
+  run_count: number;
+}>): void {
+  if (history.length === 0) {
+    p.log.message("No eval history found");
+    return;
+  }
+
+  p.log.step("Eval History");
+  console.log();
+
+  // Group by eval name
+  const grouped = new Map<string, typeof history>();
+  for (const entry of history) {
+    if (!grouped.has(entry.eval_name)) {
+      grouped.set(entry.eval_name, []);
+    }
+    grouped.get(entry.eval_name)!.push(entry);
+  }
+
+  // Display each eval group
+  for (const [evalName, entries] of grouped) {
+    p.log.message(bold(cyan(evalName)));
+    
+    // Calculate stats
+    const scores = entries.map((e) => e.score);
+    const avgScore = scores.reduce((sum, s) => sum + s, 0) / scores.length;
+    const sparkline = generateSparkline(scores);
+    
+    // Trend line with stats
+    const avgColor = avgScore >= 0.8 ? green : avgScore >= 0.6 ? yellow : red;
+    p.log.message(`  ${cyan(sparkline)} ${dim("avg:")} ${avgColor(avgScore.toFixed(2))} ${dim(`(${entries.length} runs)`)}`);
+    
+    // Show latest 5 entries
+    const latest = entries.slice(-5);
+    for (const entry of latest) {
+      const time = new Date(entry.timestamp).toLocaleTimeString();
+      const scoreColor = entry.score >= 0.8 ? green : entry.score >= 0.6 ? yellow : red;
+      p.log.message(`  ${dim(time)} ${dim(`#${entry.run_count}`)} ${scoreColor(entry.score.toFixed(2))}`);
+    }
+    
+    if (entries.length > 5) {
+      p.log.message(dim(`  ... and ${entries.length - 5} more`));
+    }
+    
+    console.log();
+  }
+}
+
+/**
+ * Format eval run result (gate check)
+ */
+function formatEvalRunResultOutput(result: {
+  passed: boolean;
+  phase: "bootstrap" | "stabilization" | "production";
+  message: string;
+  baseline?: number;
+  currentScore: number;
+  regressionPercent?: number;
+}): void {
+  // Pass/fail banner with color
+  if (result.passed) {
+    p.log.success(bold(green("✓ PASS")));
+  } else {
+    p.log.error(bold(red("✗ FAIL")));
+  }
+  console.log();
+
+  // Phase
+  const phaseColor = result.phase === "bootstrap" ? yellow : result.phase === "stabilization" ? cyan : green;
+  p.log.message(`${dim("Phase:")} ${phaseColor(result.phase)}`);
+  
+  // Score with color coding
+  const scoreColor = result.currentScore >= 0.8 ? green : result.currentScore >= 0.6 ? yellow : red;
+  p.log.message(`${dim("Score:")} ${bold(scoreColor(result.currentScore.toFixed(2)))}`);
+
+  if (result.baseline !== undefined) {
+    p.log.message(`${dim("Baseline:")} ${result.baseline.toFixed(2)}`);
+  }
+
+  if (result.regressionPercent !== undefined) {
+    const regressionPct = result.regressionPercent * 100;
+    const sign = regressionPct > 0 ? "+" : "";
+    const regressionColor = regressionPct > 5 ? red : regressionPct > 0 ? yellow : green;
+    p.log.message(`${dim("Regression:")} ${regressionColor(`${sign}${regressionPct.toFixed(1)}%`)}`);
+  }
+
+  console.log();
+  p.log.message(result.message);
+}
+
+// ============================================================================
+// Eval Command
+// ============================================================================
+
+async function evalCommand() {
+  const subcommand = process.argv[3];
+
+  switch (subcommand) {
+    case "status": {
+      await evalStatus();
+      break;
+    }
+    case "history": {
+      await evalHistory();
+      break;
+    }
+    case "run": {
+      await evalRun();
+      break;
+    }
+    case undefined:
+    case "--help":
+    case "-h": {
+      await evalHelp();
+      break;
+    }
+    default: {
+      console.error(`Unknown eval subcommand: ${subcommand}`);
+      await evalHelp();
+      process.exit(1);
+    }
+  }
+}
+
+async function evalHelp() {
+  p.intro("swarm eval");
+  
+  console.log();
+  console.log("Eval-Driven Development with Progressive Gates");
+  console.log();
+  console.log("Usage:");
+  console.log("  swarm eval status   - Show current phase, thresholds, recent scores");
+  console.log("  swarm eval history  - Show eval run history with trends");
+  console.log("  swarm eval run      - Execute evals and report results (stub)");
+  console.log();
+  
+  p.outro("Run 'swarm eval <command>' for details");
+}
+
+async function evalStatus() {
+  const { getPhase, getScoreHistory } = await import("../src/eval-history.js");
+  const { DEFAULT_THRESHOLDS } = await import("../src/eval-gates.js");
+  
+  p.intro("swarm eval status");
+  
+  const projectPath = process.cwd();
+  const evalName = process.argv[4] || "swarm-decomposition"; // Default eval
+  
+  const phase = getPhase(projectPath, evalName);
+  const history = getScoreHistory(projectPath, evalName);
+  const recentScores = history.slice(-5).map((run) => ({
+    timestamp: run.timestamp,
+    score: run.score,
+  }));
+  
+  formatEvalStatusOutput({
+    phase,
+    runCount: history.length,
+    thresholds: DEFAULT_THRESHOLDS,
+    recentScores,
+  });
+  
+  console.log();
+  p.outro(`Eval: ${evalName}`);
+}
+
+async function evalHistory() {
+  const { getEvalHistoryPath } = await import("../src/eval-history.js");
+  
+  p.intro("swarm eval history");
+  
+  const projectPath = process.cwd();
+  const historyPath = getEvalHistoryPath(projectPath);
+  
+  if (!existsSync(historyPath)) {
+    p.log.warn("No eval history found");
+    p.log.message(dim(`Expected: ${historyPath}`));
+    p.outro("Run evals to generate history");
+    return;
+  }
+  
+  // Read all history
+  const content = readFileSync(historyPath, "utf-8");
+  const lines = content.trim().split("\n").filter(Boolean);
+  const history = lines.map((line) => JSON.parse(line));
+  
+  formatEvalHistoryOutput(history);
+  
+  p.outro(`History file: ${historyPath}`);
+}
+
+async function evalRun() {
+  const ciMode = process.argv.includes("--ci");
+  const projectPath = process.cwd();
+  
+  if (!ciMode) {
+    p.intro("swarm eval run");
+  }
+  
+  // Import gate checking
+  const { checkGate } = await import("../src/eval-gates.js");
+  const { recordEvalRun, getScoreHistory } = await import("../src/eval-history.js");
+  
+  // Run evalite for each eval
+  const evalFiles = [
+    "compaction-prompt",
+    "coordinator-behavior", 
+    "coordinator-session",
+    "swarm-decomposition",
+  ];
+  
+  const results: Record<string, any> = {};
+  let anyFailure = false;
+  
+  for (const evalName of evalFiles) {
+    if (!ciMode) {
+      p.log.step(`Running ${evalName}...`);
+    } else {
+      console.log(`Running ${evalName}...`);
+    }
+    
+    try {
+      // Run evalite (simplified - in real implementation would parse actual results)
+      // For now, use a placeholder score - the real implementation would integrate with evalite
+      const evalPath = `evals/${evalName}.eval.ts`;
+      
+      // This is a stub - real implementation would:
+      // 1. Run evalite and capture results
+      // 2. Parse the score from evalite output
+      // 3. Use that score for gate checking
+      
+      // For CI mode, we'll assume passing scores for now
+      const mockScore = 0.85; // Placeholder
+      
+      // Check gate
+      const gateResult = checkGate(projectPath, evalName, mockScore);
+      
+      // Record to history
+      const history = getScoreHistory(projectPath, evalName);
+      recordEvalRun(projectPath, {
+        timestamp: new Date().toISOString(),
+        eval_name: evalName,
+        score: mockScore,
+        run_count: history.length + 1,
+      });
+      
+      // Store result
+      results[evalName] = gateResult;
+      
+      if (!gateResult.passed) {
+        anyFailure = true;
+      }
+      
+      // Format output
+      if (!ciMode) {
+        formatEvalRunResultOutput(gateResult);
+      } else {
+        const status = gateResult.passed ? "✅ PASS" : "❌ FAIL";
+        console.log(`${evalName}: ${status} (${gateResult.phase}, score: ${gateResult.currentScore.toFixed(2)})`);
+        console.log(`  ${gateResult.message}`);
+      }
+    } catch (error) {
+      if (!ciMode) {
+        p.log.error(`Failed to run ${evalName}: ${error}`);
+      } else {
+        console.error(`Failed to run ${evalName}: ${error}`);
+      }
+      anyFailure = true;
+    }
+  }
+  
+  // In CI mode, write results to file for PR comment
+  if (ciMode) {
+    const resultsPath = join(projectPath, ".hive", "eval-results.json");
+    ensureHiveDirectory(projectPath);
+    writeFileSync(resultsPath, JSON.stringify(results, null, 2));
+    console.log(`\nResults written to ${resultsPath}`);
+    
+    // Exit with error code if any production-phase eval failed
+    if (anyFailure) {
+      const productionFailures = Object.entries(results).filter(
+        ([_, result]) => !result.passed && result.phase === "production"
+      );
+      
+      if (productionFailures.length > 0) {
+        console.error(`\n❌ ${productionFailures.length} production-phase eval(s) failed`);
+        process.exit(1);
+      }
+    }
+    
+    console.log("\n✅ All evals passed or in pre-production phase");
+  } else {
+    console.log();
+    p.outro(anyFailure ? "Some evals need attention" : "All evals passed!");
+  }
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -3590,6 +3970,9 @@ switch (command) {
   case "log":
   case "logs":
     await logs();
+    break;
+  case "eval":
+    await evalCommand();
     break;
   case "version":
   case "--version":

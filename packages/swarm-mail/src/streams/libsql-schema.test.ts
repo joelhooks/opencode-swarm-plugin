@@ -45,6 +45,8 @@ describe("libSQL streams schema", () => {
       expect(tableNames).toContain("reservations");
       expect(tableNames).toContain("locks");
       expect(tableNames).toContain("cursors");
+      expect(tableNames).toContain("eval_records");
+      expect(tableNames).toContain("swarm_contexts");
     });
 
     test("creates indexes", async () => {
@@ -152,6 +154,118 @@ describe("libSQL streams schema", () => {
         await createLibSQLStreamsSchema(db);
       }).not.toThrow();
     });
+
+    test("eval_records table can store decomposition data", async () => {
+      await createLibSQLStreamsSchema(db);
+
+      const now = Date.now();
+      const evalRecord = {
+        id: "epic-123",
+        project_key: "/path/to/project",
+        task: "Add authentication",
+        context: "User story context",
+        strategy: "feature-based",
+        epic_title: "Authentication Epic",
+        subtasks: JSON.stringify([
+          { id: "sub-1", title: "Add login", files: ["auth.ts"] }
+        ]),
+        created_at: now,
+        updated_at: now,
+      };
+
+      // Insert eval record
+      await db.query(
+        `INSERT INTO eval_records (id, project_key, task, context, strategy, epic_title, subtasks, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          evalRecord.id,
+          evalRecord.project_key,
+          evalRecord.task,
+          evalRecord.context,
+          evalRecord.strategy,
+          evalRecord.epic_title,
+          evalRecord.subtasks,
+          evalRecord.created_at,
+          evalRecord.updated_at,
+        ]
+      );
+
+      // Query it back
+      const result = await db.query<{
+        id: string;
+        task: string;
+        strategy: string;
+        epic_title: string;
+      }>(
+        `SELECT id, task, strategy, epic_title FROM eval_records WHERE id = ?`,
+        [evalRecord.id]
+      );
+
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0]).toMatchObject({
+        id: "epic-123",
+        task: "Add authentication",
+        strategy: "feature-based",
+        epic_title: "Authentication Epic",
+      });
+    });
+
+    test("swarm_contexts table can store checkpoint data", async () => {
+      await createLibSQLStreamsSchema(db);
+
+      const now = Date.now();
+      const checkpoint = {
+        id: "ctx-123",
+        project_key: "/path/to/project",
+        epic_id: "epic-123",
+        bead_id: "bead-456",
+        strategy: "feature-based",
+        files: JSON.stringify(["src/auth.ts"]),
+        dependencies: JSON.stringify(["bead-455"]),
+        directives: JSON.stringify({ shared_context: "auth flow" }),
+        recovery: JSON.stringify({ last_checkpoint: now }),
+        created_at: now,
+        checkpointed_at: now,
+        updated_at: now,
+      };
+
+      // Insert checkpoint
+      await db.query(
+        `INSERT INTO swarm_contexts (id, project_key, epic_id, bead_id, strategy, files, dependencies, directives, recovery, created_at, checkpointed_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          checkpoint.id,
+          checkpoint.project_key,
+          checkpoint.epic_id,
+          checkpoint.bead_id,
+          checkpoint.strategy,
+          checkpoint.files,
+          checkpoint.dependencies,
+          checkpoint.directives,
+          checkpoint.recovery,
+          checkpoint.created_at,
+          checkpoint.checkpointed_at,
+          checkpoint.updated_at,
+        ]
+      );
+
+      // Query it back
+      const result = await db.query<{
+        id: string;
+        epic_id: string;
+        bead_id: string;
+      }>(
+        `SELECT id, epic_id, bead_id FROM swarm_contexts WHERE id = ?`,
+        [checkpoint.id]
+      );
+
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0]).toMatchObject({
+        id: "ctx-123",
+        epic_id: "epic-123",
+        bead_id: "bead-456",
+      });
+    });
   });
 
   describe("dropLibSQLStreamsSchema", () => {
@@ -161,7 +275,7 @@ describe("libSQL streams schema", () => {
 
       const tables = await db.query<{ name: string }>(`
         SELECT name FROM sqlite_master 
-        WHERE type='table' AND name IN ('events', 'agents', 'messages', 'reservations', 'locks', 'cursors')
+        WHERE type='table' AND name IN ('events', 'agents', 'messages', 'reservations', 'locks', 'cursors', 'eval_records', 'swarm_contexts')
       `);
 
       expect(tables.rows).toHaveLength(0);

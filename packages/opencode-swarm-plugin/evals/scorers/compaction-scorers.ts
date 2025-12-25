@@ -260,14 +260,14 @@ export const forbiddenPatternsAbsent = createScorer({
 export const compactionQuality = createScorer({
   name: "Overall Compaction Quality",
   description: "Composite score for compaction hook correctness",
-  scorer: ({ output, expected }) => {
+  scorer: async ({ output, expected, input }) => {
     try {
       // Run all scorers
       const scores = {
-        confidence: confidenceAccuracy.scorer({ output, expected }),
-        injection: contextInjectionCorrectness.scorer({ output, expected }),
-        required: requiredPatternsPresent.scorer({ output, expected }),
-        forbidden: forbiddenPatternsAbsent.scorer({ output, expected }),
+        confidence: await confidenceAccuracy({ output, expected, input }),
+        injection: await contextInjectionCorrectness({ output, expected, input }),
+        required: await requiredPatternsPresent({ output, expected, input }),
+        forbidden: await forbiddenPatternsAbsent({ output, expected, input }),
       };
 
       // Weighted average
@@ -279,16 +279,16 @@ export const compactionQuality = createScorer({
       };
 
       const totalScore =
-        scores.confidence.score * weights.confidence +
-        scores.injection.score * weights.injection +
-        scores.required.score * weights.required +
-        scores.forbidden.score * weights.forbidden;
+        (scores.confidence.score ?? 0) * weights.confidence +
+        (scores.injection.score ?? 0) * weights.injection +
+        (scores.required.score ?? 0) * weights.required +
+        (scores.forbidden.score ?? 0) * weights.forbidden;
 
       const details = [
-        `Confidence: ${(scores.confidence.score * 100).toFixed(0)}%`,
-        `Injection: ${(scores.injection.score * 100).toFixed(0)}%`,
-        `Required: ${(scores.required.score * 100).toFixed(0)}%`,
-        `Forbidden: ${(scores.forbidden.score * 100).toFixed(0)}%`,
+        `Confidence: ${((scores.confidence.score ?? 0) * 100).toFixed(0)}%`,
+        `Injection: ${((scores.injection.score ?? 0) * 100).toFixed(0)}%`,
+        `Required: ${((scores.required.score ?? 0) * 100).toFixed(0)}%`,
+        `Forbidden: ${((scores.forbidden.score ?? 0) * 100).toFixed(0)}%`,
       ].join(", ");
 
       return {

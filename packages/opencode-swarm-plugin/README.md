@@ -242,27 +242,44 @@ bun run eval:run
 # Run specific suites
 bun run eval:decomposition    # Task decomposition quality
 bun run eval:coordinator      # Coordinator protocol compliance
+bun run eval:compaction       # Compaction prompt quality
+
+# Check eval status (progressive gates)
+swarm eval status [eval-name]
+
+# View history with trends
+swarm eval history
+```
+
+**Progressive Gates:**
+
+```
+Phase             Runs    Gate Behavior
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Bootstrap         <10     ✅ Always pass (collect data)
+Stabilization     10-50   ⚠️  Warn on >10% regression
+Production        >50     ❌ Fail on >5% regression
 ```
 
 **What gets evaluated:**
 
-| Eval Suite | Measures | Data Source |
-|------------|----------|-------------|
-| `swarm-decomposition` | Subtask independence, complexity balance, coverage, clarity | Fixtures + captured real decompositions |
-| `coordinator-session` | Violation count, spawn efficiency, review thoroughness | Real sessions from `~/.config/swarm-tools/sessions/` |
+| Eval Suite            | Measures                                                      | Data Source                                      |
+| --------------------- | ------------------------------------------------------------- | ------------------------------------------------ |
+| `swarm-decomposition` | Subtask independence, complexity balance, coverage, clarity   | Fixtures + `.opencode/eval-data.jsonl`           |
+| `coordinator-session` | Violation count, spawn efficiency, review thoroughness        | `~/.config/swarm-tools/sessions/*.jsonl`         |
+| `compaction-prompt`   | ID specificity, actionability, identity, forbidden tools      | Session compaction events                        |
+
+**Learning Feedback Loop:**
+
+When eval scores drop >15% from baseline, failure context is automatically stored to semantic memory. Future prompts query these learnings for context.
 
 **Data capture locations:**
 - Decomposition inputs/outputs: `.opencode/eval-data.jsonl`
+- Eval history: `.opencode/eval-history.jsonl`
 - Coordinator sessions: `~/.config/swarm-tools/sessions/*.jsonl`
-- Subtask outcomes: swarm-mail database (used for pattern learning)
+- Subtask outcomes: swarm-mail database
 
-**Custom scorers:**
-- Subtask independence (0-1): Files don't overlap between subtasks
-- Complexity balance (0-1): Subtasks have similar estimated complexity
-- Coverage completeness (0-1): Required files are covered
-- Instruction clarity (0-1): Descriptions are specific and actionable
-
-See [evals/README.md](./evals/README.md) for scorer details and how to write new evals.
+See **[evals/README.md](./evals/README.md)** for full architecture, scorer details, CI integration, and how to write new evals.
 
 ---
 
