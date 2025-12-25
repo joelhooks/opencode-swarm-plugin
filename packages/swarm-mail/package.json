@@ -57,5 +57,8 @@
     "drizzle-kit": "^0.31.0",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
+  },
+  "optionalDependencies": {
+    "@libsql/darwin-x64": "^0.5.22"
   }
 }
