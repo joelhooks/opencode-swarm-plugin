@@ -1,0 +1,26 @@
+{
+  "compaction-prompt": {
+    "passed": true,
+    "phase": "bootstrap",
+    "message": "Bootstrap phase (1/10 runs) - collecting data",
+    "currentScore": 0.85
+  },
+  "coordinator-behavior": {
+    "passed": true,
+    "phase": "bootstrap",
+    "message": "Bootstrap phase (1/10 runs) - collecting data",
+    "currentScore": 0.85
+  },
+  "coordinator-session": {
+    "passed": true,
+    "phase": "bootstrap",
+    "message": "Bootstrap phase (1/10 runs) - collecting data",
+    "currentScore": 0.85
+  },
+  "swarm-decomposition": {
+    "passed": true,
+    "phase": "bootstrap",
+    "message": "Bootstrap phase (1/10 runs) - collecting data",
+    "currentScore": 0.85
+  }
+}
