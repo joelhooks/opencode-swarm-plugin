@@ -23,7 +23,7 @@
     "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
-    "build": "bun build ./src/index.ts --outdir ./dist --target node --external @electric-sql/pglite --external swarm-mail && bun build ./src/plugin.ts --outfile ./dist/plugin.js --target node --external @electric-sql/pglite --external swarm-mail && tsc",
+    "build": "bun build ./src/index.ts --outdir ./dist --target node --external @electric-sql/pglite --external swarm-mail --external vitest --external @vitest/ui --external lightningcss && bun build ./src/plugin.ts --outfile ./dist/plugin.js --target node --external @electric-sql/pglite --external swarm-mail --external vitest --external @vitest/ui --external lightningcss && tsc",
     "dev": "bun --watch src/index.ts",
     "test": "bun test --timeout 10000 src/anti-patterns.test.ts src/mandate-promotion.test.ts src/mandate-storage.test.ts src/output-guardrails.test.ts src/pattern-maturity.test.ts src/skills.test.ts src/structured.test.ts src/schemas/",
     "test:integration": "bun test --timeout 60000 src/*.integration.test.ts",
