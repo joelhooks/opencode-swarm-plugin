@@ -1,26 +1,483 @@
 {
-  "compaction-prompt": {
-    "passed": true,
-    "phase": "bootstrap",
-    "message": "Bootstrap phase (1/10 runs) - collecting data",
-    "currentScore": 0.85
+  "meta": {
+    "generated": "2025-12-25",
+    "agent": "CalmLake",
+    "cell": "opencode-swarm-plugin--ys7z8-mjlk7jstvch",
+    "epic": "opencode-swarm-plugin--ys7z8-mjlk7js9bt1",
+    "source_reports": [
+      "evals/ARCHITECTURE.md",
+      ".hive/analysis/eval-failure-analysis-2025-12-25.md",
+      ".hive/analysis/session-data-quality-audit.md",
+      "SCORER-ANALYSIS.md"
+    ],
+    "synthesis_date": "2025-12-25T19:00:00Z"
   },
-  "coordinator-behavior": {
-    "passed": true,
-    "phase": "bootstrap",
-    "message": "Bootstrap phase (1/10 runs) - collecting data",
-    "currentScore": 0.85
+  "executive_summary": {
+    "status": "GOOD_WITH_TACTICAL_ISSUES",
+    "overall_assessment": "Eval infrastructure is well-designed at the macro level with clean pipeline (CAPTURE → STORE → LOAD → EVAL → GATE → LEARN) but has tactical issues impacting usability. The 'failures' are actually code bugs, not systemic problems.",
+    "key_strengths": [
+      "Progressive gates prevent premature failures",
+      "Real data integration grounds evals in reality",
+      "Type-safe Zod schemas prevent garbage data",
+      "Learning loop closes feedback cycle",
+      "Clear separation of concerns (loaders, scorers, evals)"
+    ],
+    "critical_findings": [
+      {
+        "issue": "Two eval bugs causing false failures",
+        "impact": "example.eval.ts at 0%, compaction-prompt at 53% (both fixable)",
+        "priority": "P0"
+      },
+      {
+        "issue": "4 unused scorers (250 LOC dead code)",
+        "impact": "38% of coordinator-discipline.ts wasted, misleading coverage",
+        "priority": "P0"
+      },
+      {
+        "issue": "Data loader abstraction leak",
+        "impact": "Hard to test, hard to extend, tight coupling",
+        "priority": "P1"
+      },
+      {
+        "issue": "No scorer versioning",
+        "impact": "Can't improve scorers without breaking history",
+        "priority": "P1"
+      },
+      {
+        "issue": "Session filter too strict (2.9% pass rate)",
+        "impact": "Most coordinator behavior invisible to evals",
+        "priority": "P1"
+      },
+      {
+        "issue": "LLM-as-judge has no budget controls",
+        "impact": "Unbounded cost, network failures break evals",
+        "priority": "P2"
+      }
+    ],
+    "data_quality": "EXCELLENT",
+    "data_quality_note": "The 3 passing coordinator sessions are gold-standard (6-9 hours, 20-24 worker spawns, 0 violations). High filter rate is by design, not poor data."
   },
-  "coordinator-session": {
-    "passed": true,
-    "phase": "bootstrap",
-    "message": "Bootstrap phase (1/10 runs) - collecting data",
-    "currentScore": 0.85
+  "recommendations": {
+    "immediate_p0": [
+      {
+        "id": "REC-001",
+        "title": "Fix example.eval.ts data/task mismatch",
+        "issue": "Eval provides CellTree in data.output but task returns input string unchanged. Scorer receives 'Test task' string instead of JSON.",
+        "source": "eval-failure-analysis",
+        "effort": "5 minutes",
+        "impact": "HIGH",
+        "fix": "Remove output from data(), make task() return JSON.stringify(input) of CellTree",
+        "files": ["evals/example.eval.ts"],
+        "expected_outcome": "0% → 100% on example.eval.ts",
+        "code_snippet": "task: async (input) => JSON.stringify(input)"
+      },
+      {
+        "id": "REC-002",
+        "title": "Make forbidden tools scorer case-insensitive",
+        "issue": "Scorer checks /\\bEdit\\b/ but fixtures use 'edit' (lowercase). Zero matches on perfect fixture.",
+        "source": "eval-failure-analysis",
+        "effort": "5 minutes",
+        "impact": "HIGH",
+        "fix": "Add 'i' flag to all forbiddenTools regexes: /\\bedit\\b/i, /\\bwrite\\b/i",
+        "files": ["src/compaction-prompt-scoring.ts:213-218"],
+        "expected_outcome": "compaction-prompt: 53% → 70-80%",
+        "code_snippet": "const forbiddenTools = [/\\bedit\\b/i, /\\bwrite\\b/i, /\\bbash\\b/i, /swarmmail_reserve/i, /git commit/i];"
+      },
+      {
+        "id": "REC-003",
+        "title": "Add missing forbidden tools to fixtures",
+        "issue": "Fixtures mention 'edit, write, bash' but scorer checks 'Edit, Write, swarmmail_reserve, git commit'. Missing 2/5 tools.",
+        "source": "eval-failure-analysis",
+        "effort": "10 minutes",
+        "impact": "MEDIUM",
+        "fix": "Update all fixtures to include swarmmail_reserve and git commit in forbidden tools list",
+        "files": ["evals/fixtures/compaction-prompt-cases.ts"],
+        "expected_outcome": "Full tool coverage in compaction-prompt eval",
+        "note": "Combine with REC-002 for maximum impact"
+      },
+      {
+        "id": "REC-004",
+        "title": "Remove or integrate 4 unused scorers",
+        "issue": "researcherSpawnRate, skillLoadingRate, inboxMonitoringRate, blockerResponseTime defined but never used in any eval",
+        "source": "scorer-analysis",
+        "effort": "30 minutes (remove) OR 2 hours (integrate)",
+        "impact": "MEDIUM",
+        "fix_option_1": "Delete scorers + tests, update exports (recommended)",
+        "fix_option_2": "Add to coordinator-session.eval.ts scorers array, tune weights",
+        "files": ["evals/scorers/coordinator-discipline.ts:345-588", "evals/coordinator-session.eval.ts"],
+        "expected_outcome": "Remove 250 LOC dead code OR expand coordinator metrics",
+        "recommendation": "Remove - current 5-scorer set is sufficient for protocol adherence"
+      }
+    ],
+    "high_priority_p1": [
+      {
+        "id": "REC-005",
+        "title": "Relax default session filters",
+        "issue": "Only 3/102 sessions (2.9%) pass strict filters. 97% filtered out are workers (expected) but also filters partial coordinator sessions.",
+        "source": "session-data-quality-audit",
+        "effort": "15 minutes",
+        "impact": "HIGH",
+        "fix": "Change defaults from {requireWorkerSpawn: true, requireReview: true} to {requireWorkerSpawn: false, requireReview: false}",
+        "files": ["evals/lib/data-loader.ts"],
+        "expected_outcome": "3 → ~28 sessions passing (27.5% pass rate)",
+        "rationale": "Captures early-stage coordinator behavior, still filters worker-only sessions",
+        "migration_path": "Add tiered filter presets: 'strict', 'moderate', 'lenient'"
+      },
+      {
+        "id": "REC-006",
+        "title": "Add session type detection filter",
+        "issue": "70/102 sessions are worker completions (OUTCOME/subtask_success), not coordinator sessions. Need automatic exclusion.",
+        "source": "session-data-quality-audit",
+        "effort": "30 minutes",
+        "impact": "HIGH",
+        "fix": "Add isCoordinatorSession() filter that checks for DECISION events (decomposition_complete, worker_spawned, strategy_selected)",
+        "files": ["evals/lib/data-loader.ts"],
+        "expected_outcome": "Automatically filters worker-only sessions before quality criteria applied",
+        "code_snippet": "function isCoordinatorSession(s: CoordinatorSession): boolean { return s.events.some(e => e.event_type === 'DECISION'); }"
+      },
+      {
+        "id": "REC-007",
+        "title": "Extract data source interface (EvalSource<T>)",
+        "issue": "data-loader.ts knows about PGlite internals AND JSONL format. Violates single-responsibility.",
+        "source": "architecture",
+        "effort": "4-6 hours",
+        "impact": "MEDIUM",
+        "fix": "Create EvalSource interface, implement PGliteSource, JsonlSessionSource, FixtureSource adapters",
+        "files": ["evals/lib/data-loader.ts", "evals/lib/sources/"],
+        "expected_outcome": "Easier to test (mock sources), easier to extend (add CSV/S3 sources), explicit fallback strategy",
+        "benefits": [
+          "Sources testable in isolation",
+          "Easy to add new sources (S3, API, CSV)",
+          "Explicit fallback strategy (not hardcoded)",
+          "Reduced coupling to storage format"
+        ]
+      },
+      {
+        "id": "REC-008",
+        "title": "Add scorer versioning",
+        "issue": "Scorer logic changes invalidate historical comparisons. Can't tell if score drop is regression or stricter scoring.",
+        "source": "architecture",
+        "effort": "3-4 hours",
+        "impact": "HIGH",
+        "fix": "Add version field to scorer metadata, track versions in eval history, filter baseline to compatible runs only",
+        "files": ["evals/scorers/*.ts", "src/eval-gates.ts", "src/eval-history.ts"],
+        "expected_outcome": "Can improve scorers without breaking history, clear attribution of score changes, A/B test new scorers",
+        "schema_change": "interface EvalRunRecord { scorer_versions: Record<string, string> }"
+      },
+      {
+        "id": "REC-009",
+        "title": "Make session filters first-class and composable",
+        "issue": "Quality criteria hardcoded in loader, can't experiment with different filter profiles",
+        "source": "architecture",
+        "effort": "2-3 hours",
+        "impact": "MEDIUM",
+        "fix": "Extract SessionFilter type, create filter library (minEvents, requireWorkerSpawn, etc.), use compose() at call site",
+        "files": ["evals/lib/data-loader.ts", "evals/lib/filters.ts"],
+        "expected_outcome": "Caller controls filtering (explicit, testable), easy to add new filters, can test partial compliance",
+        "code_snippet": "const filter = filters.compose(filters.minEvents(3), filters.requireWorkerSpawn); const sessions = await load({ filter });"
+      },
+      {
+        "id": "REC-010",
+        "title": "Document weight rationale for composite scorers",
+        "issue": "overallDiscipline, compactionQuality, overallCoordinatorBehavior have different weight distributions but no documented WHY",
+        "source": "scorer-analysis",
+        "effort": "30 minutes",
+        "impact": "LOW",
+        "fix": "Add comments explaining weight choices (based on failure impact, domain priorities)",
+        "files": ["evals/scorers/coordinator-discipline.ts", "evals/scorers/compaction-scorers.ts", "evals/coordinator-behavior.eval.ts"],
+        "expected_outcome": "Maintainers understand weight rationale, easier to tune in future",
+        "example": "// Violations (30%): Breaking protocol causes immediate harm\n// Spawn (25%): Delegation is core coordinator job"
+      }
+    ],
+    "medium_priority_p2": [
+      {
+        "id": "REC-011",
+        "title": "Add LLM judge budget enforcement",
+        "issue": "decompositionCoherence calls Claude for every test case. No cost controls, network failures fail entire eval.",
+        "source": "architecture",
+        "effort": "2-3 hours",
+        "impact": "MEDIUM",
+        "fix": "Add JUDGE_BUDGET {maxCalls, maxCost, maxLatency}, track usage, return fallback score on budget exhaustion",
+        "files": ["evals/lib/llm.ts", "evals/scorers/index.ts"],
+        "expected_outcome": "Predictable costs, graceful degradation on LLM failure, fast CI runs",
+        "budget_suggestion": "maxCalls: 100, maxCost: 1.00 USD, maxLatency: 5000ms"
+      },
+      {
+        "id": "REC-012",
+        "title": "Improve baseline calculation (EMA, trimmed mean)",
+        "issue": "Simple mean of all scores. Early bad runs drag down baseline forever. No time-based decay.",
+        "source": "architecture",
+        "effort": "3-4 hours",
+        "impact": "MEDIUM",
+        "fix": "Implement exponential moving average (EMA), trimmed mean, median strategies. Make baseline strategy configurable per eval.",
+        "files": ["src/eval-gates.ts"],
+        "expected_outcome": "Baseline adapts to improvements, robust to outliers, configurable per eval needs",
+        "strategies": ["mean", "ema", "trimmed-mean", "median"]
+      },
+      {
+        "id": "REC-013",
+        "title": "Validate and document normalization thresholds",
+        "issue": "timeToFirstSpawn uses EXCELLENT_MS=60s, POOR_MS=300s with no evidence these match reality. blockerResponseTime similar.",
+        "source": "scorer-analysis",
+        "effort": "2-3 hours (data gathering) + 1 hour (docs)",
+        "impact": "LOW",
+        "fix": "Gather real coordinator session data, plot distribution of spawn/response times, validate or adjust thresholds, document rationale",
+        "files": ["evals/scorers/coordinator-discipline.ts"],
+        "expected_outcome": "Evidence-based thresholds, documented assumptions, reproducible calibration process",
+        "method": "Run 20+ real coordinator sessions, calculate percentiles (p50, p95), use for normalization"
+      },
+      {
+        "id": "REC-014",
+        "title": "Add LLM retry logic and response caching",
+        "issue": "Single LLM call, no fallback on failure. No caching - repeated eval runs re-generate same decompositions.",
+        "source": "architecture",
+        "effort": "2-3 hours",
+        "impact": "LOW",
+        "fix": "Add exponential backoff retry wrapper, implement hash-based response cache (prompt → cached result)",
+        "files": ["evals/lib/llm.ts"],
+        "expected_outcome": "Resilient to network errors, faster repeat eval runs, reduced API costs",
+        "cache_key": "hash(prompt + model) → cache.get() || generateText()"
+      },
+      {
+        "id": "REC-015",
+        "title": "Clarify reviewEfficiency vs reviewThoroughness relationship",
+        "issue": "Both measure review behavior but can contradict (4 reviews / 2 workers = thorough 100%, efficient 50%)",
+        "source": "scorer-analysis",
+        "effort": "30 minutes",
+        "impact": "LOW",
+        "fix": "Add docstring explaining: thoroughness=quality gate (did they review?), efficiency=resource optimization (not over-reviewing)",
+        "files": ["evals/scorers/coordinator-discipline.ts"],
+        "expected_outcome": "Clear documentation of intentional complementary metrics",
+        "future_enhancement": "Consider composite reviewQuality scorer balancing both (1:1 ratio = perfect)"
+      },
+      {
+        "id": "REC-016",
+        "title": "Add characterization tests for outcome scorers",
+        "issue": "outcome-scorers.ts only has export verification tests, no unit tests for scoring logic",
+        "source": "scorer-analysis",
+        "effort": "2-3 hours",
+        "impact": "LOW",
+        "fix": "Add snapshot tests with known inputs: test('scopeAccuracy known input', () => { expect(result.score).toMatchSnapshot(); })",
+        "files": ["evals/scorers/outcome-scorers.test.ts"],
+        "expected_outcome": "Easier to debug scorer failures, catch regressions in scoring logic",
+        "note": "Currently outcome scorers not used in any eval (waiting for real execution data)"
+      }
+    ],
+    "long_term_p3": [
+      {
+        "id": "REC-017",
+        "title": "Complete learning loop (retrieval integration)",
+        "issue": "eval-learning.ts stores failures to semantic memory but never queries before eval runs",
+        "source": "architecture",
+        "effort": "4-6 hours",
+        "impact": "HIGH",
+        "fix": "Add queryEvalFailures() before prompt generation, inject past failures into LLM context with 'Avoid these patterns'",
+        "files": ["src/eval-learning.ts", "evals/lib/llm.ts", "src/swarm-prompts.ts"],
+        "expected_outcome": "LLM learns from past failures, avoids repeated mistakes, self-improving system",
+        "integration_point": "Before generateDecomposition(), query semantic memory, append failures to prompt"
+      },
+      {
+        "id": "REC-018",
+        "title": "Add failure analysis and diff tooling",
+        "issue": "Learning stores 'score dropped' but not WHY. No test case diff, no scorer output comparison.",
+        "source": "architecture",
+        "effort": "6-8 hours",
+        "impact": "MEDIUM",
+        "fix": "Implement analyzeFailure() to diff scorer outputs between runs, identify which test cases regressed, surface root cause signals",
+        "files": ["src/eval-learning.ts", "src/eval-gates.ts"],
+        "expected_outcome": "Automated root cause attribution, faster debugging, better semantic memory context",
+        "output_format": "Which scorer dropped? Which test cases? What changed in code?"
+      },
+      {
+        "id": "REC-019",
+        "title": "Add CI/PR integration hooks",
+        "issue": "Gates check but don't post results. No GitHub PR comments, no merge blocking.",
+        "source": "architecture",
+        "effort": "4-6 hours",
+        "impact": "MEDIUM",
+        "fix": "Implement postGateResultToGitHub() to comment on PRs with eval results, add merge protection rules",
+        "files": ["src/eval-gates.ts", ".github/workflows/"],
+        "expected_outcome": "Visible quality signals in PRs, automated merge protection, team awareness of regressions",
+        "example": "✅ Evals passing (coordinator-session: 85%, swarm-decomposition: 78%)"
+      },
+      {
+        "id": "REC-020",
+        "title": "Performance optimization (parallel LLM, indexing)",
+        "issue": "LLM evals slow (60-100s for 20 cases), JSONL parsing is linear scan",
+        "source": "architecture",
+        "effort": "6-8 hours",
+        "impact": "MEDIUM",
+        "fix": "Parallel LLM calls (10 concurrent = 10x faster), SQLite index on session_id/epic_id, incremental eval runs (only changed cases)",
+        "files": ["evals/lib/llm.ts", "evals/lib/data-loader.ts", "evals/lib/compaction-loader.ts"],
+        "expected_outcome": "Faster eval runs (60s → 10s), faster data loading, reduced CI time",
+        "optimizations": ["Promise.all() for LLM calls", "SQLite FTS index", "git diff → affected evals"]
+      },
+      {
+        "id": "REC-021",
+        "title": "Add eval parameterization support",
+        "issue": "Can't run same eval with different configs (max_subtasks=4 vs 8). Must copy-paste eval file.",
+        "source": "architecture",
+        "effort": "4-6 hours",
+        "impact": "LOW",
+        "fix": "Add evalite.parameterize() wrapper to test multiple config combinations in single eval file",
+        "files": ["evals/swarm-decomposition.eval.ts", "evals/coordinator-session.eval.ts"],
+        "expected_outcome": "DRY eval definitions, grid search optimal params, side-by-side strategy comparison",
+        "example": "params: [{maxSubtasks: 4, strategy: 'file-based'}, {maxSubtasks: 8, strategy: 'feature-based'}]"
+      },
+      {
+        "id": "REC-022",
+        "title": "Add observability (dashboards, traces, cost tracking)",
+        "issue": "No visibility into eval run performance, LLM costs, or score trends over time",
+        "source": "architecture",
+        "effort": "8-12 hours",
+        "impact": "LOW",
+        "fix": "Integrate Grafana + Prometheus for score dashboards, OpenTelemetry for trace collection, track LLM API costs",
+        "files": ["src/eval-runner.ts", "src/observability/"],
+        "expected_outcome": "Real-time eval health visibility, cost accountability, performance regression detection",
+        "metrics": ["eval_run_duration", "llm_calls_total", "llm_cost_usd", "eval_score_gauge"]
+      }
+    ]
   },
-  "swarm-decomposition": {
-    "passed": true,
-    "phase": "bootstrap",
-    "message": "Bootstrap phase (1/10 runs) - collecting data",
-    "currentScore": 0.85
+  "current_scores": {
+    "compaction-prompt": {
+      "score": "53%",
+      "status": "DEGRADED",
+      "target": "70-80% (after REC-002, REC-003)",
+      "blocker": "Case-sensitive regex + missing tools"
+    },
+    "example": {
+      "score": "0%",
+      "status": "BROKEN",
+      "target": "100% (after REC-001)",
+      "blocker": "Data/task structure mismatch"
+    },
+    "coordinator-session": {
+      "score": "66%",
+      "status": "FAIR",
+      "target": "75-85% (after filter tuning)",
+      "note": "Only 3/102 sessions passing strict filter (by design)"
+    },
+    "coordinator-behavior": {
+      "score": "77%",
+      "status": "GOOD",
+      "target": "80-90%",
+      "note": "Stable, no immediate issues"
+    },
+    "swarm-decomposition": {
+      "score": "70%",
+      "status": "GOOD",
+      "target": "75-85%",
+      "note": "LLM variance expected"
+    },
+    "compaction-resumption": {
+      "score": "93%",
+      "status": "EXCELLENT",
+      "target": "90-95%",
+      "note": "Well-calibrated"
+    }
+  },
+  "implementation_roadmap": {
+    "sprint_1_quick_wins": {
+      "duration": "1-2 days",
+      "goal": "Fix broken evals, remove dead code",
+      "tasks": ["REC-001", "REC-002", "REC-003", "REC-004"],
+      "expected_outcome": "example.eval.ts: 0% → 100%, compaction-prompt: 53% → 70-80%, remove 250 LOC dead code"
+    },
+    "sprint_2_foundation": {
+      "duration": "1-2 weeks",
+      "goal": "Improve data quality, add versioning",
+      "tasks": ["REC-005", "REC-006", "REC-007", "REC-008", "REC-009", "REC-010"],
+      "expected_outcome": "Session pass rate: 2.9% → 27.5%, scorer versioning enabled, cleaner abstractions"
+    },
+    "sprint_3_robustness": {
+      "duration": "2-3 weeks",
+      "goal": "Add reliability and observability",
+      "tasks": ["REC-011", "REC-012", "REC-013", "REC-014", "REC-015", "REC-016"],
+      "expected_outcome": "Budget controls, better baselines, documented thresholds, LLM resilience"
+    },
+    "sprint_4_intelligence": {
+      "duration": "3-4 weeks",
+      "goal": "Close learning loop, add CI integration",
+      "tasks": ["REC-017", "REC-018", "REC-019"],
+      "expected_outcome": "Self-improving evals via memory retrieval, automated PR feedback, root cause analysis"
+    },
+    "sprint_5_scale": {
+      "duration": "4-6 weeks",
+      "goal": "Optimize performance, add advanced features",
+      "tasks": ["REC-020", "REC-021", "REC-022"],
+      "expected_outcome": "10x faster eval runs, parameterized evals, production observability"
+    }
+  },
+  "risk_assessment": {
+    "high_risk": [
+      {
+        "area": "Scorer versioning (REC-008)",
+        "risk": "Schema changes could break existing eval history",
+        "mitigation": "Add migration script, test with copy of production data first"
+      },
+      {
+        "area": "Data source refactor (REC-007)",
+        "risk": "Large refactor could introduce regressions",
+        "mitigation": "TDD approach, extract interface first, migrate one source at a time"
+      }
+    ],
+    "medium_risk": [
+      {
+        "area": "Filter defaults change (REC-005)",
+        "risk": "Changing defaults could break existing eval expectations",
+        "mitigation": "Add preset system ('strict', 'moderate', 'lenient'), document migration"
+      },
+      {
+        "area": "LLM judge budget (REC-011)",
+        "risk": "Budget enforcement could cause eval failures if too strict",
+        "mitigation": "Start with generous budget, tune down based on real usage"
+      }
+    ],
+    "low_risk": [
+      {
+        "area": "Documentation improvements (REC-010, REC-015)",
+        "risk": "Minimal risk, pure documentation",
+        "mitigation": "None needed"
+      },
+      {
+        "area": "Quick fixes (REC-001, REC-002, REC-003)",
+        "risk": "Small code changes, easy to revert",
+        "mitigation": "Test with existing fixtures first"
+      }
+    ]
+  },
+  "success_metrics": {
+    "immediate": {
+      "example_eval_score": "0% → 100%",
+      "compaction_prompt_score": "53% → 70-80%",
+      "dead_code_removed": "250 LOC",
+      "test_coverage": "Maintained at current levels"
+    },
+    "short_term": {
+      "session_pass_rate": "2.9% → 27.5%",
+      "scorer_versioning": "Implemented and tracked",
+      "abstraction_quality": "3 source adapters (PGlite, JSONL, Fixture)",
+      "documentation_completeness": "All composite scorers have weight rationale"
+    },
+    "long_term": {
+      "eval_run_time": "60s → 10s (6x improvement)",
+      "llm_cost_predictability": "Budget enforcement at $1.00/run",
+      "ci_integration": "GitHub PR comments with eval results",
+      "learning_loop_closed": "Past failures injected into prompts"
+    }
+  },
+  "quotes_from_literature": {
+    "on_abstraction": "\"Deep modules provide powerful functionality yet have simple interfaces.\" - John Ousterhout, A Philosophy of Software Design (applies to REC-007 EvalSource interface)",
+    "on_testing": "\"Tests are the documentation that never lies.\" - Kent Beck (applies to REC-016 characterization tests)",
+    "on_refactoring": "\"Make the change easy, then make the easy change.\" - Kent Beck (applies to REC-007 data source refactor)",
+    "on_measurement": "\"You can't manage what you don't measure.\" - Peter Drucker (applies to REC-022 observability)"
+  },
+  "conclusion": {
+    "overall_health": "GOOD",
+    "confidence": "HIGH",
+    "summary": "The eval infrastructure is architecturally sound with clean pipeline design and progressive quality gates. Current 'failures' are tactical code bugs (case sensitivity, data/task mismatch) that are easily fixable. The 2.9% session pass rate is by design - filtering for gold-standard complete coordinator cycles. The 3 passing sessions are excellent examples with 20-24 worker spawns and 0 violations.",
+    "priority_order": "Fix eval bugs first (REC-001, REC-002, REC-003), then remove dead code (REC-004), then improve abstractions (REC-005 through REC-010). Long-term items (learning loop, CI integration, performance) can be tackled incrementally.",
+    "estimated_total_effort": "80-120 hours across 5 sprints",
+    "next_immediate_action": "Start with Sprint 1 quick wins (1-2 days) to unblock eval scoring and remove dead code."
   }
 }
