@@ -40,7 +40,6 @@
   },
   "dependencies": {
     "@libsql/client": "^0.15.15",
-    "@libsql/darwin-arm64": "^0.5.22",
     "debug": "^4.4.3",
     "drizzle-orm": "^0.41.0",
     "effect": "^3.19.12",
@@ -57,5 +56,9 @@
     "drizzle-kit": "^0.31.0",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
+  },
+  "optionalDependencies": {
+    "@libsql/darwin-arm64": "^0.5.22",
+    "@libsql/darwin-x64": "^0.5.22"
   }
 }
