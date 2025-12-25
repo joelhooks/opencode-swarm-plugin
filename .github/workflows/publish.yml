@@ -29,12 +29,39 @@ jobs:
       - name: Build
         run: bun turbo build --filter='!@swarmtools/web'
 
-      - name: Create and publish versions
+      - name: Check for changesets
+        id: changesets
+        run: |
+          if ls .changeset/*.md 2>/dev/null | grep -v README.md | head -1 > /dev/null; then
+            echo "has_changesets=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_changesets=false" >> $GITHUB_OUTPUT
+          fi
+          # Check if local versions are ahead of npm
+          LOCAL_SWARM=$(jq -r .version packages/opencode-swarm-plugin/package.json)
+          LOCAL_MAIL=$(jq -r .version packages/swarm-mail/package.json)
+          NPM_SWARM=$(npm view opencode-swarm-plugin version 2>/dev/null || echo "0.0.0")
+          NPM_MAIL=$(npm view swarm-mail version 2>/dev/null || echo "0.0.0")
+          echo "Local opencode-swarm-plugin: $LOCAL_SWARM, npm: $NPM_SWARM"
+          echo "Local swarm-mail: $LOCAL_MAIL, npm: $NPM_MAIL"
+          if [ "$LOCAL_SWARM" != "$NPM_SWARM" ] || [ "$LOCAL_MAIL" != "$NPM_MAIL" ]; then
+            echo "needs_publish=true" >> $GITHUB_OUTPUT
+          else
+            echo "needs_publish=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create version PR (if changesets exist)
+        if: steps.changesets.outputs.has_changesets == 'true'
         uses: changesets/action@v1
         with:
           version: bun run ci:version
           commit: "chore: update versions"
           title: "chore: update versions"
-          publish: bun run ci:publish
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to npm (if versions ahead of npm)
+        if: steps.changesets.outputs.has_changesets == 'false' && steps.changesets.outputs.needs_publish == 'true'
+        run: bun run ci:publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
