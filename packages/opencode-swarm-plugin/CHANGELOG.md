@@ -1,5 +1,97 @@
 # opencode-swarm-plugin
 
+## 0.41.0
+
+### Minor Changes
+
+- [`179b3f0`](https://github.com/joelhooks/swarm-tools/commit/179b3f0e49c7959f8d754c1274d301d0b3845a79) Thanks [@joelhooks](https://github.com/joelhooks)! - ## 🐝 Compaction Prompt Now Speaks Swarm
+
+  > _"Memory is essential for communication: we recall past interactions, infer preferences, and construct evolving mental models of those we engage with."_
+  > — Mem0: Building Production-Ready AI Agents with Scalable Long-Term Memory
+
+  When context compacts mid-swarm, coordinators were waking up confused. They had state information but no protocol guidance. Now the compaction prompt includes a condensed version of the swarm command template.
+
+  **What's New:**
+
+  The `SWARM_COMPACTION_CONTEXT` now includes:
+
+  1. **What Good Looks Like** - Behavioral examples showing ideal coordinator behavior
+
+     - ✅ Spawned researcher for unfamiliar tech → got summary → stored in semantic-memory
+     - ✅ Checked inbox every 5-10 minutes → caught blocked worker → unblocked in 2min
+     - ❌ Called context7 directly → dumped 50KB → context exhaustion
+
+  2. **Mandatory Behaviors Checklist** - Post-compaction protocol
+     - Inbox monitoring (every 5-10 min with intervention triggers)
+     - Skill loading (before spawning workers)
+     - Worker review (after every worker returns, 3-strike rule)
+     - Research spawning (never call context7/pdf-brain directly)
+
+  **Why This Matters:**
+
+  Coordinators resuming from compaction now have:
+
+  - Clear behavioral guidance (not just state)
+  - Actionable tool call examples
+  - Anti-patterns to avoid
+  - The same protocol as fresh `/swarm` invocations
+
+  **Backward Compatible:** Existing compaction hooks continue to work. This adds guidance, doesn't change the hook signature.
+
+### Patch Changes
+
+- [`3e7c126`](https://github.com/joelhooks/swarm-tools/commit/3e7c126b11aa6ad909ebcb2ab3cf77883f9acfe4) Thanks [@joelhooks](https://github.com/joelhooks)! - ## 🧪 Bulletproof Test Suite
+
+  > "Setting up our tests to run synchronously and using mocking libraries will greatly speed up our testing"
+  > — ng-book
+
+  Fixed test isolation issues that caused 19 tests to fail when run together but pass in isolation.
+
+  ### The Culprits
+
+  **1. Global fetch pollution** (`ollama.test.ts`)
+
+  ```typescript
+  // BEFORE: Replaced global.fetch, never restored it
+  global.fetch = mockFetch;
+
+  // AFTER: Save and restore
+  const originalFetch = global.fetch;
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+  ```
+
+  **2. Port conflicts** (`durable-server.test.ts`)
+
+  - Tests used hardcoded ports (4483, 4484, 4485)
+  - Parallel test runs fought over the same ports
+  - Fixed: Use `port: 0` for OS-assigned ports, made `server.url` a getter
+
+  **3. AI SDK schema incompatibility** (`memory-operations.ts`)
+
+  - `z.discriminatedUnion` creates `oneOf` at top level
+  - Anthropic API requires `type: object` at top level
+  - Fixed: Flat object schema with optional fields
+
+  ### Test Stats
+
+  ```
+  Before: 19 failures when run together
+  After:  0 failures, 1406 tests pass
+  ```
+
+  ### Files Changed
+
+  - `src/memory/ollama.test.ts` - Restore global.fetch after each test
+  - `src/streams/durable-server.ts` - Dynamic port getter
+  - `src/streams/durable-server.test.ts` - Use port 0, rewrite for isolation
+  - `src/memory/memory-operations.ts` - Flat schema for Anthropic compatibility
+  - Renamed `memory-operations.test.ts` → `memory-operations.integration.test.ts`
+
+- Updated dependencies [[`3e7c126`](https://github.com/joelhooks/swarm-tools/commit/3e7c126b11aa6ad909ebcb2ab3cf77883f9acfe4)]:
+  - swarm-mail@1.5.3
+
 ## 0.40.0
 
 ### Minor Changes
