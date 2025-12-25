@@ -1,5 +1,13 @@
 # opencode-swarm-plugin
 
+## 0.42.4
+
+### Patch Changes
+
+- [`4c7d869`](https://github.com/joelhooks/swarm-tools/commit/4c7d869e385677318fbbda7fa464bbe1223039f1) Thanks [@joelhooks](https://github.com/joelhooks)! - ## Switched to X API v2
+
+  Old action used deprecated v1.1 API. Now using direct OAuth 1.0a signed requests to v2 endpoint.
+
 ## 0.42.3
 
 ### Patch Changes
