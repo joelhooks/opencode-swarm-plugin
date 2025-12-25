@@ -1,5 +1,13 @@
 # opencode-swarm-plugin
 
+## 0.42.5
+
+### Patch Changes
+
+- [`45af762`](https://github.com/joelhooks/swarm-tools/commit/45af762ce656cf652847027d176d7bb7ff91f19b) Thanks [@joelhooks](https://github.com/joelhooks)! - ## The Bees Can Finally Tweet
+
+  New @swarmtoolsai app with proper OAuth. Releases now announce themselves.
+
 ## 0.42.4
 
 ### Patch Changes
