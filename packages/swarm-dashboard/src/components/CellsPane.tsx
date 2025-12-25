@@ -1,87 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { CellNode, type Cell } from './CellNode';
-
-/**
- * Mock cell data for development
- * TODO: Replace with real swarm-mail hive integration
- */
-const MOCK_CELLS: Cell[] = [
-  {
-    id: 'epic-1',
-    title: 'Swarm Dashboard',
-    status: 'in_progress',
-    priority: 0,
-    issue_type: 'epic',
-    children: [
-      {
-        id: 'task-1-1',
-        title: 'Agent List View',
-        status: 'closed',
-        priority: 1,
-        issue_type: 'task',
-        parent_id: 'epic-1',
-      },
-      {
-        id: 'task-1-2',
-        title: 'Cells pane with tree view',
-        status: 'in_progress',
-        priority: 1,
-        issue_type: 'task',
-        parent_id: 'epic-1',
-      },
-      {
-        id: 'task-1-3',
-        title: 'Message Timeline',
-        status: 'open',
-        priority: 2,
-        issue_type: 'task',
-        parent_id: 'epic-1',
-      },
-    ],
-  },
-  {
-    id: 'bug-1',
-    title: 'Fix navigation state sync',
-    status: 'blocked',
-    priority: 0,
-    issue_type: 'bug',
-  },
-  {
-    id: 'epic-2',
-    title: 'Observability Features',
-    status: 'open',
-    priority: 1,
-    issue_type: 'epic',
-    children: [
-      {
-        id: 'task-2-1',
-        title: 'Add performance metrics',
-        status: 'open',
-        priority: 2,
-        issue_type: 'task',
-        parent_id: 'epic-2',
-      },
-      {
-        id: 'task-2-2',
-        title: 'Implement error tracking',
-        status: 'open',
-        priority: 1,
-        issue_type: 'task',
-        parent_id: 'epic-2',
-      },
-    ],
-  },
-  {
-    id: 'chore-1',
-    title: 'Update dependencies',
-    status: 'open',
-    priority: 3,
-    issue_type: 'chore',
-  },
-];
+import { getCells } from '../lib/api';
 
 interface CellsPaneProps {
   onCellSelect?: (cellId: string) => void;
+  /** Base URL for API calls (default: http://localhost:3001) */
+  apiBaseUrl?: string;
 }
 
 /**
@@ -92,12 +16,37 @@ interface CellsPaneProps {
  * - Status icons (○ open, ◐ in_progress, ● closed, ⊘ blocked)
  * - Priority badges (P0-P3)
  * - Cell selection with highlight
- * - Mock data for development (TODO: integrate with swarm-mail)
+ * - Real-time data from swarm-mail hive database
+ * - Auto-refresh every 5 seconds
  * 
  * @param onCellSelect - Callback when a cell is selected
+ * @param apiBaseUrl - Base URL for API calls
  */
-export const CellsPane = ({ onCellSelect }: CellsPaneProps) => {
+export const CellsPane = ({ onCellSelect, apiBaseUrl = "http://localhost:3001" }: CellsPaneProps) => {
   const [selectedCellId, setSelectedCellId] = useState<string | null>(null);
+  const [cells, setCells] = useState<Cell[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch cells on mount and every 5 seconds
+  useEffect(() => {
+    const fetchCells = async () => {
+      try {
+        const fetchedCells = await getCells(apiBaseUrl);
+        setCells(fetchedCells);
+        setError(null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to fetch cells");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchCells();
+    const intervalId = setInterval(fetchCells, 5000); // Refresh every 5s
+
+    return () => clearInterval(intervalId);
+  }, [apiBaseUrl]);
 
   const handleSelect = (cellId: string) => {
     setSelectedCellId(cellId);
@@ -105,6 +54,16 @@ export const CellsPane = ({ onCellSelect }: CellsPaneProps) => {
       onCellSelect(cellId);
     }
   };
+
+  const openCellsCount = cells.reduce((count, cell) => {
+    const cellCount = cell.status === 'open' ? 1 : 0;
+    const childrenCount = cell.children?.filter(c => c.status === 'open').length || 0;
+    return count + cellCount + childrenCount;
+  }, 0);
+
+  const totalCellsCount = cells.reduce((count, cell) => {
+    return count + 1 + (cell.children?.length || 0);
+  }, 0);
 
   return (
     <div className="flex flex-col h-full bg-white dark:bg-gray-900">
@@ -114,20 +73,35 @@ export const CellsPane = ({ onCellSelect }: CellsPaneProps) => {
           Cells
         </h2>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-          {MOCK_CELLS.length} cells · {MOCK_CELLS.filter(c => c.status === 'open').length} open
+          {loading ? "Loading..." : `${totalCellsCount} cells · ${openCellsCount} open`}
         </p>
+        {error && (
+          <p className="text-sm text-red-500 mt-1">
+            {error}
+          </p>
+        )}
       </div>
 
       {/* Tree view */}
       <div className="flex-1 overflow-y-auto">
-        {MOCK_CELLS.map((cell) => (
-          <CellNode
-            key={cell.id}
-            cell={cell}
-            isSelected={selectedCellId === cell.id}
-            onSelect={handleSelect}
-          />
-        ))}
+        {loading ? (
+          <div className="flex items-center justify-center h-full text-gray-500">
+            Loading cells...
+          </div>
+        ) : cells.length === 0 ? (
+          <div className="flex items-center justify-center h-full text-gray-500">
+            No cells found
+          </div>
+        ) : (
+          cells.map((cell) => (
+            <CellNode
+              key={cell.id}
+              cell={cell}
+              isSelected={selectedCellId === cell.id}
+              onSelect={handleSelect}
+            />
+          ))
+        )}
       </div>
 
       {/* Footer with legend */}

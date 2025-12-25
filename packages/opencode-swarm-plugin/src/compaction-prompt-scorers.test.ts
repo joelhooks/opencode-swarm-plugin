@@ -3,6 +3,15 @@
  *
  * TDD approach - tests written FIRST to define scorer behavior
  * Tests the PURE scoring functions (not evalite wrappers)
+ *
+ * **Case-Sensitivity Verification**:
+ * All tool name regexes MUST be case-insensitive (/i flag) because:
+ * - LLMs generate inconsistent casing (Edit vs edit, Read vs read)
+ * - Fixtures contain mixed case examples
+ * - Scoring must be robust to case variations
+ *
+ * Fixed in commit adding /i flags to Edit, Write, bash patterns.
+ * Tests added to prevent regression.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -14,6 +23,109 @@ import {
 	scoreForbiddenToolsPresent,
 	scorePostCompactionDiscipline,
 } from "./compaction-prompt-scoring.js";
+
+describe("Case-Insensitive Tool Detection (Regression Prevention)", () => {
+	test("all scorers handle mixed-case tool names correctly", () => {
+		// Real-world example with mixed casing from LLM output
+		const prompt: CompactionPrompt = {
+			content: `┌─────────────────────────────────────────┐
+│     YOU ARE THE COORDINATOR             │
+└─────────────────────────────────────────┘
+
+You are coordinating epic mjkw81rkq4c.
+
+## IMMEDIATE ACTIONS
+
+1. swarm_status(epic_id='mjkw81rkq4c', project_key='/path')
+2. swarmmail_inbox()
+
+## FORBIDDEN TOOLS
+
+NEVER use these tools - delegate to workers:
+- edit (file modifications)
+- write (file creation) 
+- BASH (shell commands for file mods)
+- swarmmail_reserve (only workers)
+- git commit (workers handle)
+
+ALWAYS spawn workers for code changes.`,
+		};
+
+		// Epic ID detection should work
+		const epicResult = scoreEpicIdSpecificity(prompt);
+		expect(epicResult.score).toBe(1.0);
+
+		// Actionability should detect swarm_status
+		const actionResult = scoreActionability(prompt);
+		expect(actionResult.score).toBe(1.0);
+
+		// Coordinator identity should detect ASCII + NEVER/ALWAYS
+		const identityResult = scoreCoordinatorIdentity(prompt);
+		expect(identityResult.score).toBe(1.0);
+
+		// Forbidden tools should detect all 5 despite mixed case
+		const forbiddenResult = scoreForbiddenToolsPresent(prompt);
+		expect(forbiddenResult.score).toBe(1.0);
+		expect(forbiddenResult.message).toContain("All 5");
+
+		// Post-compaction discipline should detect swarm_status as first tool
+		const disciplineResult = scorePostCompactionDiscipline(prompt);
+		expect(disciplineResult.score).toBe(1.0);
+	});
+
+	test("forbidden tools scorer detects lowercase tool names", () => {
+		// Previously failed before /i flags were added
+		const prompt: CompactionPrompt = {
+			content: `Don't use: edit, write, bash, swarmmail_reserve, git commit`,
+		};
+
+		const result = scoreForbiddenToolsPresent(prompt);
+
+		// Should detect all 5 tools regardless of case
+		expect(result.score).toBe(1.0);
+		expect(result.message).toContain("All 5");
+	});
+
+	test("forbidden tools scorer detects UPPERCASE tool names", () => {
+		const prompt: CompactionPrompt = {
+			content: `Forbidden: EDIT, WRITE, BASH, swarmmail_reserve, git commit`,
+		};
+
+		const result = scoreForbiddenToolsPresent(prompt);
+
+		expect(result.score).toBe(1.0);
+		expect(result.message).toContain("All 5");
+	});
+
+	test("post-compaction discipline detects mixed-case first tools", () => {
+		const testCases = [
+			{ tool: "EDIT", shouldPass: false },
+			{ tool: "edit", shouldPass: false },
+			{ tool: "Edit", shouldPass: false },
+			{ tool: "WRITE", shouldPass: false },
+			{ tool: "write", shouldPass: false },
+			{ tool: "READ", shouldPass: false },
+			{ tool: "read", shouldPass: false },
+			{ tool: "swarm_status", shouldPass: true },
+			{ tool: "SWARM_STATUS", shouldPass: true },
+			{ tool: "swarmmail_inbox", shouldPass: true },
+		];
+
+		for (const { tool, shouldPass } of testCases) {
+			const prompt: CompactionPrompt = {
+				content: `1. ${tool}()`,
+			};
+
+			const result = scorePostCompactionDiscipline(prompt);
+
+			if (shouldPass) {
+				expect(result.score).toBe(1.0);
+			} else {
+				expect(result.score).toBe(0.0);
+			}
+		}
+	});
+});
 
 describe("epicIdSpecificity scorer", () => {
 	test("scores 1.0 for real epic IDs", () => {
@@ -218,6 +330,33 @@ describe("forbiddenToolsPresent scorer", () => {
 		expect(result.score).toBe(0.0);
 		expect(result.message).toContain("0/5");
 	});
+
+	test("scores 1.0 with lowercase forbidden tools (case-insensitive)", () => {
+		const prompt: CompactionPrompt = {
+			content: `🚫 FORBIDDEN TOOLS - NEVER call these:
+- edit (use swarm_spawn_subtask)
+- write (use swarm_spawn_subtask)
+- swarmmail_reserve (only workers reserve)
+- git commit (workers commit)
+- bash (for file modifications)`,
+		};
+
+		const result = scoreForbiddenToolsPresent(prompt);
+
+		expect(result.score).toBe(1.0);
+		expect(result.message).toContain("All 5 forbidden tools");
+	});
+
+	test("scores correctly with mixed case forbidden tools", () => {
+		const prompt: CompactionPrompt = {
+			content: `Avoid: edit, Write, BASH`,
+		};
+
+		const result = scoreForbiddenToolsPresent(prompt);
+
+		expect(result.score).toBe(0.6);
+		expect(result.message).toContain("3/5");
+	});
 });
 
 describe("postCompactionDiscipline scorer", () => {
@@ -296,5 +435,41 @@ describe("postCompactionDiscipline scorer", () => {
 
 		expect(result.score).toBe(0.0);
 		expect(result.message).toContain("No tool");
+	});
+
+	test("scores 0.0 when first tool is lowercase 'read' (case-insensitive)", () => {
+		const prompt: CompactionPrompt = {
+			content: `1. read(file='src/index.ts')
+2. swarm_status()`,
+		};
+
+		const result = scorePostCompactionDiscipline(prompt);
+
+		expect(result.score).toBe(0.0);
+		expect(result.message).toContain("read");
+	});
+
+	test("scores 0.0 when first tool is lowercase 'edit'", () => {
+		const prompt: CompactionPrompt = {
+			content: `1. edit(file='src/auth.ts', ...)
+2. swarm_status()`,
+		};
+
+		const result = scorePostCompactionDiscipline(prompt);
+
+		expect(result.score).toBe(0.0);
+		expect(result.message).toContain("edit");
+	});
+
+	test("scores 0.0 when first tool is lowercase 'write'", () => {
+		const prompt: CompactionPrompt = {
+			content: `1. write(file='README.md', content='...')
+2. swarm_status()`,
+		};
+
+		const result = scorePostCompactionDiscipline(prompt);
+
+		expect(result.score).toBe(0.0);
+		expect(result.message).toContain("write");
 	});
 });

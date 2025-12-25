@@ -2518,6 +2518,8 @@ ${cyan("Commands:")}
   swarm config    Show paths to generated config files
   swarm agents    Update AGENTS.md with skill awareness
   swarm migrate   Migrate PGlite database to libSQL
+  swarm serve     Start SSE server for real-time event streaming
+    --port <n>          Port to listen on (default: 3001)
   swarm cells     List or get cells from database (replaces 'swarm tool hive_query')
   swarm log       View swarm logs with filtering
   swarm stats     Show swarm health metrics and success rates
@@ -4489,6 +4491,62 @@ async function evalRun() {
 }
 
 // ============================================================================
+// Serve Command - Start SSE Server
+// ============================================================================
+
+async function serve() {
+  p.intro("swarm serve v" + VERSION);
+
+  // Parse --port flag (default 3001)
+  const portFlagIndex = process.argv.indexOf("--port");
+  const port = portFlagIndex !== -1 
+    ? Number.parseInt(process.argv[portFlagIndex + 1]) || 3001
+    : 3001;
+
+  const projectPath = process.cwd();
+
+  p.log.step("Starting DurableStreamServer...");
+  p.log.message(dim(`  Project: ${projectPath}`));
+  p.log.message(dim(`  Port: ${port}`));
+
+  try {
+    // Import dependencies
+    const { getSwarmMailLibSQL } = await import("swarm-mail");
+    const { createDurableStreamAdapter, createDurableStreamServer } = await import("swarm-mail");
+
+    // Get swarm-mail adapter
+    const swarmMail = await getSwarmMailLibSQL(projectPath);
+    
+    // Create stream adapter
+    const streamAdapter = createDurableStreamAdapter(swarmMail, projectPath);
+    
+    // Create and start server
+    const server = createDurableStreamServer({
+      adapter: streamAdapter,
+      port,
+      projectKey: projectPath,
+    });
+
+    await server.start();
+
+    p.log.success("Server started!");
+    p.log.message("");
+    p.log.message(cyan("  Dashboard: http://localhost:5173"));
+    p.log.message(cyan(`  SSE Endpoint: ${server.url}/streams/${encodeURIComponent(projectPath)}`));
+    p.log.message("");
+    p.log.message(dim("  Press Ctrl+C to stop"));
+
+    // Keep process alive
+    await new Promise(() => {});
+  } catch (error) {
+    p.log.error("Failed to start server");
+    p.log.message(error instanceof Error ? error.message : String(error));
+    p.outro("Aborted");
+    process.exit(1);
+  }
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -4509,6 +4567,9 @@ switch (command) {
     break;
   case "config":
     config();
+    break;
+  case "serve":
+    await serve();
     break;
   case "update":
     await update();
