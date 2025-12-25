@@ -1,5 +1,15 @@
 # opencode-swarm-plugin
 
+## 0.42.1
+
+### Patch Changes
+
+- [`f6707d5`](https://github.com/joelhooks/swarm-tools/commit/f6707d53eb92021b6976212e903994c98c798483) Thanks [@joelhooks](https://github.com/joelhooks)! - ## 🐦 @swarmtoolsai Now Tweets Releases
+
+  Automated release announcements are live! When packages publish to npm, Claude summarizes the changelog into a tweet and posts from @swarmtoolsai.
+
+  No more manual "hey we shipped" posts - the bees handle it now.
+
 ## 0.42.0
 
 ### Minor Changes
