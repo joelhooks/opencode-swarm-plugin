@@ -1,5 +1,23 @@
 # opencode-swarm-plugin
 
+## 0.42.6
+
+### Patch Changes
+
+- [`ab90238`](https://github.com/joelhooks/swarm-tools/commit/ab902386883fa9654c9977d28888582fafc093e5) Thanks [@joelhooks](https://github.com/joelhooks)! - ## Query Epic Children Without Rawdogging JSONL
+
+  `hive_cells` and `hive_query` now support `parent_id` filter. Find all children of an epic in one call:
+
+  ```typescript
+  hive_cells({ parent_id: "epic-id" }); // Returns all subtasks
+  hive_query({ parent_id: "epic-id", status: "open" }); // Open subtasks only
+  ```
+
+  No more grep/jq on issues.jsonl. The tools do what they should.
+
+- Updated dependencies [[`ab90238`](https://github.com/joelhooks/swarm-tools/commit/ab902386883fa9654c9977d28888582fafc093e5)]:
+  - swarm-mail@1.5.5
+
 ## 0.42.5
 
 ### Patch Changes
