@@ -99,13 +99,11 @@ jobs:
           echo "$CHANGELOG" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
           
-          # Find the last merged PR that isn't a version bump
-          # This gets the actual feature PR, not "release: ..." PRs
-          FEATURE_PR=$(gh pr list --state merged --limit 5 --json url,title \
-            --jq '[.[] | select(.title | startswith("release:") | not)] | .[0].url')
+          # Get the PR that was merged to trigger this workflow (by commit SHA)
+          RELEASE_PR=$(gh pr list --state merged --search "${{ github.sha }}" --json url --jq '.[0].url')
           
-          if [ -n "$FEATURE_PR" ]; then
-            echo "release_url=$FEATURE_PR" >> $GITHUB_OUTPUT
+          if [ -n "$RELEASE_PR" ]; then
+            echo "release_url=$RELEASE_PR" >> $GITHUB_OUTPUT
           else
             # Fallback to commit link from changelog
             COMMIT_URL=$(echo "$CHANGELOG" | grep -oE 'https://github.com/[^)]+/commit/[a-f0-9]+' | head -1)
