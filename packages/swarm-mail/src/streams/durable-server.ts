@@ -32,6 +32,13 @@ import type { HiveAdapter } from "../types/hive-adapter.js";
 // Bun Server type without WebSocket data
 type BunServer = Server<undefined>;
 
+// CORS headers for cross-origin requests (dashboard at :5173, server at :4483)
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
 /**
  * Configuration for the Durable Stream HTTP server
  */
@@ -102,12 +109,17 @@ export function createDurableStreamServer(
       async fetch(req: Request) {
         const url = new URL(req.url);
 
+        // Handle CORS preflight
+        if (req.method === "OPTIONS") {
+          return new Response(null, { status: 204, headers: CORS_HEADERS });
+        }
+
         // Route: GET /cells
         if (url.pathname === "/cells") {
           if (!hiveAdapter) {
             return new Response(
               JSON.stringify({ error: "HiveAdapter not configured" }),
-              { status: 500, headers: { "Content-Type": "application/json" } },
+              { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } },
             );
           }
 
@@ -118,12 +130,12 @@ export function createDurableStreamServer(
             );
             return new Response(JSON.stringify({ cells }), {
               status: 200,
-              headers: { "Content-Type": "application/json" },
+              headers: { "Content-Type": "application/json", ...CORS_HEADERS },
             });
           } catch (error) {
             return new Response(
               JSON.stringify({ error: "Failed to query cells" }),
-              { status: 500, headers: { "Content-Type": "application/json" } },
+              { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } },
             );
           }
         }
@@ -131,14 +143,14 @@ export function createDurableStreamServer(
         // Parse route: /streams/:projectKey
         const match = url.pathname.match(/^\/streams\/(.+)$/);
         if (!match) {
-          return new Response("Not Found", { status: 404 });
+          return new Response("Not Found", { status: 404, headers: CORS_HEADERS });
         }
 
         const requestedProjectKey = decodeURIComponent(match[1]);
 
         // If server was configured with a specific projectKey, verify it matches
         if (configProjectKey && configProjectKey !== requestedProjectKey) {
-          return new Response("Project not found", { status: 404 });
+          return new Response("Project not found", { status: 404, headers: CORS_HEADERS });
         }
 
         // Parse query params
@@ -152,7 +164,7 @@ export function createDurableStreamServer(
 
         // Validate offset
         if (Number.isNaN(offset) || offset < 0) {
-          return new Response("Invalid offset parameter", { status: 400 });
+          return new Response("Invalid offset parameter", { status: 400, headers: CORS_HEADERS });
         }
 
         // ONE-SHOT MODE: Return events as JSON array
@@ -162,6 +174,7 @@ export function createDurableStreamServer(
             status: 200,
             headers: {
               "Content-Type": "application/json",
+              ...CORS_HEADERS,
             },
           });
         }
@@ -232,6 +245,7 @@ export function createDurableStreamServer(
             "Content-Type": "text/event-stream",
             "Cache-Control": "no-cache",
             Connection: "keep-alive",
+            ...CORS_HEADERS,
           },
         });
       },
