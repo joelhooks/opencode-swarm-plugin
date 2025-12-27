@@ -742,6 +742,9 @@ swarm query --preset agent_activity
 swarm query --preset event_frequency
 swarm query --preset error_patterns
 swarm query --preset compaction_stats
+swarm query --preset decision_quality
+swarm query --preset strategy_success_rates
+swarm query --preset decisions_by_pattern
 
 # Output formats
 swarm query --preset failed_decompositions --format table  # Default
@@ -763,6 +766,9 @@ swarm query --preset file_conflicts --format json
 | `event_frequency` | Event type distribution |
 | `error_patterns` | Common error patterns |
 | `compaction_stats` | Context compaction metrics |
+| `decision_quality` | Recent decisions with quality scores and rationale |
+| `strategy_success_rates` | Success rates by decomposition strategy |
+| `decisions_by_pattern` | Which semantic memory patterns are cited most often |
 
 ### Live Monitoring
 

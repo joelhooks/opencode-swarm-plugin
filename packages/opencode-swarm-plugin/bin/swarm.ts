@@ -2536,7 +2536,7 @@ async function query() {
   const parsed = parseQueryArgs(args);
 
   // Import query tools
-  const { executeQuery, executePreset, formatAsTable, formatAsCSV, formatAsJSON } = await import("../src/observability/query-tools.js");
+  const { executeQuery, executePreset, formatAsTable, formatAsCSV, formatAsJSON } = await import("../src/query-tools.js");
 
   p.intro("swarm query");
 

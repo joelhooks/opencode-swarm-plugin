@@ -2025,7 +2025,7 @@ export const swarm_plan_prompt = tool({
       selectedStrategy = args.strategy as StrategyName;
       strategyReasoning = `User-specified strategy: ${selectedStrategy}`;
     } else {
-      const selection = selectStrategy(args.task);
+      const selection = await selectStrategy(args.task);
       selectedStrategy = selection.strategy;
       strategyReasoning = selection.reasoning;
     }

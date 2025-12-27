@@ -16,6 +16,7 @@ import {
   getDecisionTracesByType,
   linkOutcomeToTrace,
   type DecisionTraceInput,
+  // New functions will be imported dynamically in tests to ensure they exist
 } from "./decision-trace-store.js";
 
 describe("DecisionTraceStore", () => {
@@ -240,6 +241,387 @@ describe("DecisionTraceStore", () => {
       });
 
       expect(trace.decision_type).toBe("scope_change");
+    });
+  });
+
+  describe("findSimilarDecisions", () => {
+    test("finds similar strategy_selection decisions by task description", async () => {
+      // Create historical decisions
+      await createDecisionTrace(db, {
+        decision_type: "strategy_selection",
+        agent_name: "coordinator",
+        project_key: "/project",
+        decision: { strategy: "file-based", task: "add auth service", confidence: 0.85 },
+        rationale: "Clear file boundaries for auth",
+      });
+
+      await createDecisionTrace(db, {
+        decision_type: "strategy_selection",
+        agent_name: "coordinator",
+        project_key: "/project",
+        decision: { strategy: "feature-based", task: "add user profiles", confidence: 0.75 },
+        rationale: "Cross-cutting UI changes",
+      });
+
+      // Find similar decisions - should match "auth" in "add auth service"
+      const { findSimilarDecisions } = await import("./decision-trace-store.js");
+      const similar = await findSimilarDecisions(db, "auth", 5);
+
+      expect(similar.length).toBeGreaterThan(0);
+      expect(similar[0]).toHaveProperty("id");
+      expect(similar[0]).toHaveProperty("decision_type", "strategy_selection");
+      expect(similar[0]).toHaveProperty("decision");
+    });
+
+    test("limits results to specified count", async () => {
+      // Create many decisions
+      for (let i = 0; i < 10; i++) {
+        await createDecisionTrace(db, {
+          decision_type: "strategy_selection",
+          agent_name: "coordinator",
+          project_key: "/project",
+          decision: { strategy: "file-based", task: `task ${i}` },
+        });
+      }
+
+      const { findSimilarDecisions } = await import("./decision-trace-store.js");
+      const similar = await findSimilarDecisions(db, "task", 3);
+
+      expect(similar.length).toBeLessThanOrEqual(3);
+    });
+
+    test("includes outcome information if linked", async () => {
+      const trace = await createDecisionTrace(db, {
+        decision_type: "strategy_selection",
+        agent_name: "coordinator",
+        project_key: "/project",
+        decision: { strategy: "file-based", task: "auth service" },
+      });
+
+      await linkOutcomeToTrace(db, trace.id, 123);
+
+      const { findSimilarDecisions } = await import("./decision-trace-store.js");
+      const similar = await findSimilarDecisions(db, "auth", 5);
+
+      const found = similar.find(s => s.id === trace.id);
+      expect(found?.outcome_event_id).toBe(123);
+    });
+  });
+
+  describe("createEntityLink", () => {
+    test("creates a link between decision and entity", async () => {
+      const trace = await createDecisionTrace(db, {
+        decision_type: "strategy_selection",
+        agent_name: "coordinator",
+        project_key: "/project",
+        decision: { strategy: "file-based" },
+      });
+
+      const { createEntityLink } = await import("./decision-trace-store.js");
+      const link = await createEntityLink(db, {
+        source_decision_id: trace.id,
+        target_entity_type: "memory",
+        target_entity_id: "mem-xyz",
+        link_type: "cites_precedent",
+        strength: 0.92,
+        context: "Similar auth task from 2 weeks ago",
+      });
+
+      expect(link.id).toMatch(/^el-/);
+      expect(link.source_decision_id).toBe(trace.id);
+      expect(link.target_entity_type).toBe("memory");
+      expect(link.link_type).toBe("cites_precedent");
+      expect(link.strength).toBe(0.92);
+    });
+
+    test("creates link with default strength", async () => {
+      const trace = await createDecisionTrace(db, {
+        decision_type: "worker_spawn",
+        agent_name: "coordinator",
+        project_key: "/project",
+        decision: { worker: "BlueLake" },
+      });
+
+      const { createEntityLink } = await import("./decision-trace-store.js");
+      const link = await createEntityLink(db, {
+        source_decision_id: trace.id,
+        target_entity_type: "epic",
+        target_entity_id: "epic-001",
+        link_type: "applies_pattern",
+      });
+
+      expect(link.strength).toBe(1.0);
+    });
+
+    test("supports all entity types", async () => {
+      const trace = await createDecisionTrace(db, {
+        decision_type: "strategy_selection",
+        agent_name: "coordinator",
+        project_key: "/project",
+        decision: { strategy: "file-based" },
+      });
+
+      const { createEntityLink } = await import("./decision-trace-store.js");
+      const entityTypes = ["epic", "pattern", "file", "agent", "memory"];
+
+      for (const entityType of entityTypes) {
+        const link = await createEntityLink(db, {
+          source_decision_id: trace.id,
+          target_entity_type: entityType,
+          target_entity_id: `${entityType}-123`,
+          link_type: "similar_to",
+        });
+
+        expect(link.target_entity_type).toBe(entityType);
+      }
+    });
+  });
+
+  describe("getDecisionsByMemoryPattern", () => {
+    test("finds all decisions that cite a specific memory", async () => {
+      const memoryId = "mem-auth-pattern";
+
+      // Create decisions that cite this memory
+      const trace1 = await createDecisionTrace(db, {
+        decision_type: "strategy_selection",
+        agent_name: "coordinator",
+        project_key: "/project",
+        decision: { strategy: "file-based" },
+      });
+
+      const trace2 = await createDecisionTrace(db, {
+        decision_type: "strategy_selection",
+        agent_name: "coordinator",
+        project_key: "/project",
+        decision: { strategy: "feature-based" },
+      });
+
+      const { createEntityLink, getDecisionsByMemoryPattern } = await import("./decision-trace-store.js");
+      
+      await createEntityLink(db, {
+        source_decision_id: trace1.id,
+        target_entity_type: "memory",
+        target_entity_id: memoryId,
+        link_type: "cites_precedent",
+      });
+
+      await createEntityLink(db, {
+        source_decision_id: trace2.id,
+        target_entity_type: "memory",
+        target_entity_id: memoryId,
+        link_type: "cites_precedent",
+      });
+
+      const decisions = await getDecisionsByMemoryPattern(db, memoryId);
+
+      expect(decisions.length).toBeGreaterThanOrEqual(2);
+      expect(decisions.map(d => d.id)).toContain(trace1.id);
+      expect(decisions.map(d => d.id)).toContain(trace2.id);
+    });
+
+    test("returns empty array if memory not cited", async () => {
+      const { getDecisionsByMemoryPattern } = await import("./decision-trace-store.js");
+      const decisions = await getDecisionsByMemoryPattern(db, "mem-nonexistent");
+
+      expect(decisions).toEqual([]);
+    });
+
+    test("includes link metadata with decisions", async () => {
+      const memoryId = "mem-with-context";
+      const trace = await createDecisionTrace(db, {
+        decision_type: "strategy_selection",
+        agent_name: "coordinator",
+        project_key: "/project",
+        decision: { strategy: "file-based" },
+      });
+
+      const { createEntityLink, getDecisionsByMemoryPattern } = await import("./decision-trace-store.js");
+      
+      await createEntityLink(db, {
+        source_decision_id: trace.id,
+        target_entity_type: "memory",
+        target_entity_id: memoryId,
+        link_type: "cites_precedent",
+        strength: 0.88,
+        context: "Very similar auth pattern",
+      });
+
+      const decisions = await getDecisionsByMemoryPattern(db, memoryId);
+
+      expect(decisions[0]).toHaveProperty("link_strength", 0.88);
+      expect(decisions[0]).toHaveProperty("link_context", "Very similar auth pattern");
+    });
+  });
+
+  describe("calculateDecisionQuality", () => {
+    test("calculates quality score from linked outcome events", async () => {
+      const trace = await createDecisionTrace(db, {
+        decision_type: "strategy_selection",
+        agent_name: "coordinator",
+        project_key: "/project",
+        decision: { strategy: "file-based" },
+      });
+
+      // Simulate successful outcome by creating events
+      const successEvent = await db.query(
+        `INSERT INTO events (type, project_key, timestamp, data) VALUES (?, ?, ?, ?) RETURNING id`,
+        ["swarm.completed", "/project", Date.now(), JSON.stringify({ success: true, errors: 0 })]
+      );
+
+      await linkOutcomeToTrace(db, trace.id, successEvent.rows[0].id);
+
+      const { calculateDecisionQuality } = await import("./decision-trace-store.js");
+      const quality = await calculateDecisionQuality(db, trace.id);
+
+      expect(quality).toHaveProperty("decision_id", trace.id);
+      expect(quality).toHaveProperty("quality_score");
+      expect(quality.quality_score).toBeGreaterThan(0);
+    });
+
+    test("returns null quality if no outcome linked", async () => {
+      const trace = await createDecisionTrace(db, {
+        decision_type: "strategy_selection",
+        agent_name: "coordinator",
+        project_key: "/project",
+        decision: { strategy: "file-based" },
+      });
+
+      const { calculateDecisionQuality } = await import("./decision-trace-store.js");
+      const quality = await calculateDecisionQuality(db, trace.id);
+
+      expect(quality).toHaveProperty("decision_id", trace.id);
+      expect(quality.quality_score).toBeNull();
+    });
+
+    test("lower score for decisions with failed outcomes", async () => {
+      const trace = await createDecisionTrace(db, {
+        decision_type: "strategy_selection",
+        agent_name: "coordinator",
+        project_key: "/project",
+        decision: { strategy: "file-based" },
+      });
+
+      // Simulate failed outcome
+      const failEvent = await db.query(
+        `INSERT INTO events (type, project_key, timestamp, data) VALUES (?, ?, ?, ?) RETURNING id`,
+        ["swarm.failed", "/project", Date.now(), JSON.stringify({ success: false, errors: 5 })]
+      );
+
+      await linkOutcomeToTrace(db, trace.id, failEvent.rows[0].id);
+
+      const { calculateDecisionQuality } = await import("./decision-trace-store.js");
+      const quality = await calculateDecisionQuality(db, trace.id);
+
+      expect(quality.quality_score).toBeLessThanOrEqual(0.5);
+    });
+  });
+
+  describe("getStrategySuccessRates", () => {
+    test("aggregates success rates by strategy type", async () => {
+      // Create successful file-based decisions
+      for (let i = 0; i < 3; i++) {
+        const trace = await createDecisionTrace(db, {
+          decision_type: "strategy_selection",
+          agent_name: "coordinator",
+          project_key: "/project",
+          decision: { strategy: "file-based" },
+        });
+
+        const event = await db.query(
+          `INSERT INTO events (type, project_key, timestamp, data) VALUES (?, ?, ?, ?) RETURNING id`,
+          ["swarm.completed", "/project", Date.now(), JSON.stringify({ success: true })]
+        );
+
+        await linkOutcomeToTrace(db, trace.id, event.rows[0].id);
+      }
+
+      // Create failed feature-based decision
+      const failTrace = await createDecisionTrace(db, {
+        decision_type: "strategy_selection",
+        agent_name: "coordinator",
+        project_key: "/project",
+        decision: { strategy: "feature-based" },
+      });
+
+      const failEvent = await db.query(
+        `INSERT INTO events (type, project_key, timestamp, data) VALUES (?, ?, ?, ?) RETURNING id`,
+        ["swarm.failed", "/project", Date.now(), JSON.stringify({ success: false })]
+      );
+
+      await linkOutcomeToTrace(db, failTrace.id, failEvent.rows[0].id);
+
+      const { getStrategySuccessRates } = await import("./decision-trace-store.js");
+      const rates = await getStrategySuccessRates(db);
+
+      expect(rates).toBeInstanceOf(Array);
+      const fileBased = rates.find(r => r.strategy === "file-based");
+      const featureBased = rates.find(r => r.strategy === "feature-based");
+
+      expect(fileBased).toBeDefined();
+      expect(fileBased?.success_rate).toBeGreaterThan(0.5);
+      expect(featureBased?.success_rate).toBeLessThan(1.0);
+    });
+
+    test("includes decision count and average quality", async () => {
+      const trace = await createDecisionTrace(db, {
+        decision_type: "strategy_selection",
+        agent_name: "coordinator",
+        project_key: "/project",
+        decision: { strategy: "risk-based" },
+      });
+
+      const event = await db.query(
+        `INSERT INTO events (type, project_key, timestamp, data) VALUES (?, ?, ?, ?) RETURNING id`,
+        ["swarm.completed", "/project", Date.now(), JSON.stringify({ success: true })]
+      );
+
+      await linkOutcomeToTrace(db, trace.id, event.rows[0].id);
+
+      const { getStrategySuccessRates } = await import("./decision-trace-store.js");
+      const rates = await getStrategySuccessRates(db);
+
+      const riskBased = rates.find(r => r.strategy === "risk-based");
+      expect(riskBased).toHaveProperty("total_decisions");
+      expect(riskBased).toHaveProperty("avg_quality");
+      expect(riskBased?.total_decisions).toBeGreaterThan(0);
+    });
+
+    test("returns empty array if no strategy decisions exist", async () => {
+      const { getStrategySuccessRates } = await import("./decision-trace-store.js");
+      
+      // Clear any existing strategy_selection decisions
+      await db.query(`DELETE FROM decision_traces WHERE decision_type = 'strategy_selection'`);
+      
+      const rates = await getStrategySuccessRates(db);
+      expect(rates).toEqual([]);
+    });
+  });
+
+  describe("linkOutcomeToTrace with quality update", () => {
+    test("updates quality_score when linking outcome", async () => {
+      const trace = await createDecisionTrace(db, {
+        decision_type: "strategy_selection",
+        agent_name: "coordinator",
+        project_key: "/project",
+        decision: { strategy: "file-based" },
+      });
+
+      const event = await db.query(
+        `INSERT INTO events (type, project_key, timestamp, data) VALUES (?, ?, ?, ?) RETURNING id`,
+        ["swarm.completed", "/project", Date.now(), JSON.stringify({ success: true, errors: 0 })]
+      );
+
+      await linkOutcomeToTrace(db, trace.id, event.rows[0].id);
+
+      // Check if quality_score was updated
+      const result = await db.query<{ quality_score: number | null }>(
+        `SELECT quality_score FROM decision_traces WHERE id = ?`,
+        [trace.id]
+      );
+
+      // Quality score should be computed and stored
+      expect(result.rows[0].quality_score).not.toBeNull();
+      expect(result.rows[0].quality_score).toBeGreaterThan(0);
     });
   });
 });

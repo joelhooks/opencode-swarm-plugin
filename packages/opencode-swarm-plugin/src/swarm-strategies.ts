@@ -247,9 +247,13 @@ export const STRATEGIES: Record<
  * Analyze task description and select best decomposition strategy
  *
  * @param task - Task description
- * @returns Selected strategy with reasoning
+ * @param projectKey - Optional project path for precedent-aware selection
+ * @returns Selected strategy with reasoning and optional precedent data
  */
-export function selectStrategy(task: string): {
+export async function selectStrategy(
+  task: string,
+  projectKey?: string,
+): Promise<{
   strategy: Exclude<DecompositionStrategy, "auto">;
   confidence: number;
   reasoning: string;
@@ -257,7 +261,12 @@ export function selectStrategy(task: string): {
     strategy: Exclude<DecompositionStrategy, "auto">;
     score: number;
   }>;
-} {
+  precedent?: {
+    similar_decisions: number;
+    strategy_success_rate?: number;
+    cited_epics?: string[];
+  };
+}> {
   const taskLower = task.toLowerCase();
 
   // Score each strategy based on keyword matches
@@ -296,14 +305,17 @@ export function selectStrategy(task: string): {
   const [winner, winnerScore] = entries[0];
   const [, runnerUpScore] = entries[1] || [null, 0];
 
-  // Calculate confidence based on margin
+  // Calculate base confidence based on margin
   const totalScore = entries.reduce((sum, [, score]) => sum + score, 0);
-  const confidence =
+  let confidence =
     totalScore > 0
       ? Math.min(0.95, 0.5 + (winnerScore - runnerUpScore) / totalScore)
       : 0.5; // Default to 50% if no keywords matched
 
-  // Build reasoning
+  // If no keywords matched, default to feature-based
+  const finalStrategy = winnerScore === 0 ? "feature-based" : winner;
+
+  // Build base reasoning
   let reasoning: string;
   if (winnerScore === 0) {
     reasoning = `No strong keyword signals. Defaulting to feature-based as it's most versatile.`;
@@ -314,8 +326,104 @@ export function selectStrategy(task: string): {
     reasoning = `Matched keywords: ${matchedKeywords.join(", ")}. ${STRATEGIES[winner].description}`;
   }
 
-  // If no keywords matched, default to feature-based
-  const finalStrategy = winnerScore === 0 ? "feature-based" : winner;
+  // Query precedent if projectKey provided
+  let precedent:
+    | {
+        similar_decisions: number;
+        strategy_success_rate?: number;
+        cited_epics?: string[];
+      }
+    | undefined;
+
+  if (projectKey) {
+    try {
+      const {
+        createLibSQLAdapter,
+        getDatabasePath,
+        findSimilarDecisions,
+        getStrategySuccessRates,
+      } = await import("swarm-mail");
+
+      const dbPath = getDatabasePath(projectKey);
+      const db = await createLibSQLAdapter({ url: `file:${dbPath}` });
+
+      // Find similar past decisions
+      const similarDecisions = await findSimilarDecisions(db, task, 5);
+
+      // Get strategy success rates
+      const successRates = await getStrategySuccessRates(db);
+
+      // Build precedent object
+      precedent = {
+        similar_decisions: similarDecisions.length,
+      };
+
+      // Extract cited epic IDs from similar decisions
+      if (similarDecisions.length > 0) {
+        const epicIds: string[] = [];
+        for (const decision of similarDecisions) {
+          try {
+            const decisionData =
+              typeof decision.decision === "string"
+                ? JSON.parse(decision.decision)
+                : decision.decision;
+            if (decisionData.epic_id) {
+              epicIds.push(decisionData.epic_id);
+            }
+          } catch {
+            // Ignore parse errors
+          }
+        }
+        if (epicIds.length > 0) {
+          precedent.cited_epics = epicIds;
+        }
+
+        // Check if precedent agrees with keyword selection
+        const precedentStrategies = similarDecisions
+          .map((d) => {
+            try {
+              const data =
+                typeof d.decision === "string"
+                  ? JSON.parse(d.decision)
+                  : d.decision;
+              return data.strategy;
+            } catch {
+              return null;
+            }
+          })
+          .filter(Boolean);
+
+        const agreesWithKeywords = precedentStrategies.includes(finalStrategy);
+        if (agreesWithKeywords) {
+          confidence = Math.min(0.95, confidence + 0.1);
+          reasoning += ` Precedent confirms: ${precedent.similar_decisions} similar decision(s) also chose ${finalStrategy}.`;
+        }
+      }
+
+      // Adjust confidence based on strategy success rate
+      const strategyRate = successRates.find(
+        (r) => r.strategy === finalStrategy,
+      );
+      if (strategyRate) {
+        precedent.strategy_success_rate = strategyRate.success_rate;
+
+        if (strategyRate.success_rate >= 0.7) {
+          confidence = Math.min(0.95, confidence + 0.05);
+          reasoning += ` ${finalStrategy} has ${Math.round(strategyRate.success_rate * 100)}% success rate.`;
+        } else if (strategyRate.success_rate < 0.3) {
+          confidence = Math.max(0.1, confidence - 0.1);
+          reasoning += ` Warning: ${finalStrategy} has low success rate (${Math.round(strategyRate.success_rate * 100)}%).`;
+        }
+      }
+
+      if (db.close) {
+        await db.close();
+      }
+    } catch (error) {
+      // Graceful degradation - precedent query failed, continue without it
+      console.warn("Failed to query precedent data:", error);
+    }
+  }
 
   return {
     strategy: finalStrategy,
@@ -324,6 +432,7 @@ export function selectStrategy(task: string): {
     alternatives: entries
       .filter(([s]) => s !== finalStrategy)
       .map(([strategy, score]) => ({ strategy, score })),
+    precedent,
   };
 }
 
@@ -362,19 +471,26 @@ ${examples}`;
  *
  * Analyzes task description and recommends a strategy with reasoning.
  * Use this before swarm_plan_prompt to understand the recommended approach.
+ * 
+ * When projectKey is provided, queries past strategy decisions and success rates
+ * to provide precedent-aware recommendations with adjusted confidence.
  */
 export const swarm_select_strategy = tool({
   description:
-    "Analyze task and recommend decomposition strategy (file-based, feature-based, or risk-based)",
+    "Analyze task and recommend decomposition strategy (file-based, feature-based, or risk-based) with optional precedent data",
   args: {
     task: tool.schema.string().min(1).describe("Task description to analyze"),
     codebase_context: tool.schema
       .string()
       .optional()
       .describe("Optional codebase context (file structure, tech stack, etc.)"),
+    projectKey: tool.schema
+      .string()
+      .optional()
+      .describe("Optional project path for precedent-aware strategy selection"),
   },
   async execute(args) {
-    const result = selectStrategy(args.task);
+    const result = await selectStrategy(args.task, args.projectKey);
 
     // Enhance reasoning with codebase context if provided
     let enhancedReasoning = result.reasoning;
@@ -395,6 +511,7 @@ export const swarm_select_strategy = tool({
           description: STRATEGIES[alt.strategy].description,
           score: alt.score,
         })),
+        precedent: result.precedent,
       },
       null,
       2,

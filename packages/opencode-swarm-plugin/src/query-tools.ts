@@ -2,12 +2,15 @@
  * GREEN PHASE: SQL Query Tools Implementation
  * 
  * Provides:
- * - 10 preset queries for observability insights
+ * - 13 preset queries for observability insights (10 base + 3 decision trace)
  * - Custom SQL execution with timing
  * - 3 output formats: Table (box-drawing), CSV, JSON
  */
 
 import type { DatabaseAdapter } from "swarm-mail";
+import { createLibSQLAdapter } from "swarm-mail";
+import { join } from "node:path";
+import { homedir } from "node:os";
 
 // ============================================================================
 // TYPES
@@ -23,7 +26,10 @@ export type PresetQueryName =
 	| "agent_activity"
 	| "event_frequency"
 	| "error_patterns"
-	| "compaction_stats";
+	| "compaction_stats"
+	| "decision_quality"
+	| "strategy_success_rates"
+	| "decisions_by_pattern";
 
 export interface QueryResult {
 	columns: string[];
@@ -152,21 +158,87 @@ export const presetQueries: Record<PresetQueryName, string> = {
 		FROM events
 		WHERE type = 'compaction'
 	`,
+
+	decision_quality: `
+		SELECT 
+			dt.id,
+			dt.decision_type,
+			dt.agent_name,
+			json_extract(dt.decision, '$.strategy') as strategy,
+			dt.quality_score,
+			dt.rationale
+		FROM decision_traces dt
+		WHERE dt.quality_score IS NOT NULL
+		ORDER BY dt.timestamp DESC
+		LIMIT 20
+	`,
+
+	strategy_success_rates: `
+		SELECT 
+			json_extract(decision, '$.strategy') as strategy,
+			COUNT(*) as total_decisions,
+			SUM(CASE WHEN quality_score >= 0.5 THEN 1 ELSE 0 END) as successful,
+			SUM(CASE WHEN quality_score < 0.5 THEN 1 ELSE 0 END) as failed,
+			ROUND(AVG(quality_score), 2) as avg_quality,
+			ROUND(SUM(CASE WHEN quality_score >= 0.5 THEN 1.0 ELSE 0.0 END) / COUNT(*), 2) as success_rate
+		FROM decision_traces
+		WHERE decision_type = 'strategy_selection'
+		AND quality_score IS NOT NULL
+		GROUP BY strategy
+		ORDER BY total_decisions DESC
+	`,
+
+	decisions_by_pattern: `
+		SELECT 
+			el.target_entity_id as memory_id,
+			COUNT(*) as times_cited,
+			GROUP_CONCAT(DISTINCT dt.agent_name) as agents,
+			GROUP_CONCAT(DISTINCT json_extract(dt.decision, '$.strategy')) as strategies
+		FROM entity_links el
+		JOIN decision_traces dt ON el.source_decision_id = dt.id
+		WHERE el.target_entity_type = 'memory'
+		AND el.link_type = 'cites_precedent'
+		GROUP BY el.target_entity_id
+		ORDER BY times_cited DESC
+		LIMIT 20
+	`,
 };
+
+// ============================================================================
+// DATABASE HELPERS
+// ============================================================================
+
+/**
+ * Get database path from project path.
+ * Uses global database (~/.swarm-tools/swarm-mail.db)
+ */
+function getDbPath(): string {
+	const home = homedir();
+	return join(home, ".swarm-tools", "swarm-mail.db");
+}
+
+/**
+ * Create database adapter for queries.
+ * Uses global database regardless of project path.
+ */
+async function createDbAdapter(): Promise<DatabaseAdapter> {
+	const dbPath = getDbPath();
+	return createLibSQLAdapter({ url: `file:${dbPath}` });
+}
 
 // ============================================================================
 // QUERY EXECUTION
 // ============================================================================
 
 /**
- * Execute custom SQL against the events table.
+ * Execute custom SQL against the events table (low-level).
  * 
  * @param db - DatabaseAdapter instance
  * @param sql - SQL query string
  * @param params - Optional parameterized query values
  * @returns QueryResult with rows, columns, timing
  */
-export async function executeQuery(
+async function executeQueryWithDb(
 	db: DatabaseAdapter,
 	sql: string,
 	params?: unknown[],
@@ -189,6 +261,61 @@ export async function executeQuery(
 	};
 }
 
+/**
+ * Execute a preset query by name (low-level, requires DatabaseAdapter).
+ * 
+ * @param db - DatabaseAdapter instance
+ * @param presetName - Name of the preset query
+ * @returns QueryResult with rows, columns, timing
+ */
+async function executePresetWithDb(
+	db: DatabaseAdapter,
+	presetName: string,
+): Promise<QueryResult> {
+	if (!(presetName in presetQueries)) {
+		throw new Error(
+			`Unknown preset: ${presetName}. Available presets: ${Object.keys(presetQueries).join(", ")}`
+		);
+	}
+	
+	const sql = presetQueries[presetName as PresetQueryName];
+	return executeQueryWithDb(db, sql);
+}
+
+/**
+ * Execute custom SQL query (CLI wrapper).
+ * Creates database adapter automatically.
+ * 
+ * @param projectPath - Project path (unused, queries global database)
+ * @param sql - SQL query string
+ * @returns Raw rows array for CLI formatting
+ */
+export async function executeQuery(
+	projectPath: string,
+	sql: string,
+): Promise<any[]> {
+	const db = await createDbAdapter();
+	const result = await executeQueryWithDb(db, sql);
+	return result.rows;
+}
+
+/**
+ * Execute a preset query by name (CLI wrapper).
+ * Creates database adapter automatically.
+ * 
+ * @param projectPath - Project path (unused, queries global database)
+ * @param presetName - Name of the preset query
+ * @returns Raw rows array for CLI formatting
+ */
+export async function executePreset(
+	projectPath: string,
+	presetName: string,
+): Promise<any[]> {
+	const db = await createDbAdapter();
+	const result = await executePresetWithDb(db, presetName);
+	return result.rows;
+}
+
 // ============================================================================
 // OUTPUT FORMATTERS
 // ============================================================================
@@ -203,16 +330,17 @@ export async function executeQuery(
  * │ AgentA   │     5 │
  * │ AgentB   │     3 │
  * └──────────┴───────┘
- * 2 rows in 5.2ms
+ * 2 rows
  */
-export function formatAsTable(result: QueryResult): string {
-	const { columns, rows, rowCount, executionTimeMs } = result;
+export function formatAsTable(rows: Record<string, unknown>[]): string {
+	const rowCount = rows.length;
+	const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
 
 	// Handle empty result set
 	if (rows.length === 0) {
 		const header = columns.join(" │ ");
 		const width = header.length + 4;
-		const footer = `0 rows in ${executionTimeMs.toFixed(1)}ms`;
+		const footer = `0 rows`;
 		return [
 			`┌${"─".repeat(width - 2)}┐`,
 			`│ ${header} │`,
@@ -266,7 +394,7 @@ export function formatAsTable(result: QueryResult): string {
 	lines.push(bottomBorder);
 
 	// Footer - pad to match table width
-	const footer = `${rowCount} rows in ${executionTimeMs.toFixed(1)}ms`;
+	const footer = `${rowCount} rows`;
 	const tableWidth = topBorder.length;
 	lines.push(footer.padEnd(tableWidth));
 
@@ -281,8 +409,8 @@ export function formatAsTable(result: QueryResult): string {
  * - Quotes → double them
  * - Newlines → wrap in quotes
  */
-export function formatAsCSV(result: QueryResult): string {
-	const { columns, rows } = result;
+export function formatAsCSV(rows: Record<string, unknown>[]): string {
+	const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
 
 	const lines: string[] = [];
 
@@ -319,6 +447,6 @@ export function formatAsCSV(result: QueryResult): string {
  *   { "name": "AgentB", "count": 3 }
  * ]
  */
-export function formatAsJSON(result: QueryResult): string {
-	return JSON.stringify(result.rows, null, 2);
+export function formatAsJSON(rows: Record<string, unknown>[]): string {
+	return JSON.stringify(rows, null, 2);
 }

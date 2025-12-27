@@ -136,10 +136,16 @@ export {
 	getDecisionTracesByEpic,
 	getDecisionTracesByType,
 	linkOutcomeToTrace,
+	findSimilarDecisions,
+	getStrategySuccessRates,
+	createEntityLink,
+	calculateDecisionQuality,
+	getDecisionsByMemoryPattern,
 } from "./streams/decision-trace-store";
 export type {
 	DecisionTrace,
 	DecisionTraceInput,
+	EntityLinkInput,
 } from "./streams/decision-trace-store";
 
 // Database path utilities

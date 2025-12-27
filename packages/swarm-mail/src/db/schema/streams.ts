@@ -264,6 +264,7 @@ export const decisionTracesTable = sqliteTable(
     alternatives: text("alternatives"), // JSON
     precedent_cited: text("precedent_cited"), // JSON
     outcome_event_id: integer("outcome_event_id"),
+    quality_score: real("quality_score"), // Computed from outcome events
     timestamp: integer("timestamp").notNull(),
     created_at: text("created_at").default("(datetime('now'))"),
   },
@@ -277,3 +278,42 @@ export const decisionTracesTable = sqliteTable(
 
 export type DecisionTrace = typeof decisionTracesTable.$inferSelect;
 export type NewDecisionTrace = typeof decisionTracesTable.$inferInsert;
+
+/**
+ * Entity Links table - relationships between decisions and entities.
+ *
+ * Enables building a knowledge graph of how decisions relate to:
+ * - Epics (which epic was this decision part of)
+ * - Patterns (which patterns did this decision apply)
+ * - Files (which files were affected)
+ * - Agents (which agents were involved)
+ * - Memories (which past experiences informed this decision)
+ *
+ * Link types capture the nature of the relationship:
+ * - cites_precedent: Decision references a past decision/memory
+ * - applies_pattern: Decision applies a known pattern
+ * - similar_to: Decision is similar to another decision
+ *
+ * Strength indicates confidence in the relationship (0.0 to 1.0).
+ */
+export const entityLinksTable = sqliteTable(
+  "entity_links",
+  {
+    id: text("id").primaryKey(), // el-{nanoid}
+    source_decision_id: text("source_decision_id").notNull(),
+    target_entity_type: text("target_entity_type").notNull(), // 'epic', 'pattern', 'file', 'agent', 'memory'
+    target_entity_id: text("target_entity_id").notNull(),
+    link_type: text("link_type").notNull(), // 'cites_precedent', 'applies_pattern', 'similar_to'
+    strength: real("strength").default(1.0),
+    context: text("context"),
+    created_at: text("created_at").default("(datetime('now'))"),
+  },
+  (table) => ({
+    sourceIdx: index("idx_entity_links_source").on(table.source_decision_id),
+    targetIdx: index("idx_entity_links_target").on(table.target_entity_type, table.target_entity_id),
+    typeIdx: index("idx_entity_links_type").on(table.link_type),
+  }),
+);
+
+export type EntityLink = typeof entityLinksTable.$inferSelect;
+export type NewEntityLink = typeof entityLinksTable.$inferInsert;

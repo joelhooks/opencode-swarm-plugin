@@ -94,6 +94,15 @@ export {
   overallDiscipline,
 } from "./coordinator-discipline.js";
 
+// ============================================================================
+// Decision quality scorers
+// ============================================================================
+
+export {
+  strategySelectionQuality,
+  precedentRelevance,
+} from "./decision-quality-scorers.js";
+
 /**
  * Checks that subtasks cover the full task scope
  *

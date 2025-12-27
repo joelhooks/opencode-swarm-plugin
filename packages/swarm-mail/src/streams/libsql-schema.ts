@@ -42,6 +42,7 @@ import type { DatabaseAdapter } from "../types/database.js";
  * - eval_records (decomposition eval tracking)
  * - swarm_contexts (swarm checkpoint tracking)
  * - decision_traces (decision trace log)
+ * - entity_links (decision-entity relationships)
  *
  * Idempotent - safe to call multiple times.
  *
@@ -356,6 +357,7 @@ export async function createLibSQLStreamsSchema(db: DatabaseAdapter): Promise<vo
       alternatives TEXT,
       precedent_cited TEXT,
       outcome_event_id INTEGER,
+      quality_score REAL,
       timestamp INTEGER NOT NULL,
       created_at TEXT DEFAULT (datetime('now'))
     )
@@ -380,6 +382,38 @@ export async function createLibSQLStreamsSchema(db: DatabaseAdapter): Promise<vo
     CREATE INDEX IF NOT EXISTS idx_decision_traces_timestamp 
     ON decision_traces(timestamp)
   `);
+
+  // ========================================================================
+  // Entity Links Table (decision-entity relationships)
+  // ========================================================================
+  // IMPORTANT: This table structure MUST match db/schema/streams.ts (entityLinksTable)
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS entity_links (
+      id TEXT PRIMARY KEY,
+      source_decision_id TEXT NOT NULL,
+      target_entity_type TEXT NOT NULL,
+      target_entity_id TEXT NOT NULL,
+      link_type TEXT NOT NULL,
+      strength REAL DEFAULT 1.0,
+      context TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  await db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_entity_links_source 
+    ON entity_links(source_decision_id)
+  `);
+
+  await db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_entity_links_target 
+    ON entity_links(target_entity_type, target_entity_id)
+  `);
+
+  await db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_entity_links_type 
+    ON entity_links(link_type)
+  `);
 }
 
 /**
@@ -392,6 +426,7 @@ export async function createLibSQLStreamsSchema(db: DatabaseAdapter): Promise<vo
  */
 export async function dropLibSQLStreamsSchema(db: DatabaseAdapter): Promise<void> {
   // Drop in reverse dependency order
+  await db.exec("DROP TABLE IF EXISTS entity_links");
   await db.exec("DROP TABLE IF EXISTS decision_traces");
   await db.exec("DROP TABLE IF EXISTS swarm_contexts");
   await db.exec("DROP TABLE IF EXISTS eval_records");
@@ -420,10 +455,10 @@ export async function validateLibSQLStreamsSchema(db: DatabaseAdapter): Promise<
     // Check all required tables exist
     const tables = await db.query(`
       SELECT name FROM sqlite_master 
-      WHERE type='table' AND name IN ('events', 'agents', 'messages', 'message_recipients', 'reservations', 'locks', 'cursors', 'eval_records', 'swarm_contexts', 'decision_traces')
+      WHERE type='table' AND name IN ('events', 'agents', 'messages', 'message_recipients', 'reservations', 'locks', 'cursors', 'eval_records', 'swarm_contexts', 'decision_traces', 'entity_links')
     `);
 
-    if (tables.rows.length !== 10) return false;
+    if (tables.rows.length !== 11) return false;
 
     // Check events table has required columns
     // Use table_xinfo to include generated columns (like sequence)

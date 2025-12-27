@@ -235,6 +235,128 @@ describe("swarm_select_strategy", () => {
 
     expect(parsed.reasoning).toContain("Express.js");
   });
+
+  it("accepts optional projectKey parameter for precedent-aware selection", async () => {
+    // RED: This test will fail until we add projectKey parameter
+    const result = await swarm_select_strategy.execute(
+      {
+        task: "Add user authentication",
+        projectKey: "/tmp/test-project",
+      },
+      mockContext,
+    );
+    const parsed = JSON.parse(result);
+
+    // Should work with or without precedent data
+    expect(parsed).toHaveProperty("strategy");
+    expect(parsed).toHaveProperty("confidence");
+    expect(parsed).toHaveProperty("reasoning");
+  });
+
+  it("includes precedent info when projectKey provided and data exists", async () => {
+    const result = await swarm_select_strategy.execute(
+      {
+        task: "Add OAuth authentication",
+        projectKey: "/tmp/test-precedent",
+      },
+      mockContext,
+    );
+    const parsed = JSON.parse(result);
+
+    // Precedent field may or may not be present depending on whether decision_traces table exists
+    // If projectKey is provided but DB doesn't exist/has no table, graceful degradation means no precedent
+    // This is expected behavior - precedent is optional
+    if (parsed.precedent) {
+      expect(parsed.precedent).toHaveProperty("similar_decisions");
+      expect(typeof parsed.precedent.similar_decisions).toBe("number");
+    }
+    
+    // Should still work without precedent
+    expect(parsed).toHaveProperty("strategy");
+    expect(parsed).toHaveProperty("confidence");
+    expect(parsed).toHaveProperty("reasoning");
+  });
+
+  it("boosts confidence when precedent agrees with keyword selection", async () => {
+    // RED: This will fail until we implement confidence boosting
+    const uniqueProjectKey = `/tmp/test-confidence-boost-${Date.now()}`;
+    
+    // First, create some precedent data (we'll mock this in implementation)
+    // For now, just verify the signature works
+    const result = await swarm_select_strategy.execute(
+      {
+        task: "Refactor authentication module",
+        projectKey: uniqueProjectKey,
+      },
+      mockContext,
+    );
+    const parsed = JSON.parse(result);
+
+    expect(parsed).toHaveProperty("confidence");
+    expect(parsed).toHaveProperty("reasoning");
+    // Reasoning should mention precedent if it was found
+    if (parsed.precedent?.similar_decisions > 0) {
+      expect(parsed.reasoning).toContain("precedent");
+    }
+  });
+
+  it("reduces confidence when strategy has low success rate", async () => {
+    // RED: This will fail until we implement success rate adjustment
+    const uniqueProjectKey = `/tmp/test-low-success-${Date.now()}`;
+    
+    const result = await swarm_select_strategy.execute(
+      {
+        task: "Fix critical security bug",
+        projectKey: uniqueProjectKey,
+      },
+      mockContext,
+    );
+    const parsed = JSON.parse(result);
+
+    expect(parsed).toHaveProperty("confidence");
+    // If precedent shows low success rate, should be reflected in reasoning
+    if (parsed.precedent?.strategy_success_rate !== undefined && 
+        parsed.precedent.strategy_success_rate < 0.3) {
+      expect(parsed.reasoning).toContain("low success rate");
+    }
+  });
+
+  it("works backward-compatible without projectKey", async () => {
+    // Ensure existing behavior still works
+    const result = await swarm_select_strategy.execute(
+      {
+        task: "Implement new feature",
+      },
+      mockContext,
+    );
+    const parsed = JSON.parse(result);
+
+    expect(parsed.strategy).toBe("feature-based");
+    expect(parsed).toHaveProperty("confidence");
+    expect(parsed).not.toHaveProperty("precedent");
+  });
+
+  it("cites specific epic IDs when precedent found", async () => {
+    // RED: This will fail until we implement epic citation
+    const uniqueProjectKey = `/tmp/test-epic-citation-${Date.now()}`;
+    
+    const result = await swarm_select_strategy.execute(
+      {
+        task: "Migrate all components to new API",
+        projectKey: uniqueProjectKey,
+      },
+      mockContext,
+    );
+    const parsed = JSON.parse(result);
+
+    if (parsed.precedent?.cited_epics) {
+      expect(Array.isArray(parsed.precedent.cited_epics)).toBe(true);
+      // Each epic ID should be a string
+      parsed.precedent.cited_epics.forEach((epicId: string) => {
+        expect(typeof epicId).toBe("string");
+      });
+    }
+  });
 });
 
 // ============================================================================

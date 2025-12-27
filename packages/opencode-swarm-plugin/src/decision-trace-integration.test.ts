@@ -7,7 +7,7 @@
  * The actual database operations are tested in swarm-mail's decision-trace-store.test.ts.
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import {
   traceStrategySelection,
   traceWorkerSpawn,
@@ -16,11 +16,28 @@ import {
   traceScopeChange,
   getEpicDecisionTraces,
   getDecisionTracesByType,
+  extractMemoryIds,
 } from "./decision-trace-integration.js";
+import { createLibSQLAdapter, createLibSQLStreamsSchema, getDatabasePath } from "swarm-mail";
+import type { DatabaseAdapter } from "swarm-mail";
 
 describe("Decision Trace Integration", () => {
   // Use a test project path - the helpers will create their own DB connection
-  const testProjectKey = "/tmp/decision-trace-test";
+  const testProjectKey = "/tmp/decision-trace-test-entity-links";
+  
+  let testDb: DatabaseAdapter;
+  let testDbPath: string;
+  
+  beforeAll(async () => {
+    // Use the ACTUAL path that getTraceDb() will use
+    testDbPath = getDatabasePath(testProjectKey);
+    testDb = await createLibSQLAdapter({ url: `file:${testDbPath}` });
+    await createLibSQLStreamsSchema(testDb);
+  });
+  
+  afterAll(async () => {
+    await testDb.close?.();
+  });
 
   describe("traceStrategySelection", () => {
     test("captures strategy selection with minimal input", async () => {
@@ -179,6 +196,188 @@ describe("Decision Trace Integration", () => {
     test("getDecisionTracesByType returns array", async () => {
       const traces = await getDecisionTracesByType(testProjectKey, "strategy_selection");
       expect(Array.isArray(traces)).toBe(true);
+    });
+  });
+  
+  describe("extractMemoryIds", () => {
+    test("returns empty array for undefined precedent", () => {
+      const result = extractMemoryIds(undefined);
+      expect(result).toEqual([]);
+    });
+    
+    test("returns empty array for null precedent", () => {
+      const result = extractMemoryIds(null);
+      expect(result).toEqual([]);
+    });
+    
+    test("returns empty array for precedent without memoryId", () => {
+      const result = extractMemoryIds({ similarity: 0.85 });
+      expect(result).toEqual([]);
+    });
+    
+    test("returns array with single memoryId", () => {
+      const result = extractMemoryIds({ memoryId: "mem-123", similarity: 0.92 });
+      expect(result).toEqual(["mem-123"]);
+    });
+    
+    test("returns array from memoryIds field", () => {
+      const result = extractMemoryIds({ 
+        memoryIds: ["mem-123", "mem-456"],
+        similarity: 0.88 
+      });
+      expect(result).toEqual(["mem-123", "mem-456"]);
+    });
+    
+    test("handles empty memoryIds array", () => {
+      const result = extractMemoryIds({ memoryIds: [] });
+      expect(result).toEqual([]);
+    });
+  });
+  
+  describe("Entity Link Creation", () => {
+    test("traceStrategySelection creates no entity links without precedent", async () => {
+      // Call trace function without precedent
+      const traceId = await traceStrategySelection({
+        projectKey: testProjectKey,
+        agentName: "coordinator",
+        strategy: "file-based",
+        reasoning: "No precedent case",
+      });
+      
+      expect(traceId).toBeTruthy();
+      
+      // Query entity links - should be none
+      const result = await testDb.query(
+        `SELECT * FROM entity_links WHERE source_decision_id = ?`,
+        [traceId]
+      );
+      
+      expect(result.rows?.length || 0).toBe(0);
+    });
+    
+    test("traceStrategySelection creates entity link for memory precedent", async () => {
+      // Call trace function WITH precedent
+      const traceId = await traceStrategySelection({
+        projectKey: testProjectKey,
+        agentName: "coordinator",
+        epicId: "epic-entity-test",
+        strategy: "feature-based",
+        reasoning: "Using precedent",
+        precedentCited: {
+          memoryId: "mem-abc123",
+          similarity: 0.95,
+        },
+      });
+      
+      expect(traceId).toBeTruthy();
+      
+      // Query entity links
+      const result = await testDb.query(
+        `SELECT * FROM entity_links WHERE source_decision_id = ?`,
+        [traceId]
+      );
+      
+      // Should have created one entity link
+      expect(result.rows?.length).toBe(1);
+      
+      const link = result.rows?.[0];
+      expect(link?.target_entity_type).toBe("memory");
+      expect(link?.target_entity_id).toBe("mem-abc123");
+      expect(link?.link_type).toBe("cites_precedent");
+      expect(link?.strength).toBe(0.95);
+      expect(link?.context).toContain("precedent");
+    });
+    
+    test("traceStrategySelection creates multiple entity links for multiple memories", async () => {
+      const traceId = await traceStrategySelection({
+        projectKey: testProjectKey,
+        agentName: "coordinator",
+        epicId: "epic-multi-mem",
+        strategy: "risk-based",
+        reasoning: "Multiple precedents",
+        precedentCited: {
+          memoryIds: ["mem-xyz789", "mem-def456"],
+          similarity: 0.88,
+        },
+      });
+      
+      expect(traceId).toBeTruthy();
+      
+      // Query entity links
+      const result = await testDb.query(
+        `SELECT * FROM entity_links WHERE source_decision_id = ? ORDER BY target_entity_id`,
+        [traceId]
+      );
+      
+      // Should have created two entity links
+      expect(result.rows?.length).toBe(2);
+      
+      const links = result.rows || [];
+      expect(links[0]?.target_entity_id).toBe("mem-def456");
+      expect(links[1]?.target_entity_id).toBe("mem-xyz789");
+      
+      links.forEach(link => {
+        expect(link?.target_entity_type).toBe("memory");
+        expect(link?.link_type).toBe("cites_precedent");
+        expect(link?.strength).toBe(0.88);
+      });
+    });
+    
+    test("traceWorkerSpawn creates entity links for assigned files", async () => {
+      const traceId = await traceWorkerSpawn({
+        projectKey: testProjectKey,
+        agentName: "coordinator",
+        epicId: "epic-files",
+        beadId: "bead-123",
+        subtaskTitle: "Implement auth",
+        files: ["src/auth.ts", "src/types.ts"],
+      });
+      
+      expect(traceId).toBeTruthy();
+      
+      // Query entity links
+      const result = await testDb.query(
+        `SELECT * FROM entity_links WHERE source_decision_id = ? ORDER BY target_entity_id`,
+        [traceId]
+      );
+      
+      // Should have created file entity links
+      expect(result.rows?.length).toBe(2);
+      
+      const links = result.rows || [];
+      expect(links[0]?.target_entity_type).toBe("file");
+      expect(links[0]?.target_entity_id).toBe("src/auth.ts");
+      expect(links[0]?.link_type).toBe("assigns_file");
+      
+      expect(links[1]?.target_entity_id).toBe("src/types.ts");
+    });
+    
+    test("traceReviewDecision creates entity link to worker agent", async () => {
+      const traceId = await traceReviewDecision({
+        projectKey: testProjectKey,
+        agentName: "coordinator",
+        epicId: "epic-review",
+        beadId: "bead-456",
+        workerId: "DarkHawk",
+        status: "approved",
+        summary: "Good work",
+      });
+      
+      expect(traceId).toBeTruthy();
+      
+      // Query entity links
+      const result = await testDb.query(
+        `SELECT * FROM entity_links WHERE source_decision_id = ?`,
+        [traceId]
+      );
+      
+      // Should have created agent entity link
+      expect(result.rows?.length).toBe(1);
+      
+      const link = result.rows?.[0];
+      expect(link?.target_entity_type).toBe("agent");
+      expect(link?.target_entity_id).toBe("DarkHawk");
+      expect(link?.link_type).toBe("reviewed_work_by");
     });
   });
 });

@@ -31,7 +31,12 @@
  * @module decision-trace-integration
  */
 
-import { createDecisionTrace, type DecisionTraceInput } from "swarm-mail";
+import { 
+  createDecisionTrace, 
+  createEntityLink,
+  type DecisionTraceInput,
+  type EntityLinkInput,
+} from "swarm-mail";
 import { createLibSQLAdapter } from "swarm-mail";
 import { getDatabasePath } from "swarm-mail";
 
@@ -47,6 +52,38 @@ import { getDatabasePath } from "swarm-mail";
 async function getTraceDb(projectPath?: string) {
   const dbPath = getDatabasePath(projectPath);
   return createLibSQLAdapter({ url: `file:${dbPath}` });
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/**
+ * Extract memory IDs from precedent_cited object
+ *
+ * Handles both single memoryId and array memoryIds fields.
+ *
+ * @param precedentCited - Precedent object from decision trace
+ * @returns Array of memory IDs (empty if none found)
+ */
+export function extractMemoryIds(
+  precedentCited?: { memoryId?: string; memoryIds?: string[]; similarity?: number } | null,
+): string[] {
+  if (!precedentCited) {
+    return [];
+  }
+  
+  // Check for array field first
+  if (precedentCited.memoryIds && Array.isArray(precedentCited.memoryIds)) {
+    return precedentCited.memoryIds;
+  }
+  
+  // Check for single memoryId field
+  if (precedentCited.memoryId) {
+    return [precedentCited.memoryId];
+  }
+  
+  return [];
 }
 
 // ============================================================================
@@ -77,6 +114,7 @@ export interface StrategySelectionInput {
   }>;
   precedentCited?: {
     memoryId?: string;
+    memoryIds?: string[];
     similarity?: number;
     cassResults?: number;
   };
@@ -86,6 +124,7 @@ export interface StrategySelectionInput {
  * Trace a strategy selection decision
  *
  * Call this when the coordinator selects a decomposition strategy.
+ * Automatically creates entity links to any memory patterns cited as precedent.
  *
  * @param input - Strategy selection details
  * @returns Created decision trace ID
@@ -112,6 +151,19 @@ export async function traceStrategySelection(
       alternatives: input.alternatives,
       precedent_cited: input.precedentCited,
     });
+
+    // Create entity links for memory precedents
+    const memoryIds = extractMemoryIds(input.precedentCited);
+    for (const memoryId of memoryIds) {
+      await createEntityLink(db, {
+        source_decision_id: trace.id,
+        target_entity_type: "memory",
+        target_entity_id: memoryId,
+        link_type: "cites_precedent",
+        strength: input.precedentCited?.similarity ?? 1.0,
+        context: "Cited as precedent for strategy selection",
+      });
+    }
 
     await db.close?.();
     return trace.id;
@@ -147,6 +199,7 @@ export interface WorkerSpawnInput {
  * Trace a worker spawn decision
  *
  * Call this when the coordinator spawns a worker agent.
+ * Automatically creates entity links to assigned files.
  *
  * @param input - Worker spawn details
  * @returns Created decision trace ID
@@ -173,6 +226,18 @@ export async function traceWorkerSpawn(
       },
       rationale: input.rationale || `Spawning worker for: ${input.subtaskTitle}`,
     });
+
+    // Create entity links for assigned files
+    for (const file of input.files) {
+      await createEntityLink(db, {
+        source_decision_id: trace.id,
+        target_entity_type: "file",
+        target_entity_id: file,
+        link_type: "assigns_file",
+        strength: 1.0,
+        context: `File assigned to worker ${input.workerName || "worker"}`,
+      });
+    }
 
     await db.close?.();
     return trace.id;
@@ -213,6 +278,7 @@ export interface ReviewDecisionInput {
  * Trace a review decision
  *
  * Call this when the coordinator approves or rejects worker output.
+ * Automatically creates entity link to the worker agent being reviewed.
  *
  * @param input - Review decision details
  * @returns Created decision trace ID
@@ -240,6 +306,16 @@ export async function traceReviewDecision(
       inputs_gathered: input.issues
         ? [{ source: "code_review", issues: input.issues }]
         : undefined,
+    });
+
+    // Create entity link to the worker agent being reviewed
+    await createEntityLink(db, {
+      source_decision_id: trace.id,
+      target_entity_type: "agent",
+      target_entity_id: input.workerId,
+      link_type: "reviewed_work_by",
+      strength: 1.0,
+      context: `Review ${input.status} for ${input.workerId}`,
     });
 
     await db.close?.();

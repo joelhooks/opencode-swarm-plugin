@@ -770,7 +770,7 @@ export const swarm_delegate_planning = tool({
       selectedStrategy = args.strategy;
       strategyReasoning = `User-specified strategy: ${selectedStrategy}`;
     } else {
-      const selection = selectStrategy(args.task);
+      const selection = await selectStrategy(args.task);
       selectedStrategy = selection.strategy;
       strategyReasoning = selection.reasoning;
     }
@@ -1097,7 +1097,7 @@ export const swarm_plan_interactive = tool({
 
     // Fast mode: Skip to recommendation
     if (mode === "fast") {
-      const strategyResult = selectStrategy(args.task);
+      const strategyResult = await selectStrategy(args.task);
       const guidelines = formatStrategyGuidelines(strategyResult.strategy);
 
       const output: SocraticPlanOutput = {
@@ -1118,7 +1118,7 @@ export const swarm_plan_interactive = tool({
 
     // Auto mode: Auto-select and proceed
     if (mode === "auto") {
-      const strategyResult = selectStrategy(args.task);
+      const strategyResult = await selectStrategy(args.task);
 
       const output: SocraticPlanOutput = {
         mode: "auto",
@@ -1239,7 +1239,7 @@ export const swarm_plan_interactive = tool({
 
     // Phase 2: Alternatives
     if (currentPhase === "alternatives") {
-      const strategyResult = selectStrategy(args.task);
+      const strategyResult = await selectStrategy(args.task);
 
       // Build 2-3 alternative approaches
       const alternatives: Array<{
@@ -1280,7 +1280,7 @@ export const swarm_plan_interactive = tool({
 
     // Phase 3: Recommendation
     if (currentPhase === "recommendation") {
-      const strategyResult = selectStrategy(args.task);
+      const strategyResult = await selectStrategy(args.task);
       const guidelines = formatStrategyGuidelines(strategyResult.strategy);
 
       const output: SocraticPlanOutput = {
