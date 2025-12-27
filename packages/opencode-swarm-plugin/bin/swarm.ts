@@ -34,8 +34,8 @@ import {
   importJsonlToPGLite,
   ensureHiveDirectory,
   getHiveAdapter,
-} from "../src/hive";
-import { formatCoordinatorPrompt } from "../src/swarm-prompts";
+} from "../dist/hive.js";
+import { formatCoordinatorPrompt } from "../dist/swarm-prompts.js";
 import {
   legacyDatabaseExists,
   migratePGliteToLibSQL,

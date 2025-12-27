@@ -36,7 +36,7 @@
     "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
-    "build": "bun build ./src/index.ts --outdir ./dist --target node --external @electric-sql/pglite --external swarm-mail --external evalite && bun build ./src/plugin.ts --outfile ./dist/plugin.js --target node --external @electric-sql/pglite --external swarm-mail --external evalite && bun build ./src/eval-capture.ts --outfile ./dist/eval-capture.js --target node --external @electric-sql/pglite --external swarm-mail && bun build ./src/compaction-prompt-scoring.ts --outfile ./dist/compaction-prompt-scoring.js --target node --external @electric-sql/pglite --external swarm-mail && tsc",
+    "build": "bun build ./src/index.ts --outdir ./dist --target node --external @electric-sql/pglite --external swarm-mail --external evalite && bun build ./src/plugin.ts --outfile ./dist/plugin.js --target node --external @electric-sql/pglite --external swarm-mail --external evalite && bun build ./src/eval-capture.ts --outfile ./dist/eval-capture.js --target node --external @electric-sql/pglite --external swarm-mail && bun build ./src/compaction-prompt-scoring.ts --outfile ./dist/compaction-prompt-scoring.js --target node --external @electric-sql/pglite --external swarm-mail && bun build ./src/hive.ts --outfile ./dist/hive.js --target node --external @electric-sql/pglite --external swarm-mail && bun build ./src/swarm-prompts.ts --outfile ./dist/swarm-prompts.js --target node --external @electric-sql/pglite --external swarm-mail && tsc",
     "dev": "bun --watch src/index.ts",
     "test": "bun test --timeout 10000 src/anti-patterns.test.ts src/mandate-promotion.test.ts src/mandate-storage.test.ts src/output-guardrails.test.ts src/pattern-maturity.test.ts src/skills.test.ts src/structured.test.ts src/schemas/",
     "test:integration": "bun test --timeout 60000 src/*.integration.test.ts",
@@ -54,6 +54,7 @@
   "dependencies": {
     "@clack/prompts": "^0.11.0",
     "@opencode-ai/plugin": "^1.0.134",
+    "better-sqlite3": "^12.5.0",
     "effect": "^3.19.12",
     "gray-matter": "^4.0.3",
     "ioredis": "^5.4.1",
