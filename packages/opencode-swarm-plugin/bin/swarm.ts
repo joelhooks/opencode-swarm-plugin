@@ -106,7 +106,7 @@ interface FileStats {
  */
 function writeFileWithStatus(path: string, content: string, label: string): FileStatus {
   const exists = existsSync(path);
-  
+
   if (exists) {
     const current = readFileSync(path, "utf-8");
     if (current === content) {
@@ -114,7 +114,7 @@ function writeFileWithStatus(path: string, content: string, label: string): File
       return "unchanged";
     }
   }
-  
+
   writeFileSync(path, content);
   const status: FileStatus = exists ? "updated" : "created";
   p.log.success(`${label}: ${path} (${status})`);
@@ -356,26 +356,26 @@ function showUpdateNotification(info: UpdateInfo) {
     );
     console.log(
       yellow("  │") +
-        "  Update available! " +
-        dim(info.current) +
-        " → " +
-        green(info.latest) +
-        "                " +
-        yellow("│"),
+      "  Update available! " +
+      dim(info.current) +
+      " → " +
+      green(info.latest) +
+      "                " +
+      yellow("│"),
     );
     console.log(
       yellow("  │") +
-        "  Run: " +
-        cyan("npm install -g " + PACKAGE_NAME + "@latest") +
-        "  " +
-        yellow("│"),
+      "  Run: " +
+      cyan("npm install -g " + PACKAGE_NAME + "@latest") +
+      "  " +
+      yellow("│"),
     );
     console.log(
       yellow("  │") +
-        "  Or:  " +
-        cyan("swarm update") +
-        "                                " +
-        yellow("│"),
+      "  Or:  " +
+      cyan("swarm update") +
+      "                                " +
+      yellow("│"),
     );
     console.log(
       yellow("  ╰─────────────────────────────────────────────────────╯"),
@@ -600,9 +600,10 @@ You are a swarm planner. Decompose tasks into optimal parallel subtasks.
 
 \`\`\`
 semantic-memory_find(query="<task keywords>", limit=5)   # Past learnings
-cass_search(query="<task description>", limit=5)         # Similar past tasks  
+cass_search({query="<task-name>", limit: 5}) # Similar past tasks  
 pdf-brain_search(query="<domain concepts>", limit=5)     # Design patterns
 # Skills are managed by OpenCode native format (.opencode/skill/)
+use skill
 # Check .opencode/skill/ directory for available skills
 \`\`\`
 
@@ -676,7 +677,7 @@ Your Task prompt contains detailed instructions including:
 
 1. **swarmmail_init()** - FIRST, before anything else
 2. **semantic-memory_find()** - Check past learnings
-3. **Load relevant skills** - Check .opencode/skill/ directory, use `use skill <name>` syntax
+3. **Load relevant skills** - Check .opencode/skill/ directory, use \`use skill <name>\` syntax
 4. **swarmmail_reserve()** - YOU reserve your files
 5. **Do the work** - Read, implement, verify
 6. **swarm_progress()** - Report at 25/50/75%
@@ -765,10 +766,9 @@ swarmmail_init(project_path="/abs/path/to/project", task_description="Research: 
 Based on research task, load appropriate skills:
 
 \`\`\`
-# Native syntax: use skill <skill-name>
-# Check .opencode/skill/ directory for available skills
-\`\`\`
-skills_use(name="<skill-name>", context="Researching <topic>")
+# Native syntax: 
+use skill <skill-name>
+use skill <skill-name> with "Researching <topic>"
 \`\`\`
 
 ### Step 4: Read Lockfiles (if researching dependencies)
@@ -794,7 +794,7 @@ Extract current version numbers for libraries you need to research.
 Use available doc tools to get version-specific docs:
 
 \`\`\`
-# If context7 available (check skills_list or task context)
+# If context7 available (check task context or native skills)
 # Use it for library docs
 
 # If pdf-brain available
@@ -932,7 +932,7 @@ bash("ollama --version", description="Check Ollama availability")
 
 **"Discover available testing tools"**
 
-1. Check skills_list for testing-patterns skill
+1. Check for native testing-patterns skill (use skill testing-patterns)
 2. Check which jest/vitest/bun (bash tool)
 3. Read package.json devDependencies
 4. Store findings: test runner, assertion library, coverage tool
@@ -1059,15 +1059,15 @@ async function doctor() {
   if (requiredMissing.length > 0) {
     p.outro(
       "Missing " +
-        requiredMissing.length +
-        " required dependencies. Run 'swarm setup' to install.",
+      requiredMissing.length +
+      " required dependencies. Run 'swarm setup' to install.",
     );
     process.exit(1);
   } else if (optionalMissing.length > 0) {
     p.outro(
       "All required dependencies installed. " +
-        optionalMissing.length +
-        " optional missing.",
+      optionalMissing.length +
+      " optional missing.",
     );
   } else {
     p.outro("All dependencies installed!");
@@ -1094,26 +1094,26 @@ async function setup(forceReinstall = false, nonInteractive = false) {
   const tempDir = join(tmpdir(), tempDirName);
   const pglitePath = join(tempDir, "streams");
   const libsqlPath = join(tempDir, "streams.db");
-  
+
   if (pgliteExists(pglitePath)) {
     const migrateSpinner = p.spinner();
     migrateSpinner.start("Migrating...");
-    
+
     try {
       const result = await migratePGliteToLibSQL({
         pglitePath,
         libsqlPath,
         dryRun: false,
-        onProgress: () => {},
+        onProgress: () => { },
       });
-      
+
       const total = result.memories.migrated + result.beads.migrated;
       if (total > 0) {
         migrateSpinner.stop(`Migrated ${result.memories.migrated} memories, ${result.beads.migrated} cells`);
       } else {
         migrateSpinner.stop("Migrated");
       }
-      
+
       if (result.errors.length > 0) {
         p.log.warn(`${result.errors.length} errors during migration`);
       }
@@ -1378,7 +1378,7 @@ async function setup(forceReinstall = false, nonInteractive = false) {
     p.log.warn("Found legacy .beads directory");
     p.log.message(dim("  Path: " + migrationCheck.beadsPath));
     p.log.message(dim("  Will rename to .hive/ and merge history"));
-    
+
     const shouldMigrate = await p.confirm({
       message: "Migrate .beads to .hive? (recommended)",
       initialValue: true,
@@ -1392,13 +1392,13 @@ async function setup(forceReinstall = false, nonInteractive = false) {
     if (shouldMigrate) {
       const migrateSpinner = p.spinner();
       migrateSpinner.start("Migrating .beads to .hive...");
-      
+
       try {
         const result = await migrateBeadsToHive(cwd);
         if (result.migrated) {
           migrateSpinner.stop("Renamed .beads/ → .hive/");
           p.log.success("Directory migration complete");
-          
+
           // Merge historic beads into issues.jsonl
           migrateSpinner.start("Merging historic cells...");
           const mergeResult = await mergeHistoricBeads(cwd);
@@ -1408,7 +1408,7 @@ async function setup(forceReinstall = false, nonInteractive = false) {
           } else {
             migrateSpinner.stop("No historic cells to merge");
           }
-          
+
           // Import JSONL into PGLite database
           migrateSpinner.start("Importing to database...");
           const importResult = await importJsonlToPGLite(cwd);
@@ -1440,7 +1440,7 @@ async function setup(forceReinstall = false, nonInteractive = false) {
       if (opencodeConfig.mcpServers?.['semantic-memory']) {
         p.log.warn('Found legacy semantic-memory MCP server');
         p.log.message(dim('  Semantic memory is now embedded in the plugin'));
-        
+
         const removeMcp = await p.confirm({
           message: 'Remove from MCP servers config?',
           initialValue: true,
@@ -1707,7 +1707,7 @@ async function setup(forceReinstall = false, nonInteractive = false) {
   if (stats.created > 0) summaryParts.push(`${stats.created} created`);
   if (stats.updated > 0) summaryParts.push(`${stats.updated} updated`);
   if (stats.unchanged > 0) summaryParts.push(`${stats.unchanged} unchanged`);
-  
+
   p.log.message("");
   p.log.success(`Setup complete: ${totalFiles} files (${summaryParts.join(", ")})`);
 
@@ -1735,7 +1735,7 @@ async function init() {
   // Check for existing .hive or .beads directories
   const hiveDir = existsSync(".hive");
   const beadsDir = existsSync(".beads");
-  
+
   if (hiveDir) {
     p.log.warn("Hive already initialized in this project (.hive/ exists)");
 
@@ -1751,7 +1751,7 @@ async function init() {
   } else if (beadsDir) {
     // Offer migration from .beads to .hive
     p.log.warn("Found legacy .beads/ directory");
-    
+
     const migrate = await p.confirm({
       message: "Migrate .beads/ to .hive/?",
       initialValue: true,
@@ -1760,13 +1760,13 @@ async function init() {
     if (!p.isCancel(migrate) && migrate) {
       const s = p.spinner();
       s.start("Migrating .beads/ to .hive/...");
-      
+
       const result = await migrateBeadsToHive(projectPath);
-      
+
       if (result.migrated) {
         s.stop("Migration complete");
         p.log.success("Renamed .beads/ to .hive/");
-        
+
         // Merge historic beads if beads.base.jsonl exists
         const mergeResult = await mergeHistoricBeads(projectPath);
         if (mergeResult.merged > 0) {
@@ -1784,7 +1784,7 @@ async function init() {
   try {
     // Create .hive directory using our function (no bd CLI needed)
     ensureHiveDirectory(projectPath);
-    
+
     s.stop("Hive initialized");
     p.log.success("Created .hive/ directory");
 
@@ -1823,7 +1823,7 @@ async function init() {
               type: typeResult as "feature" | "bug" | "task" | "chore",
               priority: 2,
             });
-            
+
             cellSpinner.stop("Cell created: " + cell.id);
           } catch (error) {
             cellSpinner.stop("Failed to create cell");
@@ -2217,7 +2217,7 @@ async function dashboard() {
   });
 
   // Keep process alive
-  await new Promise(() => {});
+  await new Promise(() => { });
 }
 
 /**
@@ -2710,7 +2710,7 @@ async function migrate() {
   p.intro("swarm migrate v" + VERSION);
 
   const projectPath = process.cwd();
-  
+
   // Calculate the temp directory path (same logic as libsql.convenience.ts)
   const tempDirName = getLibSQLProjectTempDirName(projectPath);
   const tempDir = join(tmpdir(), tempDirName);
@@ -2733,17 +2733,17 @@ async function migrate() {
       pglitePath,
       libsqlPath,
       dryRun: true,
-      onProgress: () => {}, // silent during dry run
+      onProgress: () => { }, // silent during dry run
     });
 
     s.stop("Scan complete");
 
     // Show summary
-    const totalItems = 
-      dryResult.memories.migrated + 
-      dryResult.beads.migrated + 
-      dryResult.messages.migrated + 
-      dryResult.agents.migrated + 
+    const totalItems =
+      dryResult.memories.migrated +
+      dryResult.beads.migrated +
+      dryResult.messages.migrated +
+      dryResult.agents.migrated +
       dryResult.events.migrated;
 
     if (totalItems === 0) {
@@ -2962,12 +2962,12 @@ function formatEvent(event: CoordinatorEvent, useColor = true): string {
     ? event.event_type === "VIOLATION"
       ? red
       : event.event_type === "OUTCOME"
-      ? green
-      : cyan
+        ? green
+        : cyan
     : (s: string) => s;
-  
+
   const type = typeColor(event.event_type.padEnd(12));
-  
+
   // Get specific type
   let specificType = "";
   if (event.event_type === "DECISION") {
@@ -2979,7 +2979,7 @@ function formatEvent(event: CoordinatorEvent, useColor = true): string {
   } else if (event.event_type === "COMPACTION") {
     specificType = event.compaction_type;
   }
-  
+
   return `${timestamp} ${type} ${specificType}`;
 }
 
@@ -2990,7 +2990,7 @@ function formatEvent(event: CoordinatorEvent, useColor = true): string {
 async function logSessions() {
   const args = process.argv.slice(4); // Skip 'log' and 'sessions'
   const sessionsDir = join(homedir(), ".config", "swarm-tools", "sessions");
-  
+
   // Parse arguments
   let sessionId: string | null = null;
   let latest = false;
@@ -2998,10 +2998,10 @@ async function logSessions() {
   let eventTypeFilter: string | null = null;
   let sinceMs: number | null = null;
   let limit = 100;
-  
+
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    
+
     if (arg === "--latest") {
       latest = true;
     } else if (arg === "--json") {
@@ -3027,48 +3027,48 @@ async function logSessions() {
       sessionId = arg;
     }
   }
-  
+
   // If no args, list sessions
   if (!sessionId && !latest) {
     const sessions = listSessionFiles(sessionsDir);
-    
+
     if (jsonOutput) {
       console.log(JSON.stringify({ sessions }, null, 2));
       return;
     }
-    
+
     if (sessions.length === 0) {
       p.log.warn("No session files found");
       p.log.message(dim(`  Expected: ${sessionsDir}/*.jsonl`));
       return;
     }
-    
+
     console.log(yellow(BANNER));
     console.log(dim(`  Coordinator Sessions (${sessions.length} total)\n`));
-    
+
     // Show sessions table
     for (const session of sessions) {
       const startTime = new Date(session.start_time).toLocaleString();
       const duration = session.end_time
         ? ((new Date(session.end_time).getTime() - new Date(session.start_time).getTime()) / 1000).toFixed(0) + "s"
         : "ongoing";
-      
+
       console.log(`  ${cyan(session.session_id)}`);
       console.log(`    ${dim("Started:")} ${startTime}`);
       console.log(`    ${dim("Events:")}  ${session.event_count}`);
       console.log(`    ${dim("Duration:")} ${duration}`);
       console.log();
     }
-    
+
     console.log(dim("  Use --latest to view most recent session"));
     console.log(dim("  Use <session_id> to view specific session"));
     console.log();
     return;
   }
-  
+
   // Get session (either by ID or latest)
   let session: { session_id: string; file_path: string; event_count: number; start_time: string; end_time?: string; } | null = null;
-  
+
   if (latest) {
     session = getLatestSession(sessionsDir);
     if (!session) {
@@ -3079,42 +3079,42 @@ async function logSessions() {
     // Find session by ID (partial match)
     const sessions = listSessionFiles(sessionsDir);
     session = sessions.find(s => s.session_id.includes(sessionId!)) || null;
-    
+
     if (!session) {
       p.log.error(`Session not found: ${sessionId}`);
       return;
     }
   }
-  
+
   // Load and filter events
   let events = parseSessionFile(session!.file_path);
-  
+
   if (eventTypeFilter) {
     events = filterEventsByType(events, eventTypeFilter);
   }
-  
+
   if (sinceMs !== null) {
     events = filterEventsSince(events, sinceMs);
   }
-  
+
   // Apply limit
   if (events.length > limit) {
     events = events.slice(-limit);
   }
-  
+
   // Output
   if (jsonOutput) {
     console.log(JSON.stringify({ session_id: session!.session_id, events }, null, 2));
     return;
   }
-  
+
   console.log(yellow(BANNER));
   console.log(dim(`  Session: ${session!.session_id}\n`));
   console.log(`  ${dim("Events:")}  ${events.length}/${session!.event_count}`);
   if (eventTypeFilter) console.log(`  ${dim("Type:")}    ${eventTypeFilter}`);
   if (sinceMs !== null) console.log(`  ${dim("Since:")}   ${args[args.indexOf("--since") + 1]}`);
   console.log();
-  
+
   for (const event of events) {
     console.log("  " + formatEvent(event, true));
   }
@@ -3146,7 +3146,7 @@ function parseLogLine(line: string, sourceFile?: string): LogLine | null {
       } else {
         level = 30; // default to info
       }
-      
+
       // Derive module from: explicit field, or source filename (e.g., "compaction.log" -> "compaction")
       let module = parsed.module;
       if (!module && sourceFile) {
@@ -3156,11 +3156,11 @@ function parseLogLine(line: string, sourceFile?: string): LogLine | null {
           module = match[1];
         }
       }
-      
+
       // Extract extra data (everything except core fields)
       const { level: _l, time: _t, module: _m, msg: _msg, ...extraData } = parsed;
       const hasExtraData = Object.keys(extraData).length > 0;
-      
+
       return {
         level,
         time: parsed.time,
@@ -3205,17 +3205,17 @@ function levelNameToNumber(name: string): number {
 function parseDuration(duration: string): number | null {
   const match = duration.match(/^(\d+)([smhd])$/);
   if (!match) return null;
-  
+
   const [, num, unit] = match;
   const value = parseInt(num, 10);
-  
+
   const multipliers: Record<string, number> = {
     s: 1000,
     m: 60 * 1000,
     h: 60 * 60 * 1000,
     d: 24 * 60 * 60 * 1000,
   };
-  
+
   return value * multipliers[unit];
 }
 
@@ -3224,14 +3224,14 @@ function formatLogLine(log: LogLine, useColor = true, verbose = false): string {
   const levelName = levelToName(log.level);
   const module = log.module.padEnd(12);
   const levelStr = useColor ? levelToColor(log.level)(levelName) : levelName;
-  
+
   let output = `${timestamp} ${levelStr} ${module} ${log.msg}`;
-  
+
   // In verbose mode, pretty print the structured data
   if (verbose && log.data) {
     output += `\n${dim(JSON.stringify(log.data, null, 2))}`;
   }
-  
+
   return output;
 }
 
@@ -3242,14 +3242,14 @@ interface LogEntry {
 
 function readLogFiles(dir: string): LogEntry[] {
   if (!existsSync(dir)) return [];
-  
+
   const allFiles = readdirSync(dir);
   // Match both pino-roll format (*.1log, *.2log) AND plain *.log files
   const logFiles = allFiles
     .filter((f: string) => /\.\d+log$/.test(f) || /\.log$/.test(f))
     .sort()
     .map((f: string) => join(dir, f));
-  
+
   const entries: LogEntry[] = [];
   for (const file of logFiles) {
     try {
@@ -3262,7 +3262,7 @@ function readLogFiles(dir: string): LogEntry[] {
       // Skip unreadable files
     }
   }
-  
+
   return entries;
 }
 
@@ -3322,17 +3322,17 @@ function formatCellsTable(cells: Array<{
  */
 async function cells() {
   const args = process.argv.slice(3);
-  
+
   // Parse arguments
   let cellId: string | null = null;
   let statusFilter: string | null = null;
   let typeFilter: string | null = null;
   let readyOnly = false;
   let jsonOutput = false;
-  
+
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    
+
     if (arg === "--status" && i + 1 < args.length) {
       statusFilter = args[++i];
       if (!["open", "in_progress", "closed", "blocked"].includes(statusFilter)) {
@@ -3356,30 +3356,30 @@ async function cells() {
       cellId = arg;
     }
   }
-  
+
   // Get adapter using swarm-mail
   const projectPath = process.cwd();
   const { getSwarmMailLibSQL, createHiveAdapter, resolvePartialId } = await import("swarm-mail");
-  
+
   try {
     const swarmMail = await getSwarmMailLibSQL(projectPath);
     const db = await swarmMail.getDatabase();
     const adapter = createHiveAdapter(db, projectPath);
-    
+
     // Run migrations to ensure schema exists
     await adapter.runMigrations();
-    
+
     // If cell ID provided, get single cell
     if (cellId) {
       // Resolve partial ID to full ID
       const fullId = await resolvePartialId(adapter, projectPath, cellId) || cellId;
       const cell = await adapter.getCell(projectPath, fullId);
-      
+
       if (!cell) {
         p.log.error(`Cell not found: ${cellId}`);
         process.exit(1);
       }
-      
+
       if (jsonOutput) {
         console.log(JSON.stringify([cell], null, 2));
       } else {
@@ -3393,10 +3393,10 @@ async function cells() {
       }
       return;
     }
-    
+
     // Otherwise query cells
     let cells: Array<{ id: string; title: string; status: string; priority: number }>;
-    
+
     if (readyOnly) {
       const readyCell = await adapter.getNextReadyCell(projectPath);
       cells = readyCell ? [{
@@ -3411,7 +3411,7 @@ async function cells() {
         type: typeFilter as any || undefined,
         limit: 20,
       });
-      
+
       cells = queriedCells.map(c => ({
         id: c.id,
         title: c.title,
@@ -3419,7 +3419,7 @@ async function cells() {
         priority: c.priority,
       }));
     }
-    
+
     if (jsonOutput) {
       console.log(JSON.stringify(cells, null, 2));
     } else {
@@ -3435,13 +3435,13 @@ async function cells() {
 
 async function logs() {
   const args = process.argv.slice(3);
-  
+
   // Check for 'sessions' subcommand
   if (args[0] === "sessions") {
     await logSessions();
     return;
   }
-  
+
   // Parse arguments
   let moduleFilter: string | null = null;
   let levelFilter: number | null = null;
@@ -3451,10 +3451,10 @@ async function logs() {
   let watchMode = false;
   let pollInterval = 1000; // 1 second default
   let verbose = false;
-  
+
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    
+
     if (arg === "--level" && i + 1 < args.length) {
       levelFilter = levelNameToNumber(args[++i]);
     } else if (arg === "--since" && i + 1 < args.length) {
@@ -3488,10 +3488,10 @@ async function logs() {
       moduleFilter = arg;
     }
   }
-  
+
   // Read logs from ~/.config/swarm-tools/logs/
   const logsDir = join(homedir(), ".config", "swarm-tools", "logs");
-  
+
   if (!existsSync(logsDir)) {
     if (!jsonOutput) {
       p.log.warn("No logs directory found");
@@ -3501,27 +3501,27 @@ async function logs() {
     }
     return;
   }
-  
+
   // Helper to filter logs
   const filterLogs = (rawLogs: LogLine[]): LogLine[] => {
     let filtered = rawLogs;
-    
+
     if (moduleFilter) {
       filtered = filtered.filter((log) => log.module === moduleFilter);
     }
-    
+
     if (levelFilter !== null) {
       filtered = filtered.filter((log) => log.level >= levelFilter);
     }
-    
+
     if (sinceMs !== null) {
       const cutoffTime = Date.now() - sinceMs;
       filtered = filtered.filter((log) => new Date(log.time).getTime() >= cutoffTime);
     }
-    
+
     return filtered;
   };
-  
+
   // Watch mode - continuous monitoring
   if (watchMode) {
     console.log(yellow(BANNER));
@@ -3529,10 +3529,10 @@ async function logs() {
     if (moduleFilter) console.log(dim(`  Module: ${moduleFilter}`));
     if (levelFilter !== null) console.log(dim(`  Level: >=${levelToName(levelFilter)}`));
     console.log();
-    
+
     // Track file positions for incremental reads
     const filePositions: Map<string, number> = new Map();
-    
+
     // Initialize positions from current file sizes
     const initializePositions = () => {
       if (!existsSync(logsDir)) return;
@@ -3547,13 +3547,13 @@ async function logs() {
         }
       }
     };
-    
+
     // Read new lines from a file since last position
     const readNewLines = (filePath: string): string[] => {
       try {
         const stats = statSync(filePath);
         const lastPos = filePositions.get(filePath) || 0;
-        
+
         if (stats.size <= lastPos) {
           // File was truncated or no new content
           if (stats.size < lastPos) {
@@ -3561,41 +3561,41 @@ async function logs() {
           }
           return [];
         }
-        
+
         const content = readFileSync(filePath, "utf-8");
         const newContent = content.slice(lastPos);
         filePositions.set(filePath, stats.size);
-        
+
         return newContent.split("\n").filter((line: string) => line.trim());
       } catch {
         return [];
       }
     };
-    
+
     // Print initial logs (last N lines)
     const rawEntries = readLogFiles(logsDir);
     let logs: LogLine[] = rawEntries
       .map(entry => parseLogLine(entry.line, entry.file))
       .filter((log): log is LogLine => log !== null);
     logs = filterLogs(logs).slice(-limit);
-    
+
     for (const log of logs) {
       console.log(formatLogLine(log, true, verbose));
     }
-    
+
     // Initialize positions after printing initial logs
     initializePositions();
-    
+
     // Poll for new logs
     const pollForNewLogs = () => {
       if (!existsSync(logsDir)) return;
-      
+
       const files = readdirSync(logsDir).filter((f: string) => /\.\d+log$/.test(f) || /\.log$/.test(f));
-      
+
       for (const file of files) {
         const filePath = join(logsDir, file);
         const newLines = readNewLines(filePath);
-        
+
         for (const line of newLines) {
           const parsed = parseLogLine(line, filePath);
           if (parsed) {
@@ -3607,38 +3607,38 @@ async function logs() {
         }
       }
     };
-    
+
     // Set up polling interval
     const intervalId = setInterval(pollForNewLogs, pollInterval);
-    
+
     // Handle graceful shutdown
     const cleanup = () => {
       clearInterval(intervalId);
       console.log(dim("\n  Stopped watching."));
       process.exit(0);
     };
-    
+
     process.on("SIGINT", cleanup);
     process.on("SIGTERM", cleanup);
-    
+
     // Keep process alive
-    await new Promise(() => {});
+    await new Promise(() => { });
     return;
   }
-  
+
   // Non-watch mode - one-shot output
   const rawEntries = readLogFiles(logsDir);
-  
+
   // Parse and filter
   let logs: LogLine[] = rawEntries
     .map(entry => parseLogLine(entry.line, entry.file))
     .filter((log): log is LogLine => log !== null);
-  
+
   logs = filterLogs(logs);
-  
+
   // Apply limit (keep most recent)
   logs = logs.slice(-limit);
-  
+
   // Output
   if (jsonOutput) {
     console.log(JSON.stringify({ logs }, null, 2));
@@ -3647,14 +3647,14 @@ async function logs() {
       p.log.warn("No logs found matching filters");
       return;
     }
-    
+
     console.log(yellow(BANNER));
     console.log(dim(`  Logs (${logs.length} entries)`));
     if (moduleFilter) console.log(dim(`  Module: ${moduleFilter}`));
     if (levelFilter !== null) console.log(dim(`  Level: >=${levelToName(levelFilter)}`));
     if (sinceMs !== null) console.log(dim(`  Since: last ${args[args.indexOf("--since") + 1]}`));
     console.log();
-    
+
     for (const log of logs) {
       console.log(formatLogLine(log, true, verbose));
     }
@@ -3678,30 +3678,30 @@ async function db() {
   const dbPath = getLibSQLDatabasePath(projectPath);
   const dbDir = dirname(dbPath.replace("file:", ""));
   const dbFile = dbPath.replace("file:", "");
-  
+
   console.log(yellow(BANNER));
   console.log(dim(`  ${TAGLINE}\n`));
-  
+
   console.log(cyan("  Database Info\n"));
-  
+
   console.log(`  ${dim("Project:")}     ${projectPath}`);
   console.log(`  ${dim("Project Name:")} ${projectName}`);
   console.log(`  ${dim("Hash:")}         ${hash}`);
   console.log(`  ${dim("DB Directory:")} ${dbDir}`);
   console.log(`  ${dim("DB File:")}      ${dbFile}`);
   console.log();
-  
+
   // Check if database exists
   if (existsSync(dbFile)) {
     const stats = statSync(dbFile);
     const sizeKB = Math.round(stats.size / 1024);
     console.log(`  ${green("✓")} Database exists (${sizeKB} KB)`);
-    
+
     // Check schema
     try {
       const { execSync } = await import("child_process");
       const schema = execSync(`sqlite3 "${dbFile}" "SELECT sql FROM sqlite_master WHERE type='table' AND name='beads'"`, { encoding: "utf-8" }).trim();
-      
+
       if (schema) {
         const hasProjectKey = schema.includes("project_key");
         if (hasProjectKey) {
@@ -3715,7 +3715,7 @@ async function db() {
       } else {
         console.log(`  ${dim("○")} No beads table yet (will be created on first use)`);
       }
-      
+
       // Check schema_version
       try {
         const version = execSync(`sqlite3 "${dbFile}" "SELECT MAX(version) FROM schema_version"`, { encoding: "utf-8" }).trim();
@@ -3725,7 +3725,7 @@ async function db() {
       } catch {
         console.log(`  ${dim("○")} No schema_version table`);
       }
-      
+
       // Count records
       try {
         const beadCount = execSync(`sqlite3 "${dbFile}" "SELECT COUNT(*) FROM beads"`, { encoding: "utf-8" }).trim();
@@ -3733,14 +3733,14 @@ async function db() {
       } catch {
         // Table doesn't exist yet
       }
-      
+
       try {
         const memoryCount = execSync(`sqlite3 "${dbFile}" "SELECT COUNT(*) FROM memories"`, { encoding: "utf-8" }).trim();
         console.log(`  ${dim("○")} Memories: ${memoryCount}`);
       } catch {
         // Table doesn't exist yet
       }
-      
+
     } catch (error) {
       console.log(`  ${dim("○")} Could not inspect schema (sqlite3 not available)`);
     }
@@ -3748,7 +3748,7 @@ async function db() {
     console.log(`  ${dim("○")} Database does not exist yet`);
     console.log(dim("    Will be created on first use"));
   }
-  
+
   // Check for legacy PGLite
   console.log();
   const pglitePath = join(dbDir, "streams");
@@ -3757,7 +3757,7 @@ async function db() {
     console.log(dim(`    ${pglitePath}`));
     console.log(dim("    Run 'swarm migrate' to migrate data"));
   }
-  
+
   console.log();
 }
 
@@ -3858,16 +3858,16 @@ function formatEvalHistoryOutput(history: Array<{
   // Display each eval group
   for (const [evalName, entries] of grouped) {
     p.log.message(bold(cyan(evalName)));
-    
+
     // Calculate stats
     const scores = entries.map((e) => e.score);
     const avgScore = scores.reduce((sum, s) => sum + s, 0) / scores.length;
     const sparkline = generateSparkline(scores);
-    
+
     // Trend line with stats
     const avgColor = avgScore >= 0.8 ? green : avgScore >= 0.6 ? yellow : red;
     p.log.message(`  ${cyan(sparkline)} ${dim("avg:")} ${avgColor(avgScore.toFixed(2))} ${dim(`(${entries.length} runs)`)}`);
-    
+
     // Show latest 5 entries
     const latest = entries.slice(-5);
     for (const entry of latest) {
@@ -3875,11 +3875,11 @@ function formatEvalHistoryOutput(history: Array<{
       const scoreColor = entry.score >= 0.8 ? green : entry.score >= 0.6 ? yellow : red;
       p.log.message(`  ${dim(time)} ${dim(`#${entry.run_count}`)} ${scoreColor(entry.score.toFixed(2))}`);
     }
-    
+
     if (entries.length > 5) {
       p.log.message(dim(`  ... and ${entries.length - 5} more`));
     }
-    
+
     console.log();
   }
 }
@@ -3906,7 +3906,7 @@ function formatEvalRunResultOutput(result: {
   // Phase
   const phaseColor = result.phase === "bootstrap" ? yellow : result.phase === "stabilization" ? cyan : green;
   p.log.message(`${dim("Phase:")} ${phaseColor(result.phase)}`);
-  
+
   // Score with color coding
   const scoreColor = result.currentScore >= 0.8 ? green : result.currentScore >= 0.6 ? yellow : red;
   p.log.message(`${dim("Score:")} ${bold(scoreColor(result.currentScore.toFixed(2)))}`);
@@ -3931,43 +3931,43 @@ function formatEvalRunResultOutput(result: {
 // ============================================================================
 
 async function stats() {
-	const { getSwarmMailLibSQL } = await import("swarm-mail");
-	const { formatSwarmStats, parseTimePeriod, aggregateByStrategy } = await import(
-		"../src/observability-tools"
-	);
+  const { getSwarmMailLibSQL } = await import("swarm-mail");
+  const { formatSwarmStats, parseTimePeriod, aggregateByStrategy } = await import(
+    "../src/observability-tools"
+  );
 
-	p.intro("swarm stats");
+  p.intro("swarm stats");
 
-	// Parse args
-	const args = process.argv.slice(3);
-	let period = "7d"; // default to 7 days
-	let format: "text" | "json" = "text";
+  // Parse args
+  const args = process.argv.slice(3);
+  let period = "7d"; // default to 7 days
+  let format: "text" | "json" = "text";
 
-	for (let i = 0; i < args.length; i++) {
-		if (args[i] === "--since" || args[i] === "-s") {
-			period = args[i + 1] || "7d";
-			i++;
-		} else if (args[i] === "--json") {
-			format = "json";
-		}
-	}
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--since" || args[i] === "-s") {
+      period = args[i + 1] || "7d";
+      i++;
+    } else if (args[i] === "--json") {
+      format = "json";
+    }
+  }
 
-	try {
-		const projectPath = process.cwd();
-		const swarmMail = await getSwarmMailLibSQL(projectPath);
-		const db = await swarmMail.getDatabase();
-		
-		// Calculate since timestamp
-		const since = parseTimePeriod(period);
-		const periodMatch = period.match(/^(\d+)([dhm])$/);
-		const periodDays = periodMatch ? 
-			(periodMatch[2] === "d" ? Number.parseInt(periodMatch[1]) :
-			 periodMatch[2] === "h" ? Number.parseInt(periodMatch[1]) / 24 :
-			 Number.parseInt(periodMatch[1]) / (24 * 60)) : 7;
+  try {
+    const projectPath = process.cwd();
+    const swarmMail = await getSwarmMailLibSQL(projectPath);
+    const db = await swarmMail.getDatabase();
 
-		// Query overall stats
-		const overallResult = await db.query(
-			`SELECT 
+    // Calculate since timestamp
+    const since = parseTimePeriod(period);
+    const periodMatch = period.match(/^(\d+)([dhm])$/);
+    const periodDays = periodMatch ?
+      (periodMatch[2] === "d" ? Number.parseInt(periodMatch[1]) :
+        periodMatch[2] === "h" ? Number.parseInt(periodMatch[1]) / 24 :
+          Number.parseInt(periodMatch[1]) / (24 * 60)) : 7;
+
+    // Query overall stats
+    const overallResult = await db.query(
+      `SELECT 
 				COUNT(DISTINCT json_extract(data, '$.epic_id')) as total_swarms,
 				SUM(CASE WHEN json_extract(data, '$.success') = 'true' THEN 1 ELSE 0 END) as successes,
 				COUNT(*) as total_outcomes,
@@ -3975,127 +3975,127 @@ async function stats() {
 			FROM events
 			WHERE type = 'subtask_outcome'
 				AND timestamp >= ?`,
-			[since],
-		);
+      [since],
+    );
 
-		const overall = overallResult.rows[0] as {
-			total_swarms: number;
-			successes: number;
-			total_outcomes: number;
-			avg_duration_min: number;
-		} || { total_swarms: 0, successes: 0, total_outcomes: 0, avg_duration_min: 0 };
+    const overall = overallResult.rows[0] as {
+      total_swarms: number;
+      successes: number;
+      total_outcomes: number;
+      avg_duration_min: number;
+    } || { total_swarms: 0, successes: 0, total_outcomes: 0, avg_duration_min: 0 };
 
-		// Query strategy breakdown
-		const strategyResult = await db.query(
-			`SELECT 
+    // Query strategy breakdown
+    const strategyResult = await db.query(
+      `SELECT 
 				json_extract(data, '$.strategy') as strategy,
 				json_extract(data, '$.success') as success
 			FROM events
 			WHERE type = 'subtask_outcome'
 				AND timestamp >= ?`,
-			[since],
-		);
+      [since],
+    );
 
-		const strategies = aggregateByStrategy(
-			(strategyResult.rows as Array<{ strategy: string | null; success: string }>).map(
-				(row) => ({
-					strategy: row.strategy,
-					success: row.success === "true",
-				}),
-			),
-		);
+    const strategies = aggregateByStrategy(
+      (strategyResult.rows as Array<{ strategy: string | null; success: string }>).map(
+        (row) => ({
+          strategy: row.strategy,
+          success: row.success === "true",
+        }),
+      ),
+    );
 
-		// Query coordinator stats from sessions
-		const sessionsPath = join(
-			homedir(),
-			".config",
-			"swarm-tools",
-			"sessions",
-		);
-		let coordinatorStats = {
-			violationRate: 0,
-			spawnEfficiency: 0,
-			reviewThoroughness: 0,
-		};
+    // Query coordinator stats from sessions
+    const sessionsPath = join(
+      homedir(),
+      ".config",
+      "swarm-tools",
+      "sessions",
+    );
+    let coordinatorStats = {
+      violationRate: 0,
+      spawnEfficiency: 0,
+      reviewThoroughness: 0,
+    };
 
-		if (existsSync(sessionsPath)) {
-			const sessionFiles = readdirSync(sessionsPath).filter(
-				(f) => f.endsWith(".jsonl") && statSync(join(sessionsPath, f)).mtimeMs >= since,
-			);
+    if (existsSync(sessionsPath)) {
+      const sessionFiles = readdirSync(sessionsPath).filter(
+        (f) => f.endsWith(".jsonl") && statSync(join(sessionsPath, f)).mtimeMs >= since,
+      );
 
-			let totalViolations = 0;
-			let totalSpawns = 0;
-			let totalReviews = 0;
-			let totalSwarms = 0;
+      let totalViolations = 0;
+      let totalSpawns = 0;
+      let totalReviews = 0;
+      let totalSwarms = 0;
 
-			for (const file of sessionFiles) {
-				try {
-					const content = readFileSync(join(sessionsPath, file), "utf-8");
-					const lines = content.trim().split("\n");
+      for (const file of sessionFiles) {
+        try {
+          const content = readFileSync(join(sessionsPath, file), "utf-8");
+          const lines = content.trim().split("\n");
 
-					let violations = 0;
-					let spawns = 0;
-					let reviews = 0;
+          let violations = 0;
+          let spawns = 0;
+          let reviews = 0;
 
-					for (const line of lines) {
-						try {
-							const event = JSON.parse(line);
-							if (event.type === "VIOLATION") violations++;
-							if (event.type === "DECISION" && event.action === "spawn") spawns++;
-							if (event.type === "DECISION" && event.action === "review") reviews++;
-						} catch {
-							// Skip invalid lines
-						}
-					}
+          for (const line of lines) {
+            try {
+              const event = JSON.parse(line);
+              if (event.type === "VIOLATION") violations++;
+              if (event.type === "DECISION" && event.action === "spawn") spawns++;
+              if (event.type === "DECISION" && event.action === "review") reviews++;
+            } catch {
+              // Skip invalid lines
+            }
+          }
 
-					if (spawns > 0 || violations > 0) {
-						totalViolations += violations;
-						totalSpawns += spawns;
-						totalReviews += reviews;
-						totalSwarms++;
-					}
-				} catch {
-					// Skip unreadable files
-				}
-			}
+          if (spawns > 0 || violations > 0) {
+            totalViolations += violations;
+            totalSpawns += spawns;
+            totalReviews += reviews;
+            totalSwarms++;
+          }
+        } catch {
+          // Skip unreadable files
+        }
+      }
 
-			coordinatorStats = {
-				violationRate: totalSwarms > 0 ? (totalViolations / totalSwarms) * 100 : 0,
-				spawnEfficiency: totalSwarms > 0 ? (totalSpawns / totalSwarms) * 100 : 0,
-				reviewThoroughness: totalSpawns > 0 ? (totalReviews / totalSpawns) * 100 : 0,
-			};
-		}
+      coordinatorStats = {
+        violationRate: totalSwarms > 0 ? (totalViolations / totalSwarms) * 100 : 0,
+        spawnEfficiency: totalSwarms > 0 ? (totalSpawns / totalSwarms) * 100 : 0,
+        reviewThoroughness: totalSpawns > 0 ? (totalReviews / totalSpawns) * 100 : 0,
+      };
+    }
 
-		// Build stats data
-		const stats = {
-			overall: {
-				totalSwarms: overall.total_swarms,
-				successRate:
-					overall.total_outcomes > 0
-						? (overall.successes / overall.total_outcomes) * 100
-						: 0,
-				avgDurationMin: overall.avg_duration_min || 0,
-			},
-			byStrategy: strategies,
-			coordinator: coordinatorStats,
-			recentDays: Math.round(periodDays * 10) / 10,
-		};
+    // Build stats data
+    const stats = {
+      overall: {
+        totalSwarms: overall.total_swarms,
+        successRate:
+          overall.total_outcomes > 0
+            ? (overall.successes / overall.total_outcomes) * 100
+            : 0,
+        avgDurationMin: overall.avg_duration_min || 0,
+      },
+      byStrategy: strategies,
+      coordinator: coordinatorStats,
+      recentDays: Math.round(periodDays * 10) / 10,
+    };
 
-		// Output
-		if (format === "json") {
-			console.log(JSON.stringify(stats, null, 2));
-		} else {
-			console.log();
-			console.log(formatSwarmStats(stats));
-			console.log();
-		}
+    // Output
+    if (format === "json") {
+      console.log(JSON.stringify(stats, null, 2));
+    } else {
+      console.log();
+      console.log(formatSwarmStats(stats));
+      console.log();
+    }
 
-		p.outro("Stats ready!");
-	} catch (error) {
-		p.log.error(error instanceof Error ? error.message : String(error));
-		p.outro("Failed to load stats");
-		process.exit(1);
-	}
+    p.outro("Stats ready!");
+  } catch (error) {
+    p.log.error(error instanceof Error ? error.message : String(error));
+    p.outro("Failed to load stats");
+    process.exit(1);
+  }
 }
 
 // ============================================================================
@@ -4103,83 +4103,83 @@ async function stats() {
 // ============================================================================
 
 async function swarmHistory() {
-	const {
-		querySwarmHistory,
-		formatSwarmHistory,
-	} = await import("../src/observability-tools.js");
+  const {
+    querySwarmHistory,
+    formatSwarmHistory,
+  } = await import("../src/observability-tools.js");
 
-	p.intro("swarm history");
+  p.intro("swarm history");
 
-	// Parse args
-	const args = process.argv.slice(3);
-	let limit = 10;
-	let status: "success" | "failed" | "in_progress" | undefined;
-	let strategy: "file-based" | "feature-based" | "risk-based" | undefined;
-	let verbose = false;
+  // Parse args
+  const args = process.argv.slice(3);
+  let limit = 10;
+  let status: "success" | "failed" | "in_progress" | undefined;
+  let strategy: "file-based" | "feature-based" | "risk-based" | undefined;
+  let verbose = false;
 
-	for (let i = 0; i < args.length; i++) {
-		const arg = args[i];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
 
-		if (arg === "--limit" || arg === "-n") {
-			const limitStr = args[i + 1];
-			if (limitStr && !Number.isNaN(Number(limitStr))) {
-				limit = Number(limitStr);
-				i++;
-			}
-		} else if (arg === "--status") {
-			const statusStr = args[i + 1];
-			if (
-				statusStr &&
-				["success", "failed", "in_progress"].includes(statusStr)
-			) {
-				status = statusStr as "success" | "failed" | "in_progress";
-				i++;
-			}
-		} else if (arg === "--strategy") {
-			const strategyStr = args[i + 1];
-			if (
-				strategyStr &&
-				["file-based", "feature-based", "risk-based"].includes(strategyStr)
-			) {
-				strategy = strategyStr as "file-based" | "feature-based" | "risk-based";
-				i++;
-			}
-		} else if (arg === "--verbose" || arg === "-v") {
-			verbose = true;
-		}
-	}
+    if (arg === "--limit" || arg === "-n") {
+      const limitStr = args[i + 1];
+      if (limitStr && !Number.isNaN(Number(limitStr))) {
+        limit = Number(limitStr);
+        i++;
+      }
+    } else if (arg === "--status") {
+      const statusStr = args[i + 1];
+      if (
+        statusStr &&
+        ["success", "failed", "in_progress"].includes(statusStr)
+      ) {
+        status = statusStr as "success" | "failed" | "in_progress";
+        i++;
+      }
+    } else if (arg === "--strategy") {
+      const strategyStr = args[i + 1];
+      if (
+        strategyStr &&
+        ["file-based", "feature-based", "risk-based"].includes(strategyStr)
+      ) {
+        strategy = strategyStr as "file-based" | "feature-based" | "risk-based";
+        i++;
+      }
+    } else if (arg === "--verbose" || arg === "-v") {
+      verbose = true;
+    }
+  }
 
-	try {
-		const projectPath = process.cwd();
-		const records = await querySwarmHistory(projectPath, {
-			limit,
-			status,
-			strategy,
-		});
+  try {
+    const projectPath = process.cwd();
+    const records = await querySwarmHistory(projectPath, {
+      limit,
+      status,
+      strategy,
+    });
 
-		console.log();
-		console.log(formatSwarmHistory(records));
-		console.log();
+    console.log();
+    console.log(formatSwarmHistory(records));
+    console.log();
 
-		if (verbose && records.length > 0) {
-			console.log("Details:");
-			for (const record of records) {
-				console.log(
-					`  ${record.epic_id}: ${record.epic_title} (${record.strategy})`,
-				);
-				console.log(
-					`    Tasks: ${record.completed_count}/${record.task_count}, Success: ${record.overall_success ? "✅" : "❌"}`,
-				);
-			}
-			console.log();
-		}
+    if (verbose && records.length > 0) {
+      console.log("Details:");
+      for (const record of records) {
+        console.log(
+          `  ${record.epic_id}: ${record.epic_title} (${record.strategy})`,
+        );
+        console.log(
+          `    Tasks: ${record.completed_count}/${record.task_count}, Success: ${record.overall_success ? "✅" : "❌"}`,
+        );
+      }
+      console.log();
+    }
 
-		p.outro("History ready!");
-	} catch (error) {
-		p.log.error(error instanceof Error ? error.message : String(error));
-		p.outro("Failed to load history");
-		process.exit(1);
-	}
+    p.outro("History ready!");
+  } catch (error) {
+    p.log.error(error instanceof Error ? error.message : String(error));
+    p.outro("Failed to load history");
+    process.exit(1);
+  }
 }
 
 // ============================================================================
@@ -4218,7 +4218,7 @@ async function evalCommand() {
 
 async function evalHelp() {
   p.intro("swarm eval");
-  
+
   console.log();
   console.log("Eval-Driven Development with Progressive Gates");
   console.log();
@@ -4227,108 +4227,108 @@ async function evalHelp() {
   console.log("  swarm eval history  - Show eval run history with trends");
   console.log("  swarm eval run      - Execute evals and report results (stub)");
   console.log();
-  
+
   p.outro("Run 'swarm eval <command>' for details");
 }
 
 async function evalStatus() {
   const { getPhase, getScoreHistory } = await import("../src/eval-history.js");
   const { DEFAULT_THRESHOLDS } = await import("../src/eval-gates.js");
-  
+
   p.intro("swarm eval status");
-  
+
   const projectPath = process.cwd();
   const evalName = process.argv[4] || "swarm-decomposition"; // Default eval
-  
+
   const phase = getPhase(projectPath, evalName);
   const history = getScoreHistory(projectPath, evalName);
   const recentScores = history.slice(-5).map((run) => ({
     timestamp: run.timestamp,
     score: run.score,
   }));
-  
+
   formatEvalStatusOutput({
     phase,
     runCount: history.length,
     thresholds: DEFAULT_THRESHOLDS,
     recentScores,
   });
-  
+
   console.log();
   p.outro(`Eval: ${evalName}`);
 }
 
 async function evalHistory() {
   const { getEvalHistoryPath } = await import("../src/eval-history.js");
-  
+
   p.intro("swarm eval history");
-  
+
   const projectPath = process.cwd();
   const historyPath = getEvalHistoryPath(projectPath);
-  
+
   if (!existsSync(historyPath)) {
     p.log.warn("No eval history found");
     p.log.message(dim(`Expected: ${historyPath}`));
     p.outro("Run evals to generate history");
     return;
   }
-  
+
   // Read all history
   const content = readFileSync(historyPath, "utf-8");
   const lines = content.trim().split("\n").filter(Boolean);
   const history = lines.map((line) => JSON.parse(line));
-  
+
   formatEvalHistoryOutput(history);
-  
+
   p.outro(`History file: ${historyPath}`);
 }
 
 async function evalRun() {
   const ciMode = process.argv.includes("--ci");
   const projectPath = process.cwd();
-  
+
   if (!ciMode) {
     p.intro("swarm eval run");
   }
-  
+
   // Import gate checking
   const { checkGate } = await import("../src/eval-gates.js");
   const { recordEvalRun, getScoreHistory } = await import("../src/eval-history.js");
-  
+
   // Run evalite for each eval
   const evalFiles = [
     "compaction-prompt",
-    "coordinator-behavior", 
+    "coordinator-behavior",
     "coordinator-session",
     "swarm-decomposition",
   ];
-  
+
   const results: Record<string, any> = {};
   let anyFailure = false;
-  
+
   for (const evalName of evalFiles) {
     if (!ciMode) {
       p.log.step(`Running ${evalName}...`);
     } else {
       console.log(`Running ${evalName}...`);
     }
-    
+
     try {
       // Run evalite (simplified - in real implementation would parse actual results)
       // For now, use a placeholder score - the real implementation would integrate with evalite
       const evalPath = `evals/${evalName}.eval.ts`;
-      
+
       // This is a stub - real implementation would:
       // 1. Run evalite and capture results
       // 2. Parse the score from evalite output
       // 3. Use that score for gate checking
-      
+
       // For CI mode, we'll assume passing scores for now
       const mockScore = 0.85; // Placeholder
-      
+
       // Check gate
       const gateResult = checkGate(projectPath, evalName, mockScore);
-      
+
       // Record to history
       const history = getScoreHistory(projectPath, evalName);
       recordEvalRun(projectPath, {
@@ -4337,14 +4337,14 @@ async function evalRun() {
         score: mockScore,
         run_count: history.length + 1,
       });
-      
+
       // Store result
       results[evalName] = gateResult;
-      
+
       if (!gateResult.passed) {
         anyFailure = true;
       }
-      
+
       // Format output
       if (!ciMode) {
         formatEvalRunResultOutput(gateResult);
@@ -4362,26 +4362,26 @@ async function evalRun() {
       anyFailure = true;
     }
   }
-  
+
   // In CI mode, write results to file for PR comment
   if (ciMode) {
     const resultsPath = join(projectPath, ".hive", "eval-results.json");
     ensureHiveDirectory(projectPath);
     writeFileSync(resultsPath, JSON.stringify(results, null, 2));
     console.log(`\nResults written to ${resultsPath}`);
-    
+
     // Exit with error code if any production-phase eval failed
     if (anyFailure) {
       const productionFailures = Object.entries(results).filter(
         ([_, result]) => !result.passed && result.phase === "production"
       );
-      
+
       if (productionFailures.length > 0) {
         console.error(`\n❌ ${productionFailures.length} production-phase eval(s) failed`);
         process.exit(1);
       }
     }
-    
+
     console.log("\n✅ All evals passed or in pre-production phase");
   } else {
     console.log();
@@ -4398,7 +4398,7 @@ async function serve() {
 
   // Parse --port flag (default 4483 - HIVE on phone keypad)
   const portFlagIndex = process.argv.indexOf("--port");
-  const port = portFlagIndex !== -1 
+  const port = portFlagIndex !== -1
     ? Number.parseInt(process.argv[portFlagIndex + 1]) || 4483
     : 4483;
 
@@ -4415,14 +4415,14 @@ async function serve() {
 
     // Get swarm-mail adapter
     const swarmMail = await getSwarmMailLibSQL(projectPath);
-    
+
     // Create stream adapter
     const streamAdapter = createDurableStreamAdapter(swarmMail, projectPath);
-    
+
     // Create hive adapter for cells endpoint
     const db = await swarmMail.getDatabase(projectPath);
     const hiveAdapter = createHiveAdapter(db, projectPath);
-    
+
     // Create and start server
     const server = createDurableStreamServer({
       adapter: streamAdapter,
@@ -4442,7 +4442,7 @@ async function serve() {
     p.log.message(dim("  Press Ctrl+C to stop"));
 
     // Keep process alive
-    await new Promise(() => {});
+    await new Promise(() => { });
   } catch (error) {
     p.log.error("Failed to start server");
     p.log.message(error instanceof Error ? error.message : String(error));
@@ -4460,7 +4460,7 @@ async function viz() {
 
   // Parse --port flag (default 4483 - HIVE on phone keypad)
   const portFlagIndex = process.argv.indexOf("--port");
-  const port = portFlagIndex !== -1 
+  const port = portFlagIndex !== -1
     ? Number.parseInt(process.argv[portFlagIndex + 1]) || 4483
     : 4483;
 
@@ -4477,14 +4477,14 @@ async function viz() {
 
     // Get swarm-mail adapter
     const swarmMail = await getSwarmMailLibSQL(projectPath);
-    
+
     // Create stream adapter
     const streamAdapter = createDurableStreamAdapter(swarmMail, projectPath);
-    
+
     // Create hive adapter for cells endpoint
     const db = await swarmMail.getDatabase(projectPath);
     const hiveAdapter = createHiveAdapter(db, projectPath);
-    
+
     // Create and start server
     const server = createDurableStreamServer({
       adapter: streamAdapter,
@@ -4504,7 +4504,7 @@ async function viz() {
     p.log.message(dim("  Press Ctrl+C to stop"));
 
     // Keep process alive
-    await new Promise(() => {});
+    await new Promise(() => { });
   } catch (error) {
     p.log.error("Failed to start dashboard server");
     p.log.message(error instanceof Error ? error.message : String(error));

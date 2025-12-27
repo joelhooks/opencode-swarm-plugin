@@ -574,7 +574,7 @@ describe("deprecation warnings", () => {
     await listSkills();
     
     // Verify warning was emitted (for listSkills internal function)
-    // The actual tool warning happens in skills_list tool execute
+    // Discovery is now native via .opencode/skill/
     warnSpy.mockRestore();
   });
 

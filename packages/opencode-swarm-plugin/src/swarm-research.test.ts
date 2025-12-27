@@ -40,7 +40,7 @@ describe("discoverDocTools", () => {
     const tools = await discoverDocTools();
     const skillTools = tools.filter((t) => t.type === "skill");
 
-    // Skills should be discoverable via skills_list
+    // Skills should be discoverable via native discovery
     expect(skillTools.length).toBeGreaterThanOrEqual(0);
   });
 

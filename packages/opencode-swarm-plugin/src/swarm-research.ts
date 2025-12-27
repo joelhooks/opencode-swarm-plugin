@@ -2,7 +2,7 @@
  * Swarm Research Module - Tool discovery for documentation researchers
  *
  * Provides runtime detection of available documentation tools:
- * - Skills (via skills_list)
+ * - Skills (via native discovery)
  * - MCP servers (next-devtools, context7, fetch, pdf-brain)
  * - CLI tools (semantic-memory via ollama)
  *
