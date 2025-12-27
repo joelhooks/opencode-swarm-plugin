@@ -326,7 +326,7 @@ semantic-memory_find(query="<keywords from your task>", limit=5, expand=true)
 
 ### Step 3: Load Relevant Skills (if available)
 
-Skills are auto-discovered from `.opencode/skill/` and activated with native syntax:
+Skills are auto-discovered from \`.opencode/skill/\` and activated with native syntax:
 \`\`\`
 use skill <skill-name>
 \`\`\`

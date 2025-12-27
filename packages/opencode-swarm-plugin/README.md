@@ -310,21 +310,6 @@ Auto-saves progress at milestones. Survives context death or crashes. Data store
 
 ### Skills (Knowledge Injection)
 
-**Legacy plugin tools** (`skills_list`, `skills_use`, `skills_read`, `skills_execute`) are **deprecated** but still functional. They emit console warnings encouraging migration to native syntax: `use skill <name>`.
-
-| Tool            | Purpose                                 |
-| --------------- | ---------------------------------------- |
-| `skills_list`   | [DEPRECATED] List available skills   |
-| `skills_use`    | [DEPRECATED] Load skill into context |
-| `skills_read`   | [DEPRECATED] Read skill content      |
-| `skills_create` | Create new skill (still functional)        |
-| `skills_update` | Update skill (still functional)           |
-| `skills_delete` | Delete skill (still functional)           |
-| `skills_init`   | Create skill templates (still functional) |
-| `skills_add_script` | Add helper script (still functional) |
-
-**Native skills (recommended):**
-
 Skills are defined in **OpenCode native format** (`.opencode/skill/` singular) with frontmatter metadata (`name`, `description`). Auto-discovered by OpenCode - no plugin tools needed.
 
 **Usage:**
@@ -350,7 +335,7 @@ mkdir -p .opencode/skill/my-skill
 # Create SKILL.md with frontmatter
 # OpenCode auto-discovers it
 
-# Or use authoring tools (still functional)
+# Or use authoring tools
 swarm init  # Creates .opencode/skill/ with templates
 ```
 

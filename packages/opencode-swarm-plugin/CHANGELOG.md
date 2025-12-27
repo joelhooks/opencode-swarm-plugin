@@ -1,5 +1,35 @@
 # opencode-swarm-plugin
 
+## 0.46.0
+
+### Breaking Changes
+
+- **Removed all deprecated skills discovery tools.** `skills_list`, `skills_use`, `skills_read`, and `skills_execute` have been removed entirely.
+- Use native OpenCode syntax: `use skill <name>` for skill discovery and loading.
+- Authoring tools remain functional: `skills_create`, `skills_update`, `skills_delete`, `skills_init`, `skills_add_script`.
+
+> _"Any sufficiently advanced technology is indistinguishable from magic."_
+> — Arthur C. Clarke
+
+**What changed:**
+
+- **Discovery tools removed:** All deprecated skills discovery tools are now gone
+- **Native-only syntax:** Skills auto-discovered by OpenCode from `.opencode/skill/` (singular)
+- **Authoring tools kept:** Skill creation and management tools still work
+- **Documentation cleaned:** All references to deprecated tools removed
+
+**Why it matters:**
+
+- **Clean separation:** OpenCode handles discovery, plugin handles authoring
+- **No confusion:** Single canonical path (`use skill <name>`)
+- **Future-proof:** Aligns with OpenCode's Agent Skills specification
+
+**Migration notes:**
+
+- Replace `skills_use(name="xyz")` with `use skill xyz`
+- Replace `skills_list()` with direct directory inspection
+- Authoring tools (`skills_create`, `skills_update`) continue to work as before
+
 ## 0.45.0
 
 ### Patch Changes

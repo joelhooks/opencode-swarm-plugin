@@ -7,7 +7,7 @@
  *
  * Examples:
  *   bun scripts/init-skill.ts my-skill
- *   bun scripts/init-skill.ts my-skill --path .claude/skills
+ *   bun scripts/init-skill.ts my-skill --path .opencode/skill
  *   bun scripts/init-skill.ts my-skill --global
  */
 
@@ -59,10 +59,13 @@ tags:
 This skill may include additional resources:
 
 ### scripts/
-Executable scripts for automation. Run with \`skills_execute\`.
+Executable scripts for automation. Scripts can be called from within skill context.
 
 ### references/
-Documentation loaded on-demand. Access with \`skills_read\`.
+Documentation loaded on-demand. Access via file reading within skill context.
+
+### assets/
+Files used in output generation (templates, images, boilerplate).
 
 ---
 *Delete any unused sections and this line when skill is complete.*
@@ -174,7 +177,7 @@ async function initSkill(
     console.log("  2. Update the description in frontmatter");
     console.log("  3. Add specific 'When to Use' scenarios");
     console.log("  4. Delete unused sections and placeholder files");
-    console.log("  5. Test with skills_use to verify it works");
+    console.log("  5. Test with 'use skill <name>' to verify it works");
   } catch (error) {
     console.error(
       `❌ Error: ${error instanceof Error ? error.message : String(error)}`
@@ -187,7 +190,7 @@ async function initSkill(
 const { values, positionals } = parseArgs({
   args: process.argv.slice(2),
   options: {
-    path: { type: "string", default: ".opencode/skills" },
+    path: { type: "string", default: ".opencode/skill" },
     global: { type: "boolean", default: false },
     help: { type: "boolean", short: "h", default: false },
   },
@@ -202,13 +205,13 @@ Usage:
   bun scripts/init-skill.ts <skill-name> [options]
 
 Options:
-  --path <path>   Directory to create skill in (default: .opencode/skills)
+  --path <path>   Directory to create skill in (default: .opencode/skill)
   --global        Create in global ~/.config/opencode/skills directory
   -h, --help      Show this help message
 
 Examples:
   bun scripts/init-skill.ts my-skill
-  bun scripts/init-skill.ts my-skill --path .claude/skills
+  bun scripts/init-skill.ts my-skill --path .opencode/skill
   bun scripts/init-skill.ts my-skill --global
 
 Skill name requirements:

@@ -6,7 +6,7 @@
  *   bun scripts/validate-skill.ts <path/to/skill>
  *
  * Examples:
- *   bun scripts/validate-skill.ts .opencode/skills/my-skill
+ *   bun scripts/validate-skill.ts .opencode/skill/my-skill
  *   bun scripts/validate-skill.ts global-skills/debugging
  */
 
@@ -139,7 +139,7 @@ async function validateSkill(skillPath: string): Promise<ValidationResult> {
   for (const file of unwantedFiles) {
     if (existsSync(join(skillPath, file))) {
       result.warnings.push(
-        `Found ${file} - skills should only contain SKILL.md and resources`,
+        `Found ${file} - skills should only contain SKILL.md and resources (scripts/, references/, assets/)`,
       );
     }
   }
@@ -158,7 +158,7 @@ Usage:
   bun scripts/validate-skill.ts <path/to/skill>
 
 Examples:
-  bun scripts/validate-skill.ts .opencode/skills/my-skill
+  bun scripts/validate-skill.ts .opencode/skill/my-skill
   bun scripts/validate-skill.ts global-skills/debugging
 `);
   process.exit(1);

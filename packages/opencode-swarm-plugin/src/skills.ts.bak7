@@ -5,8 +5,10 @@
  * Skills are markdown files with YAML frontmatter that provide
  * domain-specific instructions the model can activate when relevant.
  *
- * Discovery location:
- * 1. {projectDir}/.opencode/skill/ (OpenCode native skills)
+ * Discovery locations (in priority order):
+ * 1. {projectDir}/.opencode/skill/ (native OpenCode skills)
+ * 2. {projectDir}/.claude/skills/ (compatibility)
+ * 3. {projectDir}/skills/ (simple projects)
  *
  * Skill format:
  * ```markdown
@@ -180,11 +182,44 @@ function validateSkillMetadata(
 // =============================================================================
 
 /**
- * Skill discovery locations relative to project root
- *
- * OpenCode native skills only - discovered from .opencode/skill/
+ * Skill discovery locations relative to project root (checked first)
  */
-const PROJECT_SKILL_DIRECTORIES = [".opencode/skill"] as const;
+const PROJECT_SKILL_DIRECTORIES = [
+  ".opencode/skill",
+  ".claude/skills",
+  "skills",
+] as const;
+
+/**
+ * Global skills directory (user-level, checked after project)
+ */
+function getGlobalSkillsDir(): string {
+  const home = process.env.HOME || process.env.USERPROFILE || "~";
+  return join(home, ".config", "opencode", "skill");
+}
+
+/**
+ * Claude Code global skills directory (compatibility)
+ */
+function getClaudeGlobalSkillsDir(): string {
+  const home = process.env.HOME || process.env.USERPROFILE || "~";
+  return join(home, ".claude", "skills");
+}
+
+/**
+ * Bundled skills from the package (lowest priority)
+ */
+function getPackageSkillsDir(): string {
+  // Resolve relative to this file (handles URL-encoding like spaces)
+  try {
+    const currentFilePath = fileURLToPath(import.meta.url);
+    return join(dirname(currentFilePath), "..", "global-skills");
+  } catch {
+    // Fallback for non-file URLs (best-effort)
+    const currentDir = decodeURIComponent(new URL(".", import.meta.url).pathname);
+    return join(currentDir, "..", "global-skills");
+  }
+}
 
 /**
  * Find all SKILL.md files in a directory
@@ -257,9 +292,14 @@ async function loadSkill(skillPath: string): Promise<Skill> {
 }
 
 /**
- * Discover all skills in project directory
+ * Discover all skills in project and global directories
  *
- * OpenCode native skills only - discovered from .opencode/skill/
+ * Priority order (first match wins):
+ * 1. Project: .opencode/skill/ (native OpenCode skills)
+ * 2. Project: .claude/skills/ (compatibility)
+ * 3. Project: skills/
+ * 4. Global: ~/.config/opencode/skill/
+ * 5. Global: ~/.claude/skills/
  */
 export async function discoverSkills(
   projectDir?: string,
@@ -272,16 +312,23 @@ export async function discoverSkills(
   }
 
   const skills = new Map<string, Skill>();
+  const seenNames = new Set<string>();
 
-  // 1. Check project skill directory
-  for (const relPath of PROJECT_SKILL_DIRECTORIES) {
-    const skillsDir = join(dir, relPath);
+  /**
+   * Helper to load skills from a directory
+   */
+  async function loadSkillsFromDir(skillsDir: string): Promise<void> {
     const skillFiles = await findSkillFiles(skillsDir);
 
     for (const skillPath of skillFiles) {
       try {
         const skill = await loadSkill(skillPath);
-        skills.set(skill.metadata.name, skill);
+
+        // First definition wins (project overrides global)
+        if (!seenNames.has(skill.metadata.name)) {
+          skills.set(skill.metadata.name, skill);
+          seenNames.add(skill.metadata.name);
+        }
       } catch (error) {
         // Log but don't fail on individual skill parse errors
         console.warn(
@@ -290,6 +337,20 @@ export async function discoverSkills(
       }
     }
   }
+
+  // 1. Check project skill directories first (highest priority)
+  for (const relPath of PROJECT_SKILL_DIRECTORIES) {
+    await loadSkillsFromDir(join(dir, relPath));
+  }
+
+  // 2. Check global OpenCode skills directory
+  await loadSkillsFromDir(getGlobalSkillsDir());
+
+  // 3. Check global Claude skills directory (compatibility)
+  await loadSkillsFromDir(getClaudeGlobalSkillsDir());
+
+  // 4. Check bundled package skills (lowest priority)
+  await loadSkillsFromDir(getPackageSkillsDir());
 
   // Cache for future lookups
   if (!projectDir) {
@@ -328,7 +389,246 @@ export function invalidateSkillsCache(): void {
 }
 
 // =============================================================================
-// Skill Creation & Maintenance Tools
+// Tools
+// =============================================================================
+
+/**
+ * List available skills with metadata
+ *
+ * Returns lightweight skill references for the model to evaluate
+ * which skills are relevant to the current task.
+ */
+export const skills_list = tool({
+  description: `[DEPRECATED] List all available skills in the project.
+
+Skills are specialized instructions that help with specific domains or tasks.
+Use this tool to discover what skills are available, then use skills_use to
+activate a relevant skill.
+
+Returns skill names, descriptions, and whether they have executable scripts.`,
+  args: {
+    tag: tool.schema
+      .string()
+      .optional()
+      .describe("Optional tag to filter skills by"),
+  },
+  async execute(args) {
+    console.warn('[DEPRECATED] skills_list is deprecated. OpenCode now provides native skills support. This tool will be removed in a future version.');
+    const skills = await discoverSkills();
+    let refs = Array.from(skills.values());
+
+    // Filter by tag if provided
+    if (args.tag) {
+      refs = refs.filter((s) => s.metadata.tags?.includes(args.tag as string));
+    }
+
+    if (refs.length === 0) {
+      return args.tag
+        ? `No skills found with tag '${args.tag}'. Try without a tag filter.`
+        : `No skills found. Skills should be in .opencode/skill/, .claude/skills/, or skills/ directories with SKILL.md files.`;
+    }
+
+    const formatted = refs
+      .map((s) => {
+        const scripts = s.hasScripts ? " [has scripts]" : "";
+        const tags = s.metadata.tags?.length
+          ? ` (${s.metadata.tags.join(", ")})`
+          : "";
+        return `• ${s.metadata.name}${tags}${scripts}\n  ${s.metadata.description}`;
+      })
+      .join("\n\n");
+
+    return `Found ${refs.length} skill(s):\n\n${formatted}`;
+  },
+});
+
+/**
+ * Load and activate a skill by name
+ *
+ * Loads the full skill content for injection into context.
+ * The skill's instructions become available for the model to follow.
+ */
+export const skills_use = tool({
+  description: `[DEPRECATED] Activate a skill by loading its full instructions.
+
+After calling this tool, follow the skill's instructions for the current task.
+Skills provide domain-specific guidance and best practices.
+
+If the skill has scripts, you can run them with skills_execute.`,
+  args: {
+    name: tool.schema.string().describe("Name of the skill to activate"),
+    include_scripts: tool.schema
+      .boolean()
+      .optional()
+      .describe("Also list available scripts (default: true)"),
+  },
+  async execute(args) {
+    console.warn('[DEPRECATED] skills_use is deprecated. OpenCode now provides native skills support. This tool will be removed in a future version.');
+    const skill = await getSkill(args.name);
+
+    if (!skill) {
+      const available = await listSkills();
+      const names = available.map((s) => s.name).join(", ");
+      return `Skill '${args.name}' not found. Available skills: ${names || "none"}`;
+    }
+
+    const includeScripts = args.include_scripts !== false;
+    let output = `# Skill: ${skill.metadata.name}\n\n`;
+    output += `${skill.body}\n`;
+
+    if (includeScripts && skill.scripts.length > 0) {
+      output += `\n---\n\n## Available Scripts\n\n`;
+      output += `This skill includes the following scripts in ${skill.directory}/scripts/:\n\n`;
+      output += skill.scripts.map((s) => `• ${s}`).join("\n");
+    }
+
+    return output;
+  },
+});
+
+/**
+ * Execute a script from a skill
+ *
+ * Skills can include helper scripts in their scripts/ directory.
+ * This tool runs them with appropriate context.
+ */
+export const skills_execute = tool({
+  description: `[DEPRECATED] Execute a script from a skill's scripts/ directory.
+
+Some skills include helper scripts for common operations.
+Use skills_use first to see available scripts, then execute them here.
+
+Scripts run in the skill's directory with the project directory as an argument.`,
+  args: {
+    skill: tool.schema.string().describe("Name of the skill"),
+    script: tool.schema.string().describe("Name of the script file to execute"),
+    args: tool.schema
+      .array(tool.schema.string())
+      .optional()
+      .describe("Additional arguments to pass to the script"),
+  },
+  async execute(args, ctx) {
+    console.warn('[DEPRECATED] skills_execute is deprecated. OpenCode now provides native skills support. This tool will be removed in a future version.');
+    const skill = await getSkill(args.skill);
+
+    if (!skill) {
+      return `Skill '${args.skill}' not found.`;
+    }
+
+    if (!skill.scripts.includes(args.script)) {
+      return `Script '${args.script}' not found in skill '${args.skill}'. Available: ${skill.scripts.join(", ") || "none"}`;
+    }
+
+    const scriptPath = join(skill.directory, "scripts", args.script);
+    const scriptArgs = args.args || [];
+
+    try {
+      // Execute script using Bun.spawn with timeout
+      const TIMEOUT_MS = 60_000; // 60 second timeout
+      const proc = Bun.spawn(
+        [scriptPath, skillsProjectDirectory, ...scriptArgs],
+        {
+          cwd: skill.directory,
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
+
+      // Race between script completion and timeout
+      const timeoutPromise = new Promise<{ timedOut: true }>((resolve) => {
+        setTimeout(() => resolve({ timedOut: true }), TIMEOUT_MS);
+      });
+
+      const resultPromise = (async () => {
+        const [stdout, stderr] = await Promise.all([
+          new Response(proc.stdout).text(),
+          new Response(proc.stderr).text(),
+        ]);
+        const exitCode = await proc.exited;
+        return { timedOut: false as const, stdout, stderr, exitCode };
+      })();
+
+      const result = await Promise.race([resultPromise, timeoutPromise]);
+
+      if (result.timedOut) {
+        proc.kill();
+        return `Script timed out after ${TIMEOUT_MS / 1000} seconds.`;
+      }
+
+      const output = result.stdout + result.stderr;
+      if (result.exitCode === 0) {
+        return output || "Script executed successfully.";
+      } else {
+        return `Script exited with code ${result.exitCode}:\n${output}`;
+      }
+    } catch (error) {
+      return `Failed to execute script: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  },
+});
+
+/**
+ * Read a resource file from a skill directory
+ *
+ * Skills can include additional resources like examples, templates, or reference docs.
+ */
+export const skills_read = tool({
+  description: `[DEPRECATED] Read a resource file from a skill's directory.
+
+Skills may include additional files like:
+- examples.md - Example usage
+- reference.md - Reference documentation
+- templates/ - Template files
+
+Use this to access supplementary skill resources.`,
+  args: {
+    skill: tool.schema.string().describe("Name of the skill"),
+    file: tool.schema
+      .string()
+      .describe("Relative path to the file within the skill directory"),
+  },
+  async execute(args) {
+    console.warn('[DEPRECATED] skills_read is deprecated. OpenCode now provides native skills support. This tool will be removed in a future version.');
+    const skill = await getSkill(args.skill);
+
+    if (!skill) {
+      return `Skill '${args.skill}' not found.`;
+    }
+
+    // Security: prevent path traversal (cross-platform)
+    // Block absolute paths (Unix / and Windows C:\ or \\)
+    if (isAbsolute(args.file)) {
+      return "Invalid file path. Use a relative path.";
+    }
+
+    // Block path traversal attempts
+    if (args.file.includes("..")) {
+      return "Invalid file path. Path traversal not allowed.";
+    }
+
+    const filePath = resolve(skill.directory, args.file);
+    const relativePath = relative(skill.directory, filePath);
+
+    // Verify resolved path stays within skill directory
+    // Check for ".." at start or after separator (handles both Unix and Windows)
+    if (
+      relativePath === ".." ||
+      relativePath.startsWith(".." + sep) ||
+      relativePath.startsWith(".." + "/") ||
+      relativePath.startsWith(".." + "\\")
+    ) {
+      return "Invalid file path. Must stay within the skill directory.";
+    }
+
+    try {
+      const content = await readFile(filePath, "utf-8");
+      return content;
+    } catch (error) {
+      return `Failed to read '${args.file}' from skill '${args.skill}': ${error instanceof Error ? error.message : String(error)}`;
+    }
+  },
+});
+
 // =============================================================================
 // Skill Creation & Maintenance Tools
 // =============================================================================
@@ -601,9 +901,17 @@ Good skills have:
       .optional()
       .describe("Tools this skill commonly uses"),
     directory: tool.schema
-      .enum([".opencode/skill"])
+      .enum([
+        ".opencode/skill",
+        ".claude/skills",
+        "skills",
+        "global",
+        "global-claude",
+      ])
       .optional()
-      .describe("Where to create skill (default: .opencode/skill)"),
+      .describe(
+        "Where to create skill (default: .opencode/skill). Use 'global' for ~/.config/opencode/skill/, 'global-claude' for ~/.claude/skills/",
+      ),
   },
   async execute(args) {
     // Check if skill already exists
@@ -616,8 +924,15 @@ Good skills have:
     const csoWarnings = validateCSOCompliance(args.name, args.description);
 
     // Determine target directory
-    const baseDir = args.directory || DEFAULT_SKILLS_DIR;
-    const skillDir = join(skillsProjectDirectory, baseDir, args.name);
+    let skillDir: string;
+    if (args.directory === "global") {
+      skillDir = join(getGlobalSkillsDir(), args.name);
+    } else if (args.directory === "global-claude") {
+      skillDir = join(getClaudeGlobalSkillsDir(), args.name);
+    } else {
+      const baseDir = args.directory || DEFAULT_SKILLS_DIR;
+      skillDir = join(skillsProjectDirectory, baseDir, args.name);
+    }
     const skillPath = join(skillDir, "SKILL.md");
 
     try {
@@ -642,8 +957,9 @@ Good skills have:
         success: true,
         skill: args.name,
         path: skillPath,
-        message: `Created skill '${args.name}'. It's now discoverable via OpenCode native skills.`,
+        message: `Created skill '${args.name}'. It's now discoverable via skills_list.`,
         next_steps: [
+          "Test with skills_use to verify instructions are clear",
           "Add examples.md or reference.md for supplementary content",
           "Add scripts/ directory for executable helpers",
         ],
@@ -888,6 +1204,7 @@ executed with skills_execute. Use for:
           path: scriptPath,
           executable: args.executable,
           message: `Added script '${args.script_name}' to skill '${args.skill}'.`,
+          usage: `Run with: skills_execute(skill: "${args.skill}", script: "${args.script_name}")`,
         },
         null,
         2,
@@ -954,10 +1271,10 @@ tags:
 This skill may include additional resources:
 
 ### scripts/
-Executable scripts for automation. These can be run from skill directory.
+Executable scripts for automation. Run with \`skills_execute\`.
 
 ### references/
-Documentation for additional context and details.
+Documentation loaded on-demand. Access with \`skills_read\`.
 
 ---
 *Delete any unused sections and this line when skill is complete.*
@@ -1020,7 +1337,7 @@ Perfect for learning to create effective skills.`,
       .optional()
       .describe("Initial description (can be a TODO placeholder)"),
     directory: tool.schema
-      .enum([".opencode/skill"])
+      .enum([".opencode/skill", ".claude/skills", "skills", "global"])
       .optional()
       .describe("Where to create (default: .opencode/skill)"),
     include_example_script: tool.schema
@@ -1048,8 +1365,13 @@ Perfect for learning to create effective skills.`,
     }
 
     // Determine target directory
-    const baseDir = args.directory || DEFAULT_SKILLS_DIR;
-    const skillDir = join(skillsProjectDirectory, baseDir, args.name);
+    let skillDir: string;
+    if (args.directory === "global") {
+      skillDir = join(getGlobalSkillsDir(), args.name);
+    } else {
+      const baseDir = args.directory || DEFAULT_SKILLS_DIR;
+      skillDir = join(skillsProjectDirectory, baseDir, args.name);
+    }
 
     const createdFiles: string[] = [];
 
@@ -1072,6 +1394,8 @@ Perfect for learning to create effective skills.`,
 # Example helper script for ${args.name}
 #
 # This is a placeholder. Replace with actual implementation or delete.
+#
+# Usage: skills_execute(skill: "${args.name}", script: "example.sh")
 
 echo "Hello from ${args.name} skill!"
 echo "Project directory: \$1"
@@ -1105,10 +1429,11 @@ echo "Project directory: \$1"
           created_files: createdFiles,
           next_steps: [
             "Edit SKILL.md to complete TODO placeholders",
-            "Update description in frontmatter",
+            "Update the description in frontmatter",
             "Add specific 'When to Use' scenarios",
             "Add actionable instructions",
             "Delete unused sections and placeholder files",
+            "Test with skills_use to verify it works",
           ],
           tips: [
             "Good descriptions explain WHEN to use, not just WHAT it does",
@@ -1142,6 +1467,10 @@ echo "Project directory: \$1"
  * All skills tools for plugin registration
  */
 export const skillsTools = {
+  skills_list,
+  skills_use,
+  skills_execute,
+  skills_read,
   skills_create,
   skills_update,
   skills_delete,
@@ -1174,7 +1503,7 @@ export async function getSkillsContextForSwarm(): Promise<string> {
 ## Available Skills
 
 The following skills are available in this project and can be activated
-with native OpenCode skill syntax when relevant to subtasks:
+with \`skills_use\` when relevant to subtasks:
 
 ${skillsList}
 
