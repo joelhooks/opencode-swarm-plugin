@@ -1,5 +1,165 @@
 # opencode-swarm-plugin
 
+## 0.45.1
+
+### Patch Changes
+
+- [`df219d8`](https://github.com/joelhooks/swarm-tools/commit/df219d8f2838eb9f640f61b9b07e326225f404d0) Thanks [@joelhooks](https://github.com/joelhooks)! - ## `swarm capture` - The CLI Stays Dumb, The Plugin Stays Dumber
+
+  > "To conform to the principle of dependency inversion, we must isolate this abstraction from the details of the problem."
+  > — Robert C. Martin, Clean Code
+
+  ```
+      ┌─────────────────────────────────────────────────────────────┐
+      │                                                             │
+      │   ~/.config/opencode/plugin/swarm.ts                        │
+      │   ┌─────────────────────────────────────────────────────┐   │
+      │   │                                                     │   │
+      │   │   spawn("swarm", ["capture", "--session", ...])     │───┼──► swarm capture
+      │   │                                                     │   │         │
+      │   │   // No imports from opencode-swarm-plugin          │   │         │
+      │   │   // Version always matches CLI                     │   │         ▼
+      │   │   // Fire and forget                                │   │    captureCompactionEvent()
+      │   │                                                     │   │
+      │   └─────────────────────────────────────────────────────┘   │
+      │                                                             │
+      └─────────────────────────────────────────────────────────────┘
+  ```
+
+  **The Problem:** Plugin wrapper was importing `captureCompactionEvent` directly from the npm package. When installed globally, this import could fail or use a stale version.
+
+  **The Fix:** Shell out to `swarm capture` CLI command instead. The CLI is always the installed version, so no version mismatch.
+
+  **New command:**
+
+  ```bash
+  swarm capture --session <id> --epic <id> --type <type> [--payload <json>]
+
+  # Types: detection_complete, prompt_generated, context_injected,
+  #        resumption_started, tool_call_tracked
+  ```
+
+  **Design principle:** The plugin wrapper in `~/.config/opencode/plugin/swarm.ts` should be as dumb as possible. All logic lives in the CLI/npm package. Users never need to update their local plugin file for new features - just `npm update`.
+
+  **Files changed:**
+
+  - `bin/swarm.ts` - Added `capture` command
+  - `examples/plugin-wrapper-template.ts` - Uses CLI instead of import
+
+- [`ff29b26`](https://github.com/joelhooks/swarm-tools/commit/ff29b26344274907b6a0614f9b3b914771edf6e4) Thanks [@joelhooks](https://github.com/joelhooks)! - ## 🔧 Fix CLI Breaking on npm Install
+
+  > "The best code is no code at all."
+  > — Jeff Atwood
+
+  ```
+  ┌─────────────────────────────────────────────────────────────┐
+  │  BEFORE: npm install → "Cannot find module '../src/index'"  │
+  ├─────────────────────────────────────────────────────────────┤
+  │                                                             │
+  │  bin/swarm.ts ──import──► ../src/query-tools.js  ❌         │
+  │                                                             │
+  │  Published package:                                         │
+  │  ├── bin/swarm.ts     (raw TypeScript)                      │
+  │  ├── dist/            (compiled JS)                         │
+  │  └── src/             ❌ NOT PUBLISHED                      │
+  │                                                             │
+  ├─────────────────────────────────────────────────────────────┤
+  │  AFTER: npm install → works                                 │
+  ├─────────────────────────────────────────────────────────────┤
+  │                                                             │
+  │  dist/bin/swarm.js ──bundled──► all deps inlined  ✅        │
+  │                                                             │
+  │  Published package:                                         │
+  │  ├── dist/bin/swarm.js  (compiled, bundled)                 │
+  │  └── dist/              (all modules)                       │
+  │                                                             │
+  └─────────────────────────────────────────────────────────────┘
+  ```
+
+  **The Problem:**
+
+  CLI used dynamic imports pointing to `../src/` which doesn't exist in published packages. This broke `bun install -g opencode-swarm-plugin` with "Cannot find module" errors.
+
+  **The Fix:**
+
+  1. **Compile CLI to dist/** - Added `bin/swarm.ts` to build entries
+  2. **Static imports** - Replaced 20 dynamic imports with static ones (bundler resolves them)
+  3. **Update bin path** - `package.json` bin now points to `./dist/bin/swarm.js`
+
+  **Why dynamic imports were wrong:**
+
+  - "Lazy loading for performance" on an M4 Max is absurd
+  - Bun tree-shakes unused imports anyway
+  - Dynamic imports bypass bundler resolution
+  - Paths break when `src/` isn't published
+
+  **What changed:**
+
+  - `scripts/build.ts` - Added CLI build entry
+  - `package.json` - bin points to compiled output
+  - `bin/swarm.ts` - All imports now static, paths relative to src/
+
+  **Testing:**
+
+  ```bash
+  # Build
+  bun run build
+
+  # Test locally
+  node dist/bin/swarm.js version
+
+  # Test global install
+  bun install -g .
+  swarm version
+  ```
+
+- [`24a986e`](https://github.com/joelhooks/swarm-tools/commit/24a986eb0405895b4b7f5f201f0e1755cf078fc2) Thanks [@joelhooks](https://github.com/joelhooks)! - ## 🐝 Plugin Wrapper Now Fully Self-Contained
+
+  ```
+      ┌──────────────────────────────────────────────────────────┐
+      │                                                          │
+      │   ~/.config/opencode/plugin/swarm.ts                     │
+      │                                                          │
+      │   ┌────────────────────────────────────────────────────┐ │
+      │   │  BEFORE: import { ... } from "opencode-swarm-plugin"│ │
+      │   │          ↓                                          │ │
+      │   │  💥 Cannot find module 'evalite/runner'             │ │
+      │   └────────────────────────────────────────────────────┘ │
+      │                                                          │
+      │   ┌────────────────────────────────────────────────────┐ │
+      │   │  AFTER: // Inlined swarm detection (~250 lines)    │ │
+      │   │         // Zero imports from npm package           │ │
+      │   │         ↓                                          │ │
+      │   │  ✅ Works everywhere                               │ │
+      │   └────────────────────────────────────────────────────┘ │
+      │                                                          │
+      └──────────────────────────────────────────────────────────┘
+  ```
+
+  **Problem:** Plugin wrapper in `~/.config/opencode/plugin/swarm.ts` was importing from `opencode-swarm-plugin` npm package. The package has `evalite` as a dependency, which isn't available in OpenCode's plugin context. Result: trace trap on startup.
+
+  **Solution:** Inline all swarm detection logic directly into the plugin wrapper template:
+
+  - `SwarmProjection`, `ToolCallEvent`, `SubtaskState`, `EpicState` types
+  - `projectSwarmState()` - event fold for deterministic state
+  - `hasSwarmSignature()` - quick check for epic + spawn
+  - `isSwarmActive()` - check for pending work
+  - `getSwarmSummary()` - human-readable status
+
+  **Design Principle:** The plugin wrapper must be FULLY SELF-CONTAINED:
+
+  - NO imports from `opencode-swarm-plugin` npm package
+  - All logic either inlined OR shells out to `swarm` CLI
+  - Users never need to update their local plugin for new features
+
+  **After updating:** Copy the new template to your local plugin:
+
+  ```bash
+  cp ~/.config/opencode/plugin/swarm.ts ~/.config/opencode/plugin/swarm.ts.bak
+  # Then reinstall: bun add -g opencode-swarm-plugin
+  # Or copy from examples/plugin-wrapper-template.ts
+  ```
+
 ## 0.45.0
 
 ### Minor Changes
