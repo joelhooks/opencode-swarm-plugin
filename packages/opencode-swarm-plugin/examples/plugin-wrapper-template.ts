@@ -93,8 +93,8 @@ async function captureCompaction(
   payload: any,
 ): Promise<void> {
   try {
-    // Dynamic import to avoid circular deps (plugin wrapper → src → plugin wrapper)
-    const { captureCompactionEvent } = await import("../src/eval-capture");
+    // Dynamic import from package export
+    const { captureCompactionEvent } = await import("opencode-swarm-plugin/eval-capture");
     captureCompactionEvent({
       session_id: sessionID,
       epic_id: epicID,
