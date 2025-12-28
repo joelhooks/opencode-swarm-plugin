@@ -1,18 +1,17 @@
 /**
- * Logger infrastructure using Pino with daily rotation
+ * Logger infrastructure using Pino
  *
  * Features:
- * - Daily log rotation via pino-roll (numeric format: swarm.1log, swarm.2log, etc.)
- * - 14-day retention (14 files max in addition to current file)
- * - Module-specific child loggers with separate log files
+ * - File logging to ~/.config/swarm-tools/logs/ (when SWARM_LOG_FILE=1)
  * - Pretty mode for development (SWARM_LOG_PRETTY=1 env var)
- * - Logs to ~/.config/swarm-tools/logs/ by default
+ * - Default: stdout JSON logging (works everywhere including global installs)
  *
- * Note: pino-roll uses numeric rotation (e.g., swarm.1log, swarm.2log) not date-based names.
- * Files rotate daily based on frequency='daily', with a maximum of 14 retained files.
+ * NOTE: We intentionally avoid pino.transport() because it spawns worker_threads
+ * that have module resolution issues in bundled/global-install contexts.
+ * Uses pino.destination() for sync file writes instead.
  */
 
-import { mkdirSync, existsSync } from "node:fs";
+import { mkdirSync, existsSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { Logger } from "pino";
@@ -29,49 +28,15 @@ function ensureLogDir(logDir: string): void {
   }
 }
 
-/**
- * Creates a Pino transport with file rotation
- *
- * @param filename - Log file base name (e.g., "swarm" becomes swarm.1log, swarm.2log, etc.)
- * @param logDir - Directory to store logs
- */
-function createTransport(
-  filename: string,
-  logDir: string,
-): pino.TransportTargetOptions {
-  const isPretty = process.env.SWARM_LOG_PRETTY === "1";
-
-  if (isPretty) {
-    // Pretty mode - output to console with pino-pretty
-    return {
-      target: "pino-pretty",
-      options: {
-        colorize: true,
-        translateTime: "HH:MM:ss",
-        ignore: "pid,hostname",
-      },
-    };
-  }
-
-  // Production mode - file rotation with pino-roll
-  // pino-roll format: {file}.{number}{extension}
-  // So "swarm" becomes "swarm.1log", "swarm.2log", etc.
-  return {
-    target: "pino-roll",
-    options: {
-      file: join(logDir, filename),
-      frequency: "daily",
-      extension: "log",
-      limit: { count: 14 },
-      mkdir: true,
-    },
-  };
-}
-
 const loggerCache = new Map<string, Logger>();
 
 /**
  * Gets or creates the main logger instance
+ *
+ * Logging modes (set via environment variables):
+ * - Default: stdout JSON (works in all contexts)
+ * - SWARM_LOG_FILE=1: writes to ~/.config/swarm-tools/logs/swarm.log
+ * - SWARM_LOG_PRETTY=1: pretty console output (requires pino-pretty installed)
  *
  * @param logDir - Optional log directory (defaults to ~/.config/swarm-tools/logs)
  * @returns Pino logger instance
@@ -83,22 +48,29 @@ export function getLogger(logDir: string = DEFAULT_LOG_DIR): Logger {
     return loggerCache.get(cacheKey)!;
   }
 
-  ensureLogDir(logDir);
+  const baseConfig = {
+    level: process.env.LOG_LEVEL || "info",
+    timestamp: pino.stdTimeFunctions.isoTime,
+  };
 
-  const logger = pino(
-    {
-      level: process.env.LOG_LEVEL || "info",
-      timestamp: pino.stdTimeFunctions.isoTime,
-    },
-    pino.transport(createTransport("swarm", logDir)),
-  );
+  let logger: Logger;
+
+  if (process.env.SWARM_LOG_FILE === "1") {
+    // File logging mode - use pino.destination for sync file writes
+    ensureLogDir(logDir);
+    const logPath = join(logDir, "swarm.log");
+    logger = pino(baseConfig, pino.destination({ dest: logPath, sync: false }));
+  } else {
+    // Default: stdout logging (works in bundled CLI, global installs, everywhere)
+    logger = pino(baseConfig);
+  }
 
   loggerCache.set(cacheKey, logger);
   return logger;
 }
 
 /**
- * Creates a child logger for a specific module with its own log file
+ * Creates a child logger for a specific module
  *
  * @param module - Module name (e.g., "compaction", "cli")
  * @param logDir - Optional log directory (defaults to ~/.config/swarm-tools/logs)
@@ -114,15 +86,22 @@ export function createChildLogger(
     return loggerCache.get(cacheKey)!;
   }
 
-  ensureLogDir(logDir);
+  const baseConfig = {
+    level: process.env.LOG_LEVEL || "info",
+    timestamp: pino.stdTimeFunctions.isoTime,
+  };
 
-  const childLogger = pino(
-    {
-      level: process.env.LOG_LEVEL || "info",
-      timestamp: pino.stdTimeFunctions.isoTime,
-    },
-    pino.transport(createTransport(module, logDir)),
-  );
+  let childLogger: Logger;
+
+  if (process.env.SWARM_LOG_FILE === "1") {
+    // File logging mode
+    ensureLogDir(logDir);
+    const logPath = join(logDir, `${module}.log`);
+    childLogger = pino(baseConfig, pino.destination({ dest: logPath, sync: false }));
+  } else {
+    // Default: stdout logging
+    childLogger = pino(baseConfig);
+  }
 
   const logger = childLogger.child({ module });
   loggerCache.set(cacheKey, logger);
