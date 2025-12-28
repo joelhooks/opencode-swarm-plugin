@@ -27,7 +27,16 @@ const CLI_ENTRIES: BuildEntry[] = [
   { input: "./bin/swarm.ts", outfile: "./dist/bin/swarm.js" },
 ];
 
-const EXTERNALS = ["@electric-sql/pglite", "swarm-mail", "evalite"];
+// Externals: modules that must be resolved at runtime, not bundled
+// - pino-roll/pino-pretty: pino.transport() spawns worker_threads that require() these
+// - evalite: dev-only, shouldn't be in production bundle
+const EXTERNALS = [
+  "@electric-sql/pglite",
+  "swarm-mail",
+  "evalite",
+  "pino-roll",      // Required by pino.transport() at runtime
+  "pino-pretty",    // Optional pretty printing (devDependency)
+];
 
 async function buildEntry(entry: BuildEntry): Promise<void> {
   const externals = EXTERNALS.map(e => `--external ${e}`).join(" ");
