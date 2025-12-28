@@ -1,5 +1,152 @@
 # swarm-mail
 
+## 1.6.1
+
+### Patch Changes
+
+- [`fb4b2d5`](https://github.com/joelhooks/swarm-tools/commit/fb4b2d545943fa6e5a5f5294f2bcd129191b8667) Thanks [@joelhooks](https://github.com/joelhooks)! - ## 🔍 hive_cells Now Returns All Matches for Partial IDs
+
+  > "Tune and test your metadata by comparing it with the tone, coverage, and trends of your searchers' common queries."
+  > — _Search Analytics for Your Site_
+
+  Previously, `hive_cells({ id: "mjonid" })` would throw an "Ambiguous ID" error when multiple cells matched. This was hostile UX for a **query tool** — users expect to see all matches, not be forced to guess more characters.
+
+  ```
+       ┌──────────────────────────────────────┐
+       │  BEFORE: "Ambiguous ID" error 💀     │
+       │                                      │
+       │  > hive_cells({ id: "mjonid" })      │
+       │  Error: multiple cells match         │
+       │                                      │
+       ├──────────────────────────────────────┤
+       │  AFTER: Returns all matches 🎯       │
+       │                                      │
+       │  > hive_cells({ id: "mjonid" })      │
+       │  [                                   │
+       │    { id: "...-mjonidihuyq", ... },   │
+       │    { id: "...-mjonidimchs", ... },   │
+       │    { id: "...-mjonidioq28", ... },   │
+       │    ...13 cells total                 │
+       │  ]                                   │
+       └──────────────────────────────────────┘
+  ```
+
+  **What changed:**
+
+  - Added `findCellsByPartialId()` — returns `Cell[]` instead of throwing
+  - `hive_cells` now uses this for partial ID lookups
+  - `resolvePartialId()` still throws for tools that need exactly one cell (hive_update, hive_close, etc.)
+
+  **Why it matters:**
+
+  - Query tools should return results, not errors
+  - Partial ID search is now actually useful for exploration
+  - Consistent with how `grep` and other search tools behave
+
+- [`ca12bd6`](https://github.com/joelhooks/swarm-tools/commit/ca12bd6dd68ee41bdb9deb78409c73a08460806e) Thanks [@joelhooks](https://github.com/joelhooks)! - ## 📚 Wave 1-3 Memory Features Now Documented
+
+  > "Following the basic principles of the Zettelkasten method, we designed our memory system to create interconnected knowledge networks through dynamic indexing and linking."
+  > — _A-MEM: Agentic Memory for LLM Agents_
+
+  The swarm-mail README now comprehensively documents all Wave 1-3 memory features:
+
+  ```
+       ┌─────────────────────────────────────────┐
+       │         MEMORY SYSTEM DOCS              │
+       ├─────────────────────────────────────────┤
+       │                                         │
+       │  📝 Smart Upsert (Mem0 Pattern)         │
+       │     ADD / UPDATE / DELETE / NOOP        │
+       │     LLM decides, you relax              │
+       │                                         │
+       │  🏷️  Auto-Tagging                       │
+       │     LLM extracts tags from content      │
+       │                                         │
+       │  🔗 Memory Linking (Zettelkasten)       │
+       │     Interconnected knowledge web        │
+       │                                         │
+       │  🧠 Entity Extraction (A-MEM)           │
+       │     Knowledge graph from memories       │
+       │                                         │
+       │  ⏰ Temporal Queries                    │
+       │     Supersession chains, validity       │
+       │                                         │
+       └─────────────────────────────────────────┘
+  ```
+
+  **What's documented:**
+
+  - Basic usage with code examples
+  - Smart operations (Mem0 pattern)
+  - Knowledge graph queries
+  - Temporal validity tracking
+  - New schema tables and columns
+  - Service exports for advanced use
+  - Graceful degradation behavior
+
+  **Also fixed:** Removed stale pgvector references → now correctly states libSQL native vector support via sqlite-vec.
+
+- [`ef21ee0`](https://github.com/joelhooks/swarm-tools/commit/ef21ee0d943e0d993865dd44b69b25c025de79ac) Thanks [@joelhooks](https://github.com/joelhooks)! - ## 🐝 Memory System Polish: The Hive Remembers
+
+  > _"Our approach draws inspiration from the Zettelkasten method, a sophisticated
+  > knowledge management system that creates interconnected information networks
+  > through atomic notes and flexible linking."_
+  > — A-MEM: Agentic Memory for LLM Agents
+
+  ```
+                      .-.
+                     (o o)  "Should I ADD, UPDATE, or NOOP?"
+                     | O |
+                     /   \        ___
+                    /     \    .-'   '-.
+          _____    /       \  /  .-=-.  \    _____
+         /     \  |  ^   ^  ||  /     \  |  /     \
+        | () () | |  (o o)  || | () () | | | () () |
+         \_____/  |    <    ||  \_____/  |  \_____/
+            |      \  ===  /  \    |    /      |
+           _|_      '-----'    '--|--'       _|_
+          /   \                   |         /   \
+         | mem |<----related---->|mem|<--->| mem |
+          \___/                   |         \___/
+                              supersedes
+                                  |
+                               ___|___
+                              /       \
+                             | mem-old |
+                              \_______/
+                                  †
+  ```
+
+  ### What Changed
+
+  **swarm-mail:**
+
+  - **README overhaul** - Documented Wave 1-3 memory features with code examples
+  - **Test fixes** - `test.skip()` → `test.skipIf(!hasWorkingLLM)` for graceful CI/local behavior
+  - Replaced outdated `pgvector` references with `libSQL vec extension`
+
+  **opencode-swarm-plugin:**
+
+  - **ADR: Memory System Eval Strategy** - 3-tier approach (heuristics/integration/LLM-as-judge)
+  - **smart-operations.eval.ts** - Evalite test suite for ADD/UPDATE/DELETE/NOOP decisions
+  - Fixtures covering 8 test scenarios (exact match, refinement, contradiction, new info)
+  - LLM-as-judge scorer with graceful degradation
+
+  ### The Philosophy
+
+  > _"As the system processes more memories over time, it develops increasingly
+  > sophisticated knowledge structures, discovering higher-order patterns and
+  > concepts across multiple memories."_
+  > — A-MEM
+
+  The memory system isn't just storage—it's a living knowledge graph that evolves.
+
+  ### Run the Eval
+
+  ```bash
+  bun run eval:smart-operations
+  ```
+
 ## 1.6.0
 
 ### Minor Changes
