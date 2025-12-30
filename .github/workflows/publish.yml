@@ -54,7 +54,7 @@ jobs:
         id: pr_title
         uses: vercel/ai-action@v2
         with:
-          model: "anthropic/claude-opus-4-20250514"
+          model: "anthropic/claude-haiku-4-"
           api-key: ${{ secrets.AI_GATEWAY_API_KEY }}
           prompt: |
             Generate a concise PR title (max 60 chars) for this release. Rules:
