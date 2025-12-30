@@ -12,6 +12,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { homedir } from "node:os";
 import {
   AgentEventSchema,
   AgentRegisteredEventSchema,
@@ -1702,6 +1703,7 @@ describe("appendEvent persistence to libSQL", () => {
   });
 
   it("verifies database path resolves correctly", async () => {
+    // NEW BEHAVIOR: Database is always at global path ~/.config/swarm-tools/swarm.db
     const projectPath = "/tmp/test-persistence";
     
     const event = createEvent("agent_registered", {
@@ -1713,8 +1715,8 @@ describe("appendEvent persistence to libSQL", () => {
 
     await appendEvent(event, projectPath);
 
-    // Verify database file exists at expected location
-    const expectedDbPath = join(projectPath, ".opencode", "swarm.db");
+    // Verify database file exists at global location
+    const expectedDbPath = join(homedir(), ".config", "swarm-tools", "swarm.db");
     expect(existsSync(expectedDbPath)).toBe(true);
   });
 

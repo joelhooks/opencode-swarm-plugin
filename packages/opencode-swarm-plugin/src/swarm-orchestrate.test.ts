@@ -4,7 +4,7 @@
  * Validates:
  * - Tech stack extraction from task descriptions
  * - Researcher spawning for identified technologies
- * - Summary collection from semantic-memory
+ * - Summary collection from hivemind (ADR-011)
  * - Research result aggregation
  * - Eval capture integration (captureSubtaskOutcome wiring)
  */
@@ -13,6 +13,8 @@ import { describe, test, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { runResearchPhase, extractTechStack, swarm_complete } from "./swarm-orchestrate";
 import * as evalCapture from "./eval-capture.js";
 import * as fs from "node:fs";
+import { readFileSync } from "fs";
+import { join } from "path";
 
 describe("extractTechStack", () => {
   test("extracts Next.js from task description", () => {
@@ -544,5 +546,75 @@ describe("finalizeEvalRecord integration", () => {
     expect(parsed.finalized_eval_record).toEqual(mockFinalRecord);
 
     finalizeEvalSpy.mockRestore();
+  });
+});
+
+// ============================================================================
+// ADR-011 Hivemind Migration Tests
+// ============================================================================
+
+describe("ADR-011: hivemind migration compliance", () => {
+  const filePath = join(__dirname, "swarm-orchestrate.ts");
+  const fileContents = readFileSync(filePath, "utf-8");
+
+  test("should not reference semantic-memory tools in code", () => {
+    // Check for semantic-memory_ references (excluding comments)
+    const lines = fileContents.split("\n");
+    const codeLines = lines.filter(
+      (line) => !line.trim().startsWith("//") && !line.trim().startsWith("*")
+    );
+    const codeContent = codeLines.join("\n");
+
+    const semanticMemoryRefs = codeContent.match(/semantic-memory_/g);
+    expect(semanticMemoryRefs).toBeNull();
+  });
+
+  test("should not reference cass_ tools in code", () => {
+    const lines = fileContents.split("\n");
+    const codeLines = lines.filter(
+      (line) => !line.trim().startsWith("//") && !line.trim().startsWith("*")
+    );
+    const codeContent = codeLines.join("\n");
+
+    const cassRefs = codeContent.match(/cass_/g);
+    expect(cassRefs).toBeNull();
+  });
+
+  test("should reference hivemind for knowledge gathering (in comments)", () => {
+    // The file references hivemind in research phase comments
+    expect(fileContents).toContain("Collects summaries from hivemind");
+  });
+
+  test("should reference hivemind for memory capture (in code)", () => {
+    // The file calls hivemind store command
+    expect(fileContents).toContain("hivemind store");
+  });
+
+  test("should update degraded_features check for hivemind", () => {
+    // Check that degraded features now references hivemind instead of semantic-memory
+    const degradedFeaturesSection = fileContents.match(
+      /if \(!availability\.get\("hivemind"\)\?\.status\.available\)/
+    );
+    expect(degradedFeaturesSection).not.toBeNull();
+  });
+
+  test("should update tool availability checks to use hivemind", () => {
+    // Memory availability should check for hivemind
+    const memoryAvailCheck = fileContents.match(
+      /const memoryAvailable = await isToolAvailable\("hivemind"\)/
+    );
+    expect(memoryAvailCheck).not.toBeNull();
+  });
+
+  test("should update comments to reference hivemind", () => {
+    // Research phase comment should reference hivemind
+    expect(fileContents).toContain("Collects summaries from hivemind");
+  });
+
+  test("should update usage hints to reference hivemind", () => {
+    // Usage hint should mention hivemind
+    expect(fileContents).toContain(
+      "Each technology has documentation in hivemind"
+    );
   });
 });

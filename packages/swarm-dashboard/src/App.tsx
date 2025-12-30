@@ -56,7 +56,7 @@ function App() {
       <Layout>
         {/* Agents Pane */}
         <Pane>
-          <AgentsPane />
+          <AgentsPane events={events} state={state} />
         </Pane>
 
         {/* Events Pane */}
@@ -66,7 +66,7 @@ function App() {
 
         {/* Cells Pane */}
         <Pane>
-          <CellsPane onCellSelect={(id) => console.log("Selected cell:", id)} />
+          <CellsPane events={events} onCellSelect={(id) => console.log("Selected cell:", id)} />
         </Pane>
       </Layout>
     </div>

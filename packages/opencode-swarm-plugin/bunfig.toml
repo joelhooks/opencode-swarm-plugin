@@ -8,18 +8,25 @@ root = "src"
 # Default timeout for tests
 timeout = 10000
 
-# Preload scripts (if needed)
-# preload = ["./test-setup.ts"]
+# Preload script to restore mocks between test files
+preload = ["./test-preload.ts"]
 
-# NOTE: Some tests fail when run in full suite but pass individually.
-# This is due to Bun's mock.module() not isolating between test files.
-# Tests using mock.module() for ./hive, ./logger, swarm-mail will have
-# their mocks overwritten by earlier tests in the suite.
+# IMPORTANT: Mock Pollution Issue
+# ===============================
+# Bun's mock.module() is GLOBAL and persists across test files in the same process.
+# Tests that use mock.module() at module-level POLLUTE subsequent test files.
 #
-# Known affected tests (run individually to verify they pass):
-# - src/compaction-hook.test.ts
-# - src/compaction-capture.integration.test.ts
-# - src/tool-adapter.integration.test.ts (vitest, runs with bun)
+# EXCLUDED FILES (run separately with `bun test <file>`):
+# These files use mock.module() which breaks other tests:
+#   - src/compaction-hook.test.ts (mocks ./hive, swarm-mail, ./logger)
+#   - src/compaction-observability.integration.test.ts (mocks same)
+#   - src/eval-runner.test.ts (mocks evalite/runner)
 #
-# Long-term fix: migrate to vitest for proper test isolation, or
-# restructure tests to use dependency injection instead of module mocks.
+# Run them individually: bun test ./src/compaction-hook.test.ts
+#
+# AFFECTED FILES (fail in full suite but pass individually):
+#   - src/tool-adapter.integration.test.ts
+#   - src/compaction-capture.integration.test.ts
+#   - src/swarm.integration.test.ts
+#
+# Long-term fix: Refactor mock.module() tests to use dependency injection.

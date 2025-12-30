@@ -687,7 +687,7 @@ export const swarm_init = tool({
       degradedFeatures.push("pre-completion bug scanning");
     }
 
-    if (!availability.get("semantic-memory")?.status.available) {
+    if (!availability.get("hivemind")?.status.available) {
       degradedFeatures.push("persistent learning (using in-memory fallback)");
     }
 
@@ -1593,26 +1593,26 @@ This will be recorded as a negative learning signal.`;
       let memoryStored = false;
       let memoryError: string | undefined;
 
-      // Attempt to store in semantic-memory (non-blocking)
+      // Attempt to store in hivemind (non-blocking)
       try {
-        const memoryAvailable = await isToolAvailable("semantic-memory");
+        const memoryAvailable = await isToolAvailable("hivemind");
         if (memoryAvailable) {
-          // Call semantic-memory store command
+          // Call hivemind store command
           const storeResult =
-            await Bun.$`semantic-memory store ${memoryInfo.information} --metadata ${memoryInfo.metadata}`
+            await Bun.$`hivemind store ${memoryInfo.information} --metadata ${memoryInfo.metadata}`
               .quiet()
               .nothrow();
 
           if (storeResult.exitCode === 0) {
             memoryStored = true;
           } else {
-            memoryError = `semantic-memory store failed: ${storeResult.stderr.toString().slice(0, 200)}`;
+            memoryError = `hivemind store failed: ${storeResult.stderr.toString().slice(0, 200)}`;
             console.warn(`[swarm_complete] ${memoryError}`);
           }
         } else {
           memoryError =
-            "semantic-memory not available - learning stored in-memory only";
-          warnMissingTool("semantic-memory");
+            "hivemind not available - learning stored in-memory only";
+          warnMissingTool("hivemind");
         }
       } catch (error) {
         memoryError = `Failed to store memory: ${error instanceof Error ? error.message : String(error)}`;
@@ -1653,7 +1653,7 @@ This will be recorded as a negative learning signal.`;
           ? `**Feedback**: ${parsedEvaluation.overall_feedback}`
           : "",
         "",
-        `**Memory Capture**: ${memoryStored ? "✓ Stored in semantic-memory" : `✗ ${memoryError || "Failed"}`}`,
+        `**Memory Capture**: ${memoryStored ? "✓ Stored in hivemind" : `✗ ${memoryError || "Failed"}`}`,
       ]
         .filter(Boolean)
         .join("\n");
@@ -1680,7 +1680,7 @@ This will be recorded as a negative learning signal.`;
         );
       }
 
-      // Build success response with semantic-memory integration
+      // Build success response with hivemind integration
       const response = {
         success: true,
         bead_id: args.bead_id,
@@ -1730,8 +1730,8 @@ Files touched: ${args.files_touched?.join(", ") || "none recorded"}`,
           information: memoryInfo.information,
           metadata: memoryInfo.metadata,
           note: memoryStored
-            ? "Learning automatically stored in semantic-memory"
-            : `Failed to store: ${memoryError}. Learning lost unless semantic-memory is available.`,
+            ? "Learning automatically stored in hivemind"
+            : `Failed to store: ${memoryError}. Learning lost unless hivemind is available.`,
         },
         // Contract validation result
         contract_validation: contractValidation
@@ -2187,7 +2187,7 @@ export interface ResearchSpawnInstruction {
   /** Full prompt for the researcher agent */
   prompt: string;
   /** Agent type for the Task tool */
-  subagent_type: "swarm/researcher";
+  subagent_type: "swarm-researcher";
 }
 
 /**
@@ -2200,7 +2200,7 @@ export interface ResearchResult {
   spawn_instructions: ResearchSpawnInstruction[];
   /** Summaries keyed by technology name */
   summaries: Record<string, string>;
-  /** Semantic-memory IDs where research is stored */
+  /** Hivemind IDs where research is stored */
   memory_ids: string[];
 }
 
@@ -2211,7 +2211,7 @@ export interface ResearchResult {
  * 1. Analyzes task to identify technologies
  * 2. Spawns researcher agents for each technology (parallel)
  * 3. Waits for researchers to complete
- * 4. Collects summaries from semantic-memory
+ * 4. Collects summaries from hivemind
  * 5. Returns combined context for shared_context
  *
  * Flow:
@@ -2286,7 +2286,7 @@ export async function runResearchPhase(
       research_id: researchId,
       tech,
       prompt,
-      subagent_type: "swarm/researcher",
+      subagent_type: "swarm-researcher",
     });
   }
 
@@ -2297,7 +2297,7 @@ export async function runResearchPhase(
     tech_stack: techStack,
     spawn_instructions: spawnInstructions,
     summaries: {}, // Will be populated by coordinator after researchers complete
-    memory_ids: [], // Will be populated by coordinator after researchers store in semantic-memory
+    memory_ids: [], // Will be populated by coordinator after researchers store in hivemind
   };
 }
 
@@ -2338,7 +2338,7 @@ export const swarm_research_phase = tool({
           memories_stored: result.memory_ids.length,
         },
         usage_hint:
-          "Inject summaries into shared_context for task decomposition. Each technology has documentation in semantic-memory.",
+          "Inject summaries into shared_context for task decomposition. Each technology has documentation in hivemind.",
       },
       null,
       2
@@ -2571,7 +2571,7 @@ export const swarm_check_strikes = tool({
             : undefined,
         };
 
-        // Add semantic-memory storage hint on 3-strike
+        // Add hivemind storage hint on 3-strike
         if (strikedOut) {
           response.memory_store = formatMemoryStoreOn3Strike(
             args.bead_id,

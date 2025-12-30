@@ -289,7 +289,7 @@ describe("Researcher prompt generation", () => {
 		expect(parsed.tech_stack).toEqual(["zod", "typescript"]);
 		expect(parsed.project_path).toBe("/test/project");
 		expect(parsed.check_upgrades).toBe(false);
-		expect(parsed.subagent_type).toBe("swarm/researcher");
+		expect(parsed.subagent_type).toBe("swarm-researcher");
 
 		// Check expected output schema
 		expect(parsed.expected_output).toBeDefined();
@@ -485,7 +485,7 @@ describe("End-to-end research workflow", () => {
 
 		const spawnData = JSON.parse(spawnResult);
 		expect(spawnData.prompt).toBeDefined();
-		expect(spawnData.subagent_type).toBe("swarm/researcher");
+		expect(spawnData.subagent_type).toBe("swarm-researcher");
 		expect(spawnData.tech_stack).toEqual(techStack);
 
 		// The spawned prompt should be ready for Task tool
@@ -560,7 +560,7 @@ describe("Research spawn instructions (NEW)", () => {
 			expect(instruction.prompt).toBeDefined();
 			expect(typeof instruction.prompt).toBe("string");
 			expect(instruction.prompt.length).toBeGreaterThan(0);
-			expect(instruction.subagent_type).toBe("swarm/researcher");
+			expect(instruction.subagent_type).toBe("swarm-researcher");
 		}
 	});
 

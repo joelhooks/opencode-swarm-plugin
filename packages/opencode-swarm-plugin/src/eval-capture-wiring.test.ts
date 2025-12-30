@@ -46,7 +46,7 @@ describe("captureResearcherSpawned wiring", () => {
       tool: "task",
       sessionID: "test-session-123",
       prompt: 'Research Next.js Cache Components using pdf-brain and context7',
-      agentName: "swarm/researcher"
+      agentName: "swarm-researcher"
     };
     
     const toolOutput = {

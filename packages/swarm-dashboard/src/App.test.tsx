@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, cleanup } from "@testing-library/react";
 import App from "./App";
 
 // Mock partysocket to avoid real WebSocket connections
@@ -47,74 +47,74 @@ describe("App", () => {
   });
 
   it("renders with Layout component structure", () => {
-    render(<App />);
+    const { container } = render(<App />);
     
     // Layout should render a grid container
-    const app = document.querySelector(".grid");
+    const app = container.querySelector(".grid");
     expect(app).toBeTruthy();
     expect(app?.classList.contains("grid-cols-1")).toBe(true);
   });
 
   it("renders AgentsPane with WebSocket connection", () => {
-    render(<App />);
+    const { getByRole, getByText } = render(<App />);
     
     // AgentsPane header (just "Agents" not "Active Agents")
-    const heading = screen.getByRole("heading", { name: /^agents$/i });
+    const heading = getByRole("heading", { name: /^agents$/i });
     expect(heading).toBeTruthy();
     
     // Should show "No agents" empty state
-    expect(screen.getByText("No agents")).toBeTruthy();
+    expect(getByText("No agents")).toBeTruthy();
   });
 
   it("renders EventsPane with event filtering", () => {
-    render(<App />);
+    const { getByRole } = render(<App />);
     
     // EventsPane header
-    const heading = screen.getByRole("heading", { name: /^events$/i });
+    const heading = getByRole("heading", { name: /^events$/i });
     expect(heading).toBeTruthy();
     
     // Filter buttons should be present
-    const allButton = screen.getByRole("button", { name: /^all$/i });
+    const allButton = getByRole("button", { name: /^all$/i });
     expect(allButton).toBeTruthy();
     
-    const agentButton = screen.getByRole("button", { name: /^agent$/i });
+    const agentButton = getByRole("button", { name: /^agent$/i });
     expect(agentButton).toBeTruthy();
   });
 
   it("renders CellsPane with tree view", () => {
-    render(<App />);
+    const { getByRole, getByText } = render(<App />);
     
     // CellsPane header
-    const heading = screen.getByRole("heading", { name: /^cells$/i });
+    const heading = getByRole("heading", { name: /^cells$/i });
     expect(heading).toBeTruthy();
     
     // Should show empty state (no events yet)
-    expect(screen.getByText("No cells found")).toBeTruthy();
+    expect(getByText("No cells found")).toBeTruthy();
   });
 
   it("passes events from useSwarmSocket to AgentsPane and EventsPane", () => {
-    render(<App />);
+    const { getByRole } = render(<App />);
     
     // Both panes should be present (they'll derive from same events array)
-    expect(screen.getByRole("heading", { name: /^agents$/i })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: /^events$/i })).toBeTruthy();
+    expect(getByRole("heading", { name: /^agents$/i })).toBeTruthy();
+    expect(getByRole("heading", { name: /^events$/i })).toBeTruthy();
   });
 
   it("uses correct WebSocket endpoint URL", () => {
     // This test verifies the URL passed to useSwarmSocket
     // In real implementation, we'd check the WebSocket constructor call
     // For now, just verify the panes render (they internally use the hook)
-    render(<App />);
+    const { getByRole } = render(<App />);
     
-    expect(screen.getByRole("heading", { name: /^agents$/i })).toBeTruthy();
+    expect(getByRole("heading", { name: /^agents$/i })).toBeTruthy();
   });
 
   it("does not render Vite template content", () => {
-    render(<App />);
+    const { queryByText, queryByAltText } = render(<App />);
     
     // Should NOT have Vite logo or counter
-    expect(screen.queryByText(/vite \+ react/i)).toBeFalsy();
-    expect(screen.queryByText(/count is/i)).toBeFalsy();
-    expect(screen.queryByAltText(/vite logo/i)).toBeFalsy();
+    expect(queryByText(/vite \+ react/i)).toBeFalsy();
+    expect(queryByText(/count is/i)).toBeFalsy();
+    expect(queryByAltText(/vite logo/i)).toBeFalsy();
   });
 });

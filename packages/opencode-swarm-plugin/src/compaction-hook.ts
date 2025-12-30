@@ -106,7 +106,7 @@ Your role is ORCHESTRATION, not implementation. The resume steps above (if prese
 ## 🎯 WHAT GOOD LOOKS LIKE (Behavioral Examples)
 
 **✅ GOOD Coordinator Behavior:**
-- Spawned researcher for unfamiliar tech → got summary → stored in semantic-memory
+- Spawned researcher for unfamiliar tech → got summary → stored in hivemind
 - Loaded \`skills_use(name="testing-patterns")\` BEFORE spawning test workers
 - Checked \`swarmmail_inbox()\` every 5-10 minutes → caught blocked worker → unblocked in 2min
 - Delegated planning to swarm/planner subagent → main context stayed clean
@@ -260,15 +260,14 @@ swarm_spawn_researcher(
   tech_stack=["TECHNOLOGY"],
   project_path="PROJECT_PATH"
 )
-// Then spawn with Task(subagent_type="swarm/researcher", prompt="...")
+// Then spawn with Task(subagent_type="swarm-researcher", prompt="...")
 \`\`\`
 
 ### Phase 2: Knowledge Gathering
 
 \`\`\`
-semantic-memory_find(query="TASK_KEYWORDS", limit=5)   # Past learnings
-cass_search(query="TASK_DESCRIPTION", limit=5)         # Similar past tasks
-skills_list()                                          # Available skills
+hivemind_find(query="TASK_KEYWORDS", limit=5)   # Past learnings
+skills_list()                                   # Available skills
 \`\`\`
 
 ### Phase 3: Decompose
@@ -291,7 +290,7 @@ swarm_validate_decomposition(response="CELLTREE_JSON")
 
 \`\`\`
 swarm_spawn_subtask(bead_id, epic_id, title, files, shared_context, project_path)
-Task(subagent_type="swarm/worker", prompt="GENERATED_PROMPT")
+Task(subagent_type="swarm-worker", prompt="GENERATED_PROMPT")
 \`\`\`
 
 ### Phase 7: Review Loop (MANDATORY)
@@ -769,6 +768,26 @@ interface SwarmState {
 }
 
 /**
+ * Minimal adapter interface for swarm detection
+ * Only requires queryCells - the only method detectSwarm uses
+ */
+interface MinimalHiveAdapter {
+  queryCells: (
+    projectKey: string,
+    filters: Record<string, unknown>,
+  ) => Promise<
+    Array<{
+      id: string;
+      title?: string;
+      type: string;
+      status: string;
+      parent_id: string | null;
+      updated_at: number;
+    }>
+  >;
+}
+
+/**
  * Check for swarm sign - evidence a swarm passed through
  * 
  * Uses multiple signals with different confidence levels:
@@ -778,7 +797,12 @@ interface SwarmState {
  * 
  * Philosophy: Err on the side of continuation.
  */
-async function detectSwarm(): Promise<SwarmDetection> {
+async function detectSwarm(
+  getHiveAdapterFn: (projectKey: string) => Promise<MinimalHiveAdapter>,
+  checkSwarmHealthFn: typeof checkSwarmHealth,
+  getHiveWorkingDirectoryFn: typeof getHiveWorkingDirectory,
+  log: ReturnType<typeof getLog>,
+): Promise<SwarmDetection> {
   const reasons: string[] = [];
   let highConfidence = false;
   let mediumConfidence = false;
@@ -786,7 +810,7 @@ async function detectSwarm(): Promise<SwarmDetection> {
   let state: SwarmState | undefined;
 
   try {
-    const projectKey = getHiveWorkingDirectory();
+    const projectKey = getHiveWorkingDirectoryFn();
     
     // Initialize state with project path
     state = {
@@ -802,10 +826,10 @@ async function detectSwarm(): Promise<SwarmDetection> {
     // Check 1: Active reservations in swarm-mail (HIGH confidence)
     const swarmMailStart = Date.now();
     try {
-      const health = await checkSwarmHealth(projectKey);
+      const health = await checkSwarmHealthFn(projectKey);
       const duration = Date.now() - swarmMailStart;
 
-      getLog().debug(
+      log.debug(
         {
           source: "swarm-mail",
           duration_ms: duration,
@@ -830,7 +854,7 @@ async function detectSwarm(): Promise<SwarmDetection> {
         }
       }
     } catch (error) {
-      getLog().debug(
+      log.debug(
         {
           source: "swarm-mail",
           duration_ms: Date.now() - swarmMailStart,
@@ -844,7 +868,7 @@ async function detectSwarm(): Promise<SwarmDetection> {
     // Check 2: Hive cells (various confidence levels)
     const hiveStart = Date.now();
     try {
-      const adapter = await getHiveAdapter(projectKey);
+      const adapter = await getHiveAdapterFn(projectKey);
       const cells = await adapter.queryCells(projectKey, {});
       const duration = Date.now() - hiveStart;
 
@@ -886,7 +910,7 @@ async function detectSwarm(): Promise<SwarmDetection> {
             state.subtasks.open = epicSubtasks.filter((c) => c.status === "open").length;
             state.subtasks.blocked = epicSubtasks.filter((c) => c.status === "blocked").length;
             
-            getLog().debug(
+            log.debug(
               {
                 epic_id: state.epicId,
                 epic_title: state.epicTitle,
@@ -914,7 +938,7 @@ async function detectSwarm(): Promise<SwarmDetection> {
           reasons.push(`${cells.length} total cells in hive`);
         }
 
-        getLog().debug(
+        log.debug(
           {
             source: "hive",
             duration_ms: duration,
@@ -927,13 +951,13 @@ async function detectSwarm(): Promise<SwarmDetection> {
           "checked hive cells",
         );
       } else {
-        getLog().debug(
+        log.debug(
           { source: "hive", duration_ms: duration, total_cells: 0 },
           "hive empty",
         );
       }
     } catch (error) {
-      getLog().debug(
+      log.debug(
         {
           source: "hive",
           duration_ms: Date.now() - hiveStart,
@@ -947,7 +971,7 @@ async function detectSwarm(): Promise<SwarmDetection> {
     // Project detection failed, use fallback
     lowConfidence = true;
     reasons.push("Could not detect project, using fallback");
-    getLog().debug(
+    log.debug(
       {
         error: error instanceof Error ? error.message : String(error),
       },
@@ -974,7 +998,7 @@ async function detectSwarm(): Promise<SwarmDetection> {
     state,
   };
 
-  getLog().debug(
+  log.debug(
     {
       detected: result.detected,
       confidence: result.confidence,
@@ -993,6 +1017,50 @@ async function detectSwarm(): Promise<SwarmDetection> {
 // ============================================================================
 
 /**
+ * Options for creating a compaction hook with dependency injection
+ */
+export interface CompactionHookOptions {
+  /** Optional OpenCode SDK client for scanning session messages */
+  client?: OpencodeClient;
+  /** Custom getHiveAdapter function (for testing) */
+  getHiveAdapter?: (projectKey: string) => Promise<{
+    queryCells: (
+      projectKey: string,
+      filters: Record<string, unknown>,
+    ) => Promise<
+      Array<{
+        id: string;
+        title?: string;
+        type: string;
+        status: string;
+        parent_id: string | null;
+        updated_at: number;
+      }>
+    >;
+  }>;
+  /** Custom checkSwarmHealth function (for testing) */
+  checkSwarmHealth?: (projectKey?: string) => Promise<{
+    healthy: boolean;
+    database: "connected" | "disconnected";
+    stats?: {
+      events: number;
+      agents: number;
+      messages: number;
+      reservations: number;
+    };
+  }>;
+  /** Custom getHiveWorkingDirectory function (for testing) */
+  getHiveWorkingDirectory?: () => string;
+  /** Custom logger instance (for testing) */
+  logger?: {
+    info: (data: unknown, message?: string) => void;
+    debug: (data: unknown, message?: string) => void;
+    warn: (data: unknown, message?: string) => void;
+    error: (data: unknown, message?: string) => void;
+  };
+}
+
+/**
  * Create the compaction hook for use in plugin registration
  *
  * Injects swarm context based on detection confidence:
@@ -1003,9 +1071,7 @@ async function detectSwarm(): Promise<SwarmDetection> {
  * Philosophy: Err on the side of continuation. A false positive costs
  * a bit of context space. A false negative loses the swarm.
  *
- * @param client - Optional OpenCode SDK client for scanning session messages.
- *                 When provided, extracts PRECISE swarm state from actual tool calls.
- *                 When undefined, falls back to hive/swarm-mail heuristic detection.
+ * @param options - Configuration options including SDK client and dependency injection hooks
  *
  * @example
  * ```typescript
@@ -1013,16 +1079,50 @@ async function detectSwarm(): Promise<SwarmDetection> {
  *
  * export const SwarmPlugin: Plugin = async (input) => ({
  *   tool: { ... },
- *   "experimental.session.compacting": createCompactionHook(input.client),
+ *   "experimental.session.compacting": createCompactionHook({ client: input.client }),
+ * });
+ * ```
+ *
+ * @example Testing with custom dependencies
+ * ```typescript
+ * const hook = createCompactionHook({
+ *   getHiveAdapter: async () => mockAdapter,
+ *   checkSwarmHealth: async () => mockHealth,
  * });
  * ```
  */
-export function createCompactionHook(client?: OpencodeClient) {
+export function createCompactionHook(
+  options?: OpencodeClient | CompactionHookOptions,
+) {
+  // Support legacy client-only signature: createCompactionHook(client)
+  // Check if it's CompactionHookOptions by looking for DI fields (not just 'client')
+  const isOptions =
+    options &&
+    typeof options === "object" &&
+    ("getHiveAdapter" in options ||
+      "checkSwarmHealth" in options ||
+      "getHiveWorkingDirectory" in options ||
+      "client" in options);
+  
+  const opts: CompactionHookOptions = isOptions
+    ? (options as CompactionHookOptions)
+    : { client: options as OpencodeClient | undefined };
+
+  const {
+    client,
+    getHiveAdapter: customGetHiveAdapter,
+    checkSwarmHealth: customCheckSwarmHealth,
+    getHiveWorkingDirectory: customGetHiveWorkingDirectory,
+    logger: customLogger,
+  } = opts;
   return async (
     input: { sessionID: string },
     output: { context: string[] },
   ): Promise<void> => {
     const startTime = Date.now();
+    
+    // Use custom logger if provided, otherwise use default
+    const log = customLogger || getLog();
     
     // Create metrics collector
     const metrics = createMetricsCollector({
@@ -1030,7 +1130,7 @@ export function createCompactionHook(client?: OpencodeClient) {
       has_sdk_client: !!client,
     });
 
-    getLog().info(
+    log.info(
       {
         session_id: input.sessionID,
         trigger: "session_compaction",
@@ -1051,7 +1151,12 @@ export function createCompactionHook(client?: OpencodeClient) {
       
       // Also run heuristic detection from hive/swarm-mail
       recordPhaseStart(metrics, CompactionPhase.DETECT);
-      const detection = await detectSwarm();
+      const detection = await detectSwarm(
+        customGetHiveAdapter || getHiveAdapter,
+        customCheckSwarmHealth || checkSwarmHealth,
+        customGetHiveWorkingDirectory || getHiveWorkingDirectory,
+        log,
+      );
 
       // Boost confidence if we found swarm evidence in session messages
       let effectiveConfidence = detection.confidence;
@@ -1134,7 +1239,7 @@ export function createCompactionHook(client?: OpencodeClient) {
           },
         });
 
-        getLog().info(
+        log.info(
           {
             confidence: effectiveConfidence,
             context_length: contextContent.length,
@@ -1171,7 +1276,7 @@ export function createCompactionHook(client?: OpencodeClient) {
           },
         });
 
-        getLog().info(
+        log.info(
           {
             confidence: effectiveConfidence,
             context_length: contextContent.length,
@@ -1185,7 +1290,7 @@ export function createCompactionHook(client?: OpencodeClient) {
           context_type: "none",
         });
         
-        getLog().debug(
+        log.debug(
           {
             confidence: effectiveConfidence,
             context_type: "none",
@@ -1199,7 +1304,7 @@ export function createCompactionHook(client?: OpencodeClient) {
       const duration = Date.now() - startTime;
       const summary = getMetricsSummary(metrics);
       
-      getLog().info(
+      log.info(
         {
           duration_ms: duration,
           success: true,
@@ -1230,7 +1335,7 @@ export function createCompactionHook(client?: OpencodeClient) {
         error: error instanceof Error ? error.message : String(error),
       });
       
-      getLog().error(
+      log.error(
         {
           duration_ms: duration,
           success: false,

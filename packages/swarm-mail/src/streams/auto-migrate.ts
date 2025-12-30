@@ -507,6 +507,257 @@ export async function migratePGLiteToGlobal(
 }
 
 /**
+ * Migrate local libSQL database to global database
+ *
+ * Migrates all tables from local libSQL DB to global DB using INSERT OR IGNORE.
+ * After successful migration, renames local DB to .migrated suffix.
+ *
+ * ## Idempotency
+ * - Skips if .migrated file already exists
+ * - Skips if local DB doesn't exist
+ * - Safe to call multiple times
+ *
+ * ## Tables Migrated
+ * - Streams: events, agents, messages, message_recipients, reservations, cursors, locks
+ * - Hive: beads, bead_dependencies, bead_labels, bead_comments, blocked_beads_cache, dirty_beads
+ * - Learning: eval_records, swarm_contexts, deferred
+ *
+ * @param localDbPath - absolute path to local database file
+ * @param globalDbPath - absolute path to global database file
+ * @returns migration statistics
+ *
+ * @example
+ * ```typescript
+ * const stats = await migrateLocalDbToGlobal(
+ *   "/project/.opencode/streams.db",
+ *   "~/.config/swarm-tools/swarm.db"
+ * );
+ * // Local DB renamed to /project/.opencode/streams.db.migrated
+ * ```
+ */
+export async function migrateLocalDbToGlobal(
+	localDbPath: string,
+	globalDbPath: string,
+): Promise<MigrationStats> {
+	const stats: MigrationStats = {
+		events: 0,
+		agents: 0,
+		messages: 0,
+		messageRecipients: 0,
+		reservations: 0,
+		cursors: 0,
+		locks: 0,
+		beads: 0,
+		beadDependencies: 0,
+		beadLabels: 0,
+		beadComments: 0,
+		blockedBeadsCache: 0,
+		dirtyBeads: 0,
+		evalRecords: 0,
+		swarmContexts: 0,
+		deferred: 0,
+		errors: [],
+	};
+
+	// Check if .migrated file already exists (skip if so)
+	const migratedPath = `${localDbPath}.migrated`;
+	if (existsSync(migratedPath)) {
+		return stats; // Skip - already migrated
+	}
+
+	// Check if local DB exists (skip if not)
+	if (!existsSync(localDbPath)) {
+		return stats; // Skip - no local DB to migrate
+	}
+
+	// Open local and global databases
+	const localDb = createClient({ url: `file:${localDbPath}` });
+	const globalDb = createClient({ url: `file:${globalDbPath}` });
+
+	// Get list of tables in local DB
+	const tablesResult = await localDb.execute(`
+    SELECT name FROM sqlite_master 
+    WHERE type='table' AND name NOT LIKE 'sqlite_%'
+  `);
+
+	const tableNames = new Set(
+		tablesResult.rows.map((row) => row.name as string),
+	);
+
+	// Migrate each table if it exists
+	// Streams subsystem
+	if (tableNames.has("events")) {
+		stats.events = await migrateTable(
+			localDb,
+			globalDb,
+			"events",
+			"id, type, project_key, timestamp, data, created_at", // Exclude 'sequence' - it's GENERATED
+			stats.errors,
+		);
+	}
+
+	if (tableNames.has("agents")) {
+		stats.agents = await migrateTable(
+			localDb,
+			globalDb,
+			"agents",
+			"id, project_key, name, program, model, task_description, registered_at, last_active_at",
+			stats.errors,
+		);
+	}
+
+	if (tableNames.has("messages")) {
+		stats.messages = await migrateTable(
+			localDb,
+			globalDb,
+			"messages",
+			"id, project_key, from_agent, subject, body, thread_id, importance, ack_required, created_at",
+			stats.errors,
+		);
+	}
+
+	if (tableNames.has("message_recipients")) {
+		stats.messageRecipients = await migrateTable(
+			localDb,
+			globalDb,
+			"message_recipients",
+			"message_id, agent_name, read_at, acked_at",
+			stats.errors,
+		);
+	}
+
+	if (tableNames.has("reservations")) {
+		stats.reservations = await migrateTable(
+			localDb,
+			globalDb,
+			"reservations",
+			"id, project_key, agent_name, path_pattern, exclusive, reason, created_at, expires_at, released_at, lock_holder_id",
+			stats.errors,
+		);
+	}
+
+	if (tableNames.has("cursors")) {
+		stats.cursors = await migrateTable(
+			localDb,
+			globalDb,
+			"cursors",
+			"id, stream, checkpoint, position, updated_at",
+			stats.errors,
+		);
+	}
+
+	if (tableNames.has("locks")) {
+		stats.locks = await migrateTable(
+			localDb,
+			globalDb,
+			"locks",
+			"resource, holder, seq, acquired_at, expires_at",
+			stats.errors,
+		);
+	}
+
+	// Hive subsystem
+	if (tableNames.has("beads")) {
+		stats.beads = await migrateTable(
+			localDb,
+			globalDb,
+			"beads",
+			"id, project_key, type, status, title, description, priority, parent_id, assignee, created_at, updated_at, closed_at, closed_reason, deleted_at, deleted_by, delete_reason, created_by",
+			stats.errors,
+		);
+	}
+
+	if (tableNames.has("bead_dependencies")) {
+		stats.beadDependencies = await migrateTable(
+			localDb,
+			globalDb,
+			"bead_dependencies",
+			"cell_id, depends_on_id, relationship, created_at, created_by",
+			stats.errors,
+		);
+	}
+
+	if (tableNames.has("bead_labels")) {
+		stats.beadLabels = await migrateTable(
+			localDb,
+			globalDb,
+			"bead_labels",
+			"cell_id, label, created_at",
+			stats.errors,
+		);
+	}
+
+	if (tableNames.has("bead_comments")) {
+		stats.beadComments = await migrateTable(
+			localDb,
+			globalDb,
+			"bead_comments",
+			"id, cell_id, author, body, parent_id, created_at, updated_at",
+			stats.errors,
+		);
+	}
+
+	if (tableNames.has("blocked_beads_cache")) {
+		stats.blockedBeadsCache = await migrateTable(
+			localDb,
+			globalDb,
+			"blocked_beads_cache",
+			"cell_id, blocker_ids, updated_at",
+			stats.errors,
+		);
+	}
+
+	if (tableNames.has("dirty_beads")) {
+		stats.dirtyBeads = await migrateTable(
+			localDb,
+			globalDb,
+			"dirty_beads",
+			"cell_id, marked_at",
+			stats.errors,
+		);
+	}
+
+	// Learning subsystem
+	if (tableNames.has("eval_records")) {
+		stats.evalRecords = await migrateTable(
+			localDb,
+			globalDb,
+			"eval_records",
+			"id, project_key, task, context, strategy, epic_title, subtasks, outcomes, overall_success, total_duration_ms, total_errors, human_accepted, human_modified, human_notes, file_overlap_count, scope_accuracy, time_balance_ratio, created_at, updated_at",
+			stats.errors,
+		);
+	}
+
+	if (tableNames.has("swarm_contexts")) {
+		stats.swarmContexts = await migrateTable(
+			localDb,
+			globalDb,
+			"swarm_contexts",
+			"id, project_key, epic_id, bead_id, strategy, files, dependencies, directives, recovery, created_at, checkpointed_at, recovered_at, recovered_from_checkpoint, updated_at",
+			stats.errors,
+		);
+	}
+
+	if (tableNames.has("deferred")) {
+		stats.deferred = await migrateTable(
+			localDb,
+			globalDb,
+			"deferred",
+			"id, url, resolved, value, error, expires_at, created_at",
+			stats.errors,
+		);
+	}
+
+	localDb.close();
+	globalDb.close();
+
+	// After successful migration, rename local DB to .migrated
+	renameSync(localDbPath, migratedPath);
+
+	return stats;
+}
+
+/**
  * Backup old database
  *
  * Renames database file or directory with .backup-<ISO-timestamp> suffix.

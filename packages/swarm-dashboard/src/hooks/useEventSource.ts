@@ -16,6 +16,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { UseEventSourceState } from "../lib/types";
+import { useCursorPersistence } from "./useCursorPersistence";
 
 const MAX_RETRY_DELAY = 30000; // 30 seconds
 const INITIAL_RETRY_DELAY = 1000; // 1 second
@@ -58,6 +59,9 @@ export function useEventSource(
   const retryDelayRef = useRef(initialRetryDelay);
   const unmountedRef = useRef(false);
   
+  // Cursor persistence for resumable streams
+  const { getCursor, setCursor } = useCursorPersistence(url || "");
+  
   // Store callbacks in refs to avoid reconnection on callback changes
   // This is the key fix - callbacks changing shouldn't trigger reconnect
   const onMessageRef = useRef(onMessage);
@@ -92,7 +96,17 @@ export function useEventSource(
     }));
 
     try {
-      const es = new EventSource(url);
+      // EventSource automatically sends Last-Event-ID header on same-page reconnects
+      // But NOT across page reloads - so we add cursor query param for initial load
+      let connectionUrl = url;
+      const lastCursor = getCursor();
+      if (lastCursor) {
+        const urlObj = new URL(url);
+        urlObj.searchParams.set("cursor", lastCursor);
+        connectionUrl = urlObj.toString();
+      }
+      
+      const es = new EventSource(connectionUrl);
       eventSourceRef.current = es;
 
       es.onopen = () => {
@@ -118,11 +132,15 @@ export function useEventSource(
         if (unmountedRef.current) return;
         
         // Track last event ID for resumable streams
+        // EventSource provides this via event.lastEventId (SSE id: field)
         if (event.lastEventId) {
           setState((prev) => ({
             ...prev,
             lastEventId: event.lastEventId,
           }));
+          
+          // Persist cursor to localStorage for page reload recovery
+          setCursor(event.lastEventId);
         }
         
         // Use ref to get latest callback without causing reconnect
@@ -178,7 +196,8 @@ export function useEventSource(
     }
   // Callbacks are stored in refs, so they don't need to be dependencies
   // This prevents reconnection when callbacks change (the key fix!)
-  }, [url, reconnect, initialRetryDelay, maxRetryDelay]);
+  // getCursor and setCursor are stable (memoized by useCursorPersistence)
+  }, [url, reconnect, initialRetryDelay, maxRetryDelay, getCursor, setCursor]);
 
   const disconnect = useCallback(() => {
     if (eventSourceRef.current) {

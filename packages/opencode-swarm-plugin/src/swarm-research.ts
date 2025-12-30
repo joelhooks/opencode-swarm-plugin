@@ -4,7 +4,6 @@
  * Provides runtime detection of available documentation tools:
  * - Skills (via skills_list)
  * - MCP servers (next-devtools, context7, fetch, pdf-brain)
- * - CLI tools (semantic-memory via ollama)
  *
  * Researchers use this to discover HOW to fetch docs.
  * Coordinators provide WHAT to research (tech stack).
@@ -75,11 +74,6 @@ const TOOL_DEFINITIONS: Omit<DiscoveredTool, "available">[] = [
     name: "pdf-brain",
     type: "mcp",
     capabilities: ["knowledge-base-search", "internal-docs"],
-  },
-  {
-    name: "semantic-memory",
-    type: "cli",
-    capabilities: ["storage", "semantic-search", "persistence"],
   },
 ];
 
@@ -332,7 +326,6 @@ function isMcpToolAvailable(_toolName: string): boolean {
  * Checks for:
  * - Skills (via skills discovery)
  * - MCP servers (next-devtools, context7, fetch, pdf-brain)
- * - CLI tools (semantic-memory)
  *
  * @returns List of discovered tools with availability status
  */

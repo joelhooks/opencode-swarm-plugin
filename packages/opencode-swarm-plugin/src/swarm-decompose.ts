@@ -938,7 +938,7 @@ Now generate the CellTree for the given task.`;
     return JSON.stringify(
       {
         prompt: fullPrompt,
-        subagent_type: "swarm/planner",
+        subagent_type: "swarm-planner",
         description: "Task decomposition planning",
         strategy: {
           selected: selectedStrategy,

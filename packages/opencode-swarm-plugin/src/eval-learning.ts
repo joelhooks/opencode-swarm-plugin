@@ -9,10 +9,10 @@
  *
  * ```typescript
  * import { learnFromEvalFailure } from "./eval-learning";
- * import { getMemoryAdapter } from "./memory-tools";
+ * import { getHivemindAdapter } from "./hivemind-tools";
  * import { getScoreHistory } from "./eval-history";
  *
- * const memoryAdapter = await getMemoryAdapter();
+ * const memoryAdapter = await getHivemindAdapter();
  * const history = getScoreHistory(projectPath, "compaction-test");
  *
  * const result = await learnFromEvalFailure(
@@ -56,7 +56,7 @@
  */
 
 import type { EvalRunRecord } from "./eval-history";
-import type { MemoryAdapter } from "./memory-tools";
+import type { MemoryAdapter } from "./hivemind-tools";
 
 // ============================================================================
 // Configuration
@@ -229,10 +229,10 @@ export function formatFailureContext(
  * @example
  * ```typescript
  * import { learnFromEvalFailure } from "./eval-learning.js";
- * import { getMemoryAdapter } from "./memory-tools.js";
+ * import { getHivemindAdapter } from "./hivemind-tools.js";
  * import { getScoreHistory } from "./eval-history.js";
  *
- * const memoryAdapter = await getMemoryAdapter();
+ * const memoryAdapter = await getHivemindAdapter();
  * const history = getScoreHistory("/path/to/project", "coordinator-behavior");
  *
  * const result = await learnFromEvalFailure(

@@ -88,6 +88,7 @@ export {
 	detectSourceType,
 	getGlobalDbPath,
 	migrateLibSQLToGlobal,
+	migrateLocalDbToGlobal,
 	migratePGLiteToGlobal,
 	migrateProjectToGlobal,
 	needsMigration,
@@ -344,6 +345,16 @@ export type { SessionViewerOpts } from "./sessions/session-viewer";
 
 export { FileWatcher } from "./sessions/file-watcher";
 export type { FileEvent, FileWatcherOptions } from "./sessions/file-watcher";
+
+export { SessionIndexer } from "./sessions/session-indexer";
+export type {
+	IndexDirectoryOptions,
+	IndexFileResult,
+	IndexHealth,
+	SearchOptions as SessionSearchOptions,
+	SessionStats,
+	StalenessResult,
+} from "./sessions/session-indexer";
 
 // ============================================================================
 // PGlite → libSQL Migration

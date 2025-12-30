@@ -86,39 +86,31 @@ describe("getDatabasePath()", () => {
     expect(getDatabasePath()).toBe(expected);
   });
   
-  it("returns project-local path when projectPath provided", async () => {
+  it("always returns global path even when projectPath provided", async () => {
+    // NEW BEHAVIOR: getDatabasePath always returns global path
+    // Project-local DBs are auto-migrated to global on first access
     const { getDatabasePath } = await import("./index");
-    const { tmpdir } = await import("node:os");
+    const { homedir, tmpdir } = await import("node:os");
     const { join } = await import("node:path");
     
-    // Use temp directory to avoid read-only filesystem errors
     const projectPath = join(tmpdir(), "test-project-" + Date.now());
-    const expected = join(projectPath, ".opencode", "swarm.db");
+    const expected = join(homedir(), ".config", "swarm-tools", "swarm.db");
     
     const result = getDatabasePath(projectPath);
     expect(result).toBe(expected);
-    
-    // Clean up
-    const { rmSync } = await import("node:fs");
-    rmSync(join(projectPath, ".opencode"), { recursive: true, force: true });
   });
   
-  it("resolves worktrees to main repo path", async () => {
+  it("always returns global path for worktree paths", async () => {
+    // NEW BEHAVIOR: getDatabasePath always returns global path
     const { getDatabasePath } = await import("./index");
-    const { tmpdir } = await import("node:os");
+    const { homedir, tmpdir } = await import("node:os");
     const { join } = await import("node:path");
     
-    // Use temp directory for real filesystem operations
     const projectPath = join(tmpdir(), "test-project-worktree-" + Date.now());
-    const expected = join(projectPath, ".opencode", "swarm.db");
+    const expected = join(homedir(), ".config", "swarm-tools", "swarm.db");
     
-    // For non-worktree paths, getMainRepoPath returns the same path
     const result = getDatabasePath(projectPath);
     expect(result).toBe(expected);
-    
-    // Clean up
-    const { rmSync } = await import("node:fs");
-    rmSync(join(projectPath, ".opencode"), { recursive: true, force: true });
   });
 });
 
@@ -134,5 +126,116 @@ describe("getOldProjectDbPaths()", () => {
       libsql: join(projectPath, ".opencode", "streams.db"),
       pglite: join(projectPath, ".opencode", "streams"),
     });
+  });
+});
+
+describe("getDatabasePath() auto-migration", () => {
+  it("triggers migration when local DB exists", async () => {
+    const { getDatabasePath } = await import("./index");
+    const { createClient } = await import("@libsql/client");
+    const { existsSync, mkdirSync, rmSync } = await import("node:fs");
+    const { tmpdir, homedir } = await import("node:os");
+    const { join } = await import("node:path");
+    
+    // Create temp project with real SQLite DB
+    const projectPath = join(tmpdir(), `test-auto-migrate-${Date.now()}`);
+    const localDbDir = join(projectPath, ".opencode");
+    const localDbPath = join(localDbDir, "streams.db");
+    const globalDbPath = join(homedir(), ".config", "swarm-tools", "swarm.db");
+    
+    try {
+      mkdirSync(localDbDir, { recursive: true });
+      
+      // Create a real SQLite database with a table
+      const localDb = createClient({ url: `file:${localDbPath}` });
+      await localDb.execute("CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY)");
+      await localDb.execute("INSERT INTO events (id) VALUES ('test-event')");
+      localDb.close();
+      
+      // Call getDatabasePath - triggers migration in background
+      const result = getDatabasePath(projectPath);
+      
+      // Should return global path immediately
+      expect(result).toBe(globalDbPath);
+      
+      // Wait for migration to complete (fire-and-forget)
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      // Local DB should be renamed to .migrated
+      expect(existsSync(localDbPath)).toBe(false);
+      expect(existsSync(`${localDbPath}.migrated`)).toBe(true);
+    } finally {
+      // Cleanup
+      if (existsSync(projectPath)) {
+        rmSync(projectPath, { recursive: true, force: true });
+      }
+    }
+  });
+  
+  it("does not trigger migration when local DB does not exist", async () => {
+    const { getDatabasePath } = await import("./index");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    
+    // Create temp project WITHOUT local DB
+    const projectPath = join(tmpdir(), `test-no-migrate-${Date.now()}`);
+    
+    // Call getDatabasePath - should NOT trigger migration (no local DB)
+    const result = getDatabasePath(projectPath);
+    
+    // Should return global path
+    const { homedir } = await import("node:os");
+    const expectedGlobal = join(homedir(), ".config", "swarm-tools", "swarm.db");
+    expect(result).toBe(expectedGlobal);
+  });
+  
+  it("only migrates once (idempotent)", async () => {
+    const { getDatabasePath } = await import("./index");
+    const { createClient } = await import("@libsql/client");
+    const { existsSync, mkdirSync, rmSync } = await import("node:fs");
+    const { tmpdir, homedir } = await import("node:os");
+    const { join } = await import("node:path");
+    
+    // Create temp project with real SQLite DB
+    const projectPath = join(tmpdir(), `test-idempotent-${Date.now()}`);
+    const localDbDir = join(projectPath, ".opencode");
+    const localDbPath = join(localDbDir, "streams.db");
+    const globalDbPath = join(homedir(), ".config", "swarm-tools", "swarm.db");
+    
+    try {
+      mkdirSync(localDbDir, { recursive: true });
+      
+      // Create a real SQLite database
+      const localDb = createClient({ url: `file:${localDbPath}` });
+      await localDb.execute("CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY)");
+      await localDb.execute("INSERT INTO events (id) VALUES ('test-event-2')");
+      localDb.close();
+      
+      // First call - triggers migration
+      getDatabasePath(projectPath);
+      
+      // Wait for migration to complete
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      // .migrated marker should exist
+      expect(existsSync(`${localDbPath}.migrated`)).toBe(true);
+      
+      // Second call - should NOT re-migrate (idempotent check)
+      const result = getDatabasePath(projectPath);
+      
+      // Should still return global path
+      expect(result).toBe(globalDbPath);
+      
+      // Wait a bit to ensure no second migration happened
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
+      // .migrated file should still exist (not duplicated)
+      expect(existsSync(`${localDbPath}.migrated`)).toBe(true);
+    } finally {
+      // Cleanup
+      if (existsSync(projectPath)) {
+        rmSync(projectPath, { recursive: true, force: true });
+      }
+    }
   });
 });

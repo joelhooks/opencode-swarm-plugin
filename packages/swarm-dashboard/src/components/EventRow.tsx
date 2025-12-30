@@ -5,7 +5,7 @@
  * Uses WebTUI/Catppuccin theme variables for dark/light mode
  */
 
-import type { AgentEvent } from "../lib/types";
+import type { AgentEvent, BaseEvent } from "../lib/types";
 
 interface EventRowProps {
   event: AgentEvent;

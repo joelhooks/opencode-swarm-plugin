@@ -21,17 +21,24 @@
  *
  * GET /events (SSE fallback)
  * - Server-Sent Events stream for browsers without WebSocket
+ * - Supports cursor-based reconnection via Last-Event-ID header or ?cursor= param
  *
  * GET /streams/:projectKey?offset=N&live=true
- * - offset: Start reading from this sequence (default 0)
+ * - Cursor-based resume: Last-Event-ID header (standard SSE) or ?cursor= or ?offset=
+ * - Priority: Last-Event-ID > cursor > offset (default 0)
  * - live: If true, keep connection open and stream new events via SSE
+ * - Each event includes SSE id: field for browser auto-reconnect
  *
  * ## SSE Format
  *
+ * id: <offset>\n
  * data: {json}\n\n
  *
- * Each event is sent as a JSON-encoded StreamEvent:
- * { offset: number, data: string, timestamp: number }
+ * Each event includes:
+ * - id: Event offset (enables browser Last-Event-ID auto-reconnect)
+ * - data: JSON-encoded StreamEvent { offset: number, data: string, timestamp: number }
+ *
+ * On reconnect, browser automatically sends Last-Event-ID header with last-seen offset.
  */
 
 import type { Server, ServerWebSocket } from "bun";
@@ -41,7 +48,104 @@ import type { HiveAdapter } from "../types/hive-adapter.js";
 // WebSocket client data
 interface WSClientData {
   subscriptionId: number;
+  clientId: string;
   unsubscribe?: () => void;
+}
+
+/**
+ * Client registry for tracking WebSocket/SSE connections and their cursors.
+ * 
+ * Each connected client (WebSocket or SSE) gets a unique ID and has their
+ * last-seen event cursor tracked. This enables cursor-based resume for
+ * reconnecting clients.
+ * 
+ * @example
+ * ```typescript
+ * const registry = new ClientRegistry();
+ * 
+ * // On client connect
+ * const clientId = registry.register();
+ * 
+ * // On event sent to client
+ * registry.updateCursor(clientId, event.offset);
+ * 
+ * // On client disconnect
+ * registry.unregister(clientId);
+ * 
+ * // Monitor active clients
+ * const clients = registry.getClients();
+ * console.log(`${clients.length} active clients`);
+ * ```
+ */
+export class ClientRegistry {
+  private clients = new Map<string, { cursor: number }>();
+  private idCounter = 0;
+
+  /**
+   * Register a new client and return unique client ID.
+   * 
+   * Client IDs are generated as: `client-{timestamp}-{counter}`
+   * Initial cursor is set to 0.
+   * 
+   * @returns Unique client ID string
+   */
+  register(): string {
+    const clientId = `client-${Date.now()}-${this.idCounter++}`;
+    this.clients.set(clientId, { cursor: 0 });
+    return clientId;
+  }
+
+  /**
+   * Update the last-seen cursor for a client.
+   * 
+   * Should be called after successfully sending an event to the client.
+   * If the client doesn't exist, this is a no-op (safe to call).
+   * 
+   * @param clientId - The client's unique ID
+   * @param cursor - The event offset/cursor that was sent
+   */
+  updateCursor(clientId: string, cursor: number): void {
+    const client = this.clients.get(clientId);
+    if (client) {
+      client.cursor = cursor;
+    }
+  }
+
+  /**
+   * Get the current cursor for a client.
+   * 
+   * @param clientId - The client's unique ID
+   * @returns The client's last-seen cursor, or undefined if client not found
+   */
+  getCursor(clientId: string): number | undefined {
+    return this.clients.get(clientId)?.cursor;
+  }
+
+  /**
+   * Unregister a client and clean up their data.
+   * 
+   * Should be called when a client disconnects (WebSocket close, SSE abort).
+   * Idempotent - safe to call multiple times or with non-existent client ID.
+   * 
+   * @param clientId - The client's unique ID
+   */
+  unregister(clientId: string): void {
+    this.clients.delete(clientId);
+  }
+
+  /**
+   * Get all registered clients with their cursors.
+   * 
+   * Useful for monitoring active connections and debugging.
+   * 
+   * @returns Array of client info objects (clientId + cursor)
+   */
+  getClients(): Array<{ clientId: string; cursor: number }> {
+    return Array.from(this.clients.entries()).map(([clientId, { cursor }]) => ({
+      clientId,
+      cursor,
+    }));
+  }
 }
 
 // Bun Server type with WebSocket data
@@ -56,6 +160,48 @@ const CORS_HEADERS = {
 
 // Heartbeat interval (30 seconds)
 const HEARTBEAT_INTERVAL = 30000;
+
+/**
+ * Parse cursor from request (Last-Event-ID header, cursor param, or offset param)
+ * 
+ * Priority: Last-Event-ID > cursor > offset > 0
+ * 
+ * @param req - Request object
+ * @param url - URL object with parsed query params
+ * @returns Parsed cursor value or error response
+ */
+function parseCursor(req: Request, url: URL): number | Response {
+  const lastEventId = req.headers.get("Last-Event-ID");
+  const cursorParam = url.searchParams.get("cursor");
+  const offsetParam = url.searchParams.get("offset");
+
+  // Priority: Last-Event-ID > cursor > offset
+  if (lastEventId) {
+    const cursor = Number.parseInt(lastEventId, 10);
+    if (Number.isNaN(cursor) || cursor < 0) {
+      return new Response("Invalid Last-Event-ID header", { status: 400, headers: CORS_HEADERS });
+    }
+    return cursor;
+  }
+  
+  if (cursorParam) {
+    const cursor = Number.parseInt(cursorParam, 10);
+    if (Number.isNaN(cursor) || cursor < 0) {
+      return new Response("Invalid cursor parameter", { status: 400, headers: CORS_HEADERS });
+    }
+    return cursor;
+  }
+  
+  if (offsetParam) {
+    const cursor = Number.parseInt(offsetParam, 10);
+    if (Number.isNaN(cursor) || cursor < 0) {
+      return new Response("Invalid offset parameter", { status: 400, headers: CORS_HEADERS });
+    }
+    return cursor;
+  }
+
+  return 0; // Default: start from beginning
+}
 
 /**
  * Configuration for the Durable Stream HTTP server
@@ -81,6 +227,8 @@ export interface DurableStreamServer {
   stop(): Promise<void>;
   /** Base URL of the server */
   url: string;
+  /** Client registry (for testing/monitoring) */
+  registry: ClientRegistry;
 }
 
 /**
@@ -119,6 +267,9 @@ export function createDurableStreamServer(
   // WebSocket clients for heartbeat
   const wsClients = new Set<ServerWebSocket<WSClientData>>();
   let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+  
+  // Client registry for cursor tracking
+  const registry = new ClientRegistry();
 
   async function start(): Promise<void> {
     if (bunServer) {
@@ -133,10 +284,19 @@ export function createDurableStreamServer(
       websocket: {
         open(ws) {
           wsClients.add(ws);
-          console.log(`[WS] Client connected (${wsClients.size} total)`);
           
-          // Send initial connection confirmation
-          ws.send(JSON.stringify({ type: "connected", timestamp: Date.now() }));
+          // Register client and track in data
+          const clientId = registry.register();
+          ws.data.clientId = clientId;
+          
+          console.log(`[WS] Client ${clientId} connected (${wsClients.size} total)`);
+          
+          // Send initial connection confirmation with client ID
+          ws.send(JSON.stringify({ 
+            type: "connected", 
+            clientId, 
+            timestamp: Date.now() 
+          }));
         },
         
         async message(ws, message) {
@@ -158,6 +318,8 @@ export function createDurableStreamServer(
                   if (event.offset > offset) {
                     try {
                       ws.send(JSON.stringify({ type: "event", ...event }));
+                      // Update cursor after successfully sending event
+                      registry.updateCursor(ws.data.clientId, event.offset);
                     } catch (error) {
                       console.error("[WS] Error sending event:", error);
                     }
@@ -185,7 +347,11 @@ export function createDurableStreamServer(
           if (ws.data.unsubscribe) {
             ws.data.unsubscribe();
           }
-          console.log(`[WS] Client disconnected (${wsClients.size} remaining)`);
+          
+          // Unregister client from registry
+          registry.unregister(ws.data.clientId);
+          
+          console.log(`[WS] Client ${ws.data.clientId} disconnected (${wsClients.size} remaining)`);
         },
       },
       
@@ -200,7 +366,10 @@ export function createDurableStreamServer(
         // WebSocket upgrade: GET /ws
         if (url.pathname === "/ws") {
           const upgraded = server.upgrade(req, {
-            data: { subscriptionId: subscriptionCounter++ },
+            data: { 
+              subscriptionId: subscriptionCounter++,
+              clientId: "" // Will be set in open handler
+            },
           });
           if (upgraded) {
             return undefined; // Bun handles the response
@@ -240,25 +409,34 @@ export function createDurableStreamServer(
           // Use configured projectKey or default to "*" for all
           const projectKeyForEvents = configProjectKey || "*";
           
-          // Parse query params
-          const offsetParam = url.searchParams.get("offset");
+          // Parse cursor from Last-Event-ID header (standard SSE) or query params
+          const cursorOrError = parseCursor(req, url);
+          if (cursorOrError instanceof Response) {
+            return cursorOrError;
+          }
+          const offset = cursorOrError;
+          
           const limitParam = url.searchParams.get("limit");
-          const offset = offsetParam ? Number.parseInt(offsetParam, 10) : 0;
           const limit = limitParam ? Number.parseInt(limitParam, 10) : 100;
 
           // Always live mode for /events endpoint
           const stream = new ReadableStream({
             async start(controller) {
               const encoder = new TextEncoder();
+              
+              // Register SSE client
+              const clientId = registry.register();
 
               // Send SSE comment to flush headers and establish connection
-              controller.enqueue(encoder.encode(": connected\n\n"));
+              controller.enqueue(encoder.encode(`: connected client=${clientId}\n\n`));
 
               // Send existing events first
               const existingEvents = await adapter.read(offset, limit);
               for (const event of existingEvents) {
-                const sse = `data: ${JSON.stringify(event)}\n\n`;
+                const sse = `id: ${event.offset}\ndata: ${JSON.stringify(event)}\n\n`;
                 controller.enqueue(encoder.encode(sse));
+                // Update cursor after sending
+                registry.updateCursor(clientId, event.offset);
               }
 
               // Subscribe to new events
@@ -267,8 +445,10 @@ export function createDurableStreamServer(
                 (event: StreamEvent) => {
                   if (event.offset > offset) {
                     try {
-                      const sse = `data: ${JSON.stringify(event)}\n\n`;
+                      const sse = `id: ${event.offset}\ndata: ${JSON.stringify(event)}\n\n`;
                       controller.enqueue(encoder.encode(sse));
+                      // Update cursor after successfully sending event
+                      registry.updateCursor(clientId, event.offset);
                     } catch (error) {
                       console.error("Error sending event:", error);
                     }
@@ -285,6 +465,8 @@ export function createDurableStreamServer(
                   sub.unsubscribe();
                   subscriptions.delete(subscriptionId);
                 }
+                // Unregister SSE client
+                registry.unregister(clientId);
                 try {
                   controller.close();
                 } catch {
@@ -321,19 +503,18 @@ export function createDurableStreamServer(
           return new Response("Project not found", { status: 404, headers: CORS_HEADERS });
         }
 
-        // Parse query params
-        const offsetParam = url.searchParams.get("offset");
+        // Parse cursor from Last-Event-ID header (standard SSE) or query params
+        const cursorOrError = parseCursor(req, url);
+        if (cursorOrError instanceof Response) {
+          return cursorOrError;
+        }
+        const offset = cursorOrError;
+
+        // Parse other query params
         const liveParam = url.searchParams.get("live");
         const limitParam = url.searchParams.get("limit");
-
-        const offset = offsetParam ? Number.parseInt(offsetParam, 10) : 0;
         const live = liveParam === "true";
         const limit = limitParam ? Number.parseInt(limitParam, 10) : 100;
-
-        // Validate offset
-        if (Number.isNaN(offset) || offset < 0) {
-          return new Response("Invalid offset parameter", { status: 400, headers: CORS_HEADERS });
-        }
 
         // ONE-SHOT MODE: Return events as JSON array
         if (!live) {
@@ -351,15 +532,20 @@ export function createDurableStreamServer(
         const stream = new ReadableStream({
           async start(controller) {
             const encoder = new TextEncoder();
+            
+            // Register SSE client
+            const clientId = registry.register();
 
             // Send SSE comment to flush headers and establish connection
-            controller.enqueue(encoder.encode(": connected\n\n"));
+            controller.enqueue(encoder.encode(`: connected client=${clientId}\n\n`));
 
             // Send existing events first
             const existingEvents = await adapter.read(offset, limit);
             for (const event of existingEvents) {
-              const sse = `data: ${JSON.stringify(event)}\n\n`;
+              const sse = `id: ${event.offset}\ndata: ${JSON.stringify(event)}\n\n`;
               controller.enqueue(encoder.encode(sse));
+              // Update cursor after sending
+              registry.updateCursor(clientId, event.offset);
             }
 
             // Subscribe to new events, passing offset to avoid async race
@@ -369,8 +555,10 @@ export function createDurableStreamServer(
                 // Only send events after our offset (adapter filters too, but double-check)
                 if (event.offset > offset) {
                   try {
-                    const sse = `data: ${JSON.stringify(event)}\n\n`;
+                    const sse = `id: ${event.offset}\ndata: ${JSON.stringify(event)}\n\n`;
                     controller.enqueue(encoder.encode(sse));
+                    // Update cursor after successfully sending event
+                    registry.updateCursor(clientId, event.offset);
                   } catch (error) {
                     // Client disconnected, will be cleaned up in cancel()
                     console.error("Error sending event:", error);
@@ -389,6 +577,8 @@ export function createDurableStreamServer(
                 sub.unsubscribe();
                 subscriptions.delete(subscriptionId);
               }
+              // Unregister SSE client
+              registry.unregister(clientId);
             };
 
             // Handle client disconnect
@@ -484,5 +674,6 @@ export function createDurableStreamServer(
       const effectivePort = bunServer?.port ?? port;
       return `http://localhost:${effectivePort}`;
     },
+    registry,
   };
 }

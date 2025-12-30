@@ -1,0 +1,86 @@
+/**
+ * CASS Tools Tests - Inhouse Implementation
+ * 
+ * Tests for the SessionIndexer-based CASS tools.
+ */
+import { describe, test, expect } from "bun:test";
+import { cassTools } from "./cass-tools";
+
+describe("cass_health", () => {
+	test("returns health status", async () => {
+		const result = await cassTools.cass_health.execute({});
+		
+		// Should return JSON
+		expect(() => JSON.parse(result)).not.toThrow();
+		
+		const health = JSON.parse(result);
+		expect(health).toHaveProperty("healthy");
+		expect(typeof health.healthy).toBe("boolean");
+	});
+});
+
+describe("cass_stats", () => {
+	test("returns statistics", async () => {
+		const result = await cassTools.cass_stats.execute({});
+		
+		// Should return JSON
+		expect(() => JSON.parse(result)).not.toThrow();
+		
+		const stats = JSON.parse(result);
+		expect(stats).toHaveProperty("total_sessions");
+		expect(stats).toHaveProperty("total_chunks");
+		expect(stats).toHaveProperty("by_agent");
+	});
+});
+
+describe("cass_search", () => {
+	test("handles empty query gracefully", async () => {
+		const result = await cassTools.cass_search.execute({ query: "test" });
+		
+		// Should not throw
+		expect(result).toBeTruthy();
+		
+		// Should either return results or "No results found" message
+		if (result.includes("No results found")) {
+			expect(result).toContain("Try:");
+		}
+	});
+});
+
+describe("cass_view", () => {
+	test("handles invalid path gracefully", async () => {
+		const result = await cassTools.cass_view.execute({ 
+			path: "/nonexistent/path.jsonl" 
+		});
+		
+		// Should return error JSON
+		expect(() => JSON.parse(result)).not.toThrow();
+		const error = JSON.parse(result);
+		expect(error).toHaveProperty("error");
+	});
+});
+
+describe("cass_expand", () => {
+	test("handles invalid path gracefully", async () => {
+		const result = await cassTools.cass_expand.execute({ 
+			path: "/nonexistent/path.jsonl",
+			line: 1
+		});
+		
+		// Should return error JSON
+		expect(() => JSON.parse(result)).not.toThrow();
+		const error = JSON.parse(result);
+		expect(error).toHaveProperty("error");
+	});
+});
+
+describe("cass_index", () => {
+	test.skip("runs without crashing", async () => {
+		// Skipped: Takes too long to index all directories
+		// This may take a while if there are many sessions
+		const result = await cassTools.cass_index.execute({});
+		
+		// Should not throw and return something
+		expect(result).toBeTruthy();
+	}, { timeout: 60000 }); // 60s timeout for indexing
+});

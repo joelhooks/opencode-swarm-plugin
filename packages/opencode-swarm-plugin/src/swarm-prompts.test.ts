@@ -580,7 +580,7 @@ describe("swarm_spawn_researcher tool", () => {
     expect(parsed.prompt.length).toBeGreaterThan(100);
   });
 
-  test("returns subagent_type field as 'swarm/researcher'", async () => {
+  test("returns subagent_type field as 'swarm-researcher'", async () => {
     const { swarm_spawn_researcher } = await import("./swarm-prompts");
     
     const result = await swarm_spawn_researcher.execute({
@@ -591,7 +591,7 @@ describe("swarm_spawn_researcher tool", () => {
     });
 
     const parsed = JSON.parse(result);
-    expect(parsed.subagent_type).toBe("swarm/researcher");
+    expect(parsed.subagent_type).toBe("swarm-researcher");
   });
 
   test("returns expected_output schema", async () => {
@@ -853,7 +853,7 @@ describe("COORDINATOR_PROMPT", () => {
     const phase15Content = phase15Match[0];
 
     expect(phase15Content).toContain("swarm_spawn_researcher");
-    expect(phase15Content).toContain("Task(subagent_type=\"swarm/researcher\"");
+    expect(phase15Content).toContain("Task(subagent_type=\"swarm-researcher\"");
   });
 
   test("has section explicitly forbidding direct research tool calls", () => {

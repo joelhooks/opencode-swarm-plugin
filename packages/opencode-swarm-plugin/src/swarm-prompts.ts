@@ -296,10 +296,10 @@ swarmmail_init(project_path="{project_path}", task_description="{bead_id}: {subt
 
 ### Step 2: 🧠 Query Past Learnings (MANDATORY - BEFORE starting work)
 
-**⚠️ CRITICAL: ALWAYS query semantic memory BEFORE writing ANY code.**
+**⚠️ CRITICAL: ALWAYS query hivemind BEFORE writing ANY code.**
 
 \`\`\`
-semantic-memory_find(query="<keywords from your task>", limit=5, expand=true)
+hivemind_find(query="<keywords from your task>", limit=5, expand=true)
 \`\`\`
 
 **Why this is MANDATORY:**
@@ -318,7 +318,7 @@ semantic-memory_find(query="<keywords from your task>", limit=5, expand=true)
 - **Performance**: Search "<technology> performance optimization"
 
 **BEFORE you start coding:**
-1. Run semantic-memory_find with keywords from your task
+1. Run hivemind_find with keywords from your task
 2. Read the results with expand=true for full content
 3. Check if any memory solves your problem or warns of pitfalls
 4. Adjust your approach based on past learnings
@@ -414,7 +414,7 @@ swarm_checkpoint(
 **If you learned it the hard way, STORE IT so the next agent doesn't have to.**
 
 \`\`\`
-semantic-memory_store(
+hivemind_store(
   information="<what you learned, WHY it matters, how to apply it>",
   tags="<domain, tech-stack, pattern-type>"
 )
@@ -471,12 +471,12 @@ swarm_complete(
 
 If you encounter unknown API behavior or version-specific issues:
 
-1. **Check semantic-memory first:**
-   \`semantic-memory_find(query="<library> <version> <topic>", limit=3, expand=true)\`
+1. **Check hivemind first:**
+   \`hivemind_find(query="<library> <version> <topic>", limit=3, expand=true)\`
 
 2. **If not found, spawn researcher:**
    \`swarm_spawn_researcher(research_id="{bead_id}-research", epic_id="{epic_id}", tech_stack=["<library>"], project_path="{project_path}")\`
-   Then spawn with Task tool: \`Task(subagent_type="swarm/researcher", prompt="<from above>")\`
+   Then spawn with Task tool: \`Task(subagent_type="swarm-researcher", prompt="<from above>")\`
 
 3. **Wait for research, then continue**
 
@@ -560,20 +560,20 @@ Other cell operations:
 
 **NON-NEGOTIABLE:**
 1. Step 1 (swarmmail_init) MUST be first - do it before anything else
-2. 🧠 Step 2 (semantic-memory_find) MUST happen BEFORE starting work - query first, code second
+2. 🧠 Step 2 (hivemind_find) MUST happen BEFORE starting work - query first, code second
 3. Step 4 (swarmmail_reserve) - YOU reserve files, not coordinator
 4. Step 6 (swarm_progress) - Report at milestones, don't work silently
-5. 💾 Step 8 (semantic-memory_store) - If you learned something hard, STORE IT
+5. 💾 Step 8 (hivemind_store) - If you learned something hard, STORE IT
 6. Step 9 (swarm_complete) - Use this to close, NOT hive_close
 
 **If you skip these steps:**
 - Your work won't be tracked (swarm_complete will fail)
-- 🔄 You'll waste time repeating already-solved problems (no semantic memory query)
+- 🔄 You'll waste time repeating already-solved problems (no hivemind query)
 - Edit conflicts with other agents (no file reservation)
 - Lost work if you crash (no checkpoints)
 - 🔄 Future agents repeat YOUR mistakes (no learnings stored)
 
-**Memory is the swarm's collective intelligence. Query it. Feed it.**
+**Hivemind is the swarm's collective intelligence. Query it. Feed it.**
 
 Begin now.`;
 
@@ -646,7 +646,7 @@ The following tools are **FORBIDDEN** for coordinators to call:
 
 **INSTEAD:** Use \`swarm_spawn_researcher\` (see Phase 1.5 below) to spawn a researcher worker who:
 - Fetches documentation in disposable context
-- Stores full details in semantic-memory
+- Stores full details in hivemind
 - Returns a condensed summary for shared_context
 
 ## Workflow
@@ -711,7 +711,7 @@ swarm_spawn_researcher(
 )
 
 // 2. Spawn researcher as Task subagent
-const researchFindings = await Task(subagent_type="swarm/researcher", prompt="<from above>")
+const researchFindings = await Task(subagent_type="swarm-researcher", prompt="<from above>")
 
 // 3. Researcher returns condensed summary
 // Use this summary in shared_context for workers
@@ -726,10 +726,10 @@ const researchFindings = await Task(subagent_type="swarm/researcher", prompt="<f
 **When NOT to spawn a researcher:**
 - Using well-known stable APIs (React hooks, Express middleware)
 - Task is purely refactoring existing code
-- You already have relevant findings from semantic-memory or CASS
+- You already have relevant findings from hivemind
 
 **Researcher output:**
-- Full findings stored in semantic-memory (searchable by future agents)
+- Full findings stored in hivemind (searchable by future agents)
 - Condensed 3-5 bullet summary returned for shared_context
 
 ### Phase 2: Knowledge Gathering (MANDATORY)
@@ -737,9 +737,9 @@ const researchFindings = await Task(subagent_type="swarm/researcher", prompt="<f
 **Before decomposing, query ALL knowledge sources:**
 
 \`\`\`
-semantic-memory_find(query="<task keywords>", limit=5)   # Past learnings
-cass_search(query="<task description>", limit=5)         # Similar past tasks  
-skills_list()                                            # Available skills
+hivemind_find(query="<task keywords>", limit=5)                              # Past learnings
+hivemind_find(query="<task description>", limit=5, collection="sessions")    # Similar past tasks  
+skills_list()                                                                # Available skills
 \`\`\`
 
 Synthesize findings into shared_context for workers.
@@ -769,20 +769,20 @@ swarm_validate_decomposition(response="<CellTree JSON>")
 \`\`\`
 // Single message with multiple Task calls
 swarm_spawn_subtask(bead_id_1, epic_id, title_1, files_1, shared_context, project_path="{project_path}")
-Task(subagent_type="swarm/worker", prompt="<from above>")
+Task(subagent_type="swarm-worker", prompt="<from above>")
 swarm_spawn_subtask(bead_id_2, epic_id, title_2, files_2, shared_context, project_path="{project_path}")
-Task(subagent_type="swarm/worker", prompt="<from above>")
+Task(subagent_type="swarm-worker", prompt="<from above>")
 \`\`\`
 
 **For sequential work:**
 \`\`\`
 // Spawn worker 1, wait for completion
 swarm_spawn_subtask(bead_id_1, ...)
-const result1 = await Task(subagent_type="swarm/worker", prompt="<from above>")
+const result1 = await Task(subagent_type="swarm-worker", prompt="<from above>")
 
 // THEN spawn worker 2 with context from worker 1
 swarm_spawn_subtask(bead_id_2, ..., shared_context="Worker 1 completed: " + result1)
-const result2 = await Task(subagent_type="swarm/worker", prompt="<from above>")
+const result2 = await Task(subagent_type="swarm-worker", prompt="<from above>")
 \`\`\`
 
 **NEVER do the work yourself.** Even if it seems faster, spawn a worker.
@@ -864,7 +864,7 @@ Begin with Phase 0 (Socratic Planning) unless \`--fast\` or \`--auto\` flag is p
  * Spawned BEFORE decomposition to gather technology documentation.
  * Researchers receive an EXPLICIT list of technologies to research from the coordinator.
  * They dynamically discover WHAT TOOLS are available to fetch docs.
- * Output: condensed summary for shared_context + detailed findings in semantic-memory.
+ * Output: condensed summary for shared_context + detailed findings in hivemind.
  */
 export const RESEARCHER_PROMPT = `You are a swarm researcher gathering documentation for: **{research_id}**
 
@@ -920,9 +920,9 @@ For EACH technology in the list:
 - Note breaking changes, new features, migration complexity
 
 ### Step 5: Store Detailed Findings
-For EACH technology, store in semantic-memory:
+For EACH technology, store in hivemind:
 \`\`\`
-semantic-memory_store(
+hivemind_store(
   information="<technology-name> <version>: <key patterns, gotchas, API changes, compatibility notes>",
   tags="research, <tech-name>, documentation, {epic_id}"
 )
@@ -936,7 +936,7 @@ Send condensed findings to coordinator:
 swarmmail_send(
   to=["coordinator"],
   subject="Research Complete: {research_id}",
-  body="<brief summary - see semantic-memory for details>",
+  body="<brief summary - see hivemind for details>",
   thread_id="{epic_id}"
 )
 \`\`\`
@@ -953,7 +953,7 @@ Output JSON with:
       "key_patterns": ["string"],
       "gotchas": ["string"],
       "breaking_changes": ["string"],  // Only if --check-upgrades
-      "memory_id": "string"  // ID of semantic-memory entry
+      "memory_id": "string"  // ID of hivemind entry
     }
   ],
   "summary": "string"  // Condensed summary for shared_context
@@ -966,12 +966,12 @@ Output JSON with:
 1. Step 1 (swarmmail_init) MUST be first
 2. Research ONLY the technologies the coordinator specified
 3. Fetch docs for INSTALLED versions (unless --check-upgrades)
-4. Store detailed findings in semantic-memory (one per technology)
+4. Store detailed findings in hivemind (one per technology)
 5. Return condensed summary for coordinator (full details in memory)
 6. Use appropriate doc tools (nextjs_docs for Next.js, context7 for libraries, etc.)
 
 **Output goes TWO places:**
-- **semantic-memory**: Detailed findings (searchable by future agents)
+- **hivemind**: Detailed findings (searchable by future agents)
 - **Return JSON**: Condensed summary (for coordinator's shared_context)
 
 Begin research now.`;
@@ -1303,7 +1303,7 @@ async function getWorkerInsights(
 
 ${learnings.join("\n")}
 
-**Check semantic-memory for full details if needed.**`;
+**Check hivemind for full details if needed.**`;
     }
     
     // Combine both sources
@@ -1724,7 +1724,7 @@ export const swarm_spawn_subtask = tool({
  */
 export const swarm_spawn_researcher = tool({
   description:
-    "Prepare a research task for spawning. Returns prompt for gathering technology documentation. Researcher fetches docs and stores findings in semantic-memory.",
+    "Prepare a research task for spawning. Returns prompt for gathering technology documentation. Researcher fetches docs and stores findings in hivemind.",
   args: {
     research_id: tool.schema.string().describe("Unique ID for this research task"),
     epic_id: tool.schema.string().describe("Parent epic ID"),
@@ -1756,7 +1756,7 @@ export const swarm_spawn_researcher = tool({
         tech_stack: args.tech_stack,
         project_path: args.project_path,
         check_upgrades: args.check_upgrades ?? false,
-        subagent_type: "swarm/researcher",
+        subagent_type: "swarm-researcher",
         expected_output: {
           technologies: [
             {

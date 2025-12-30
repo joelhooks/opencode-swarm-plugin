@@ -11,6 +11,14 @@ import pino from "pino";
  * Instead of trying to reset the cached logger instances (which doesn't work in Bun ESM),
  * we test the logger behavior directly using unique log directories per test.
  * The logger module caches by logDir path, so unique paths = unique instances.
+ * 
+ * IMPORTANT: Test directories MUST be created with mkdir() BEFORE calling getLogger/createChildLogger
+ * to prevent ENOENT race conditions. The race happens when:
+ * 1. Test calls getLogger(testLogDir) which triggers ensureLogDir(testLogDir)
+ * 2. Test immediately calls readdir(testLogDir) 
+ * 3. If ensureLogDir hasn't completed, readdir fails with ENOENT
+ * 
+ * Fix: Create directories explicitly in tests before any logger operations.
  */
 describe("Logger Infrastructure", () => {
   let tempRoot: string;
@@ -44,6 +52,7 @@ describe("Logger Infrastructure", () => {
     test("returns a valid Pino logger instance", async () => {
       // Use unique dir to avoid cache conflicts
       const testLogDir = join(tempRoot, `test-${Date.now()}-1`);
+      await mkdir(testLogDir, { recursive: true });
       process.env.SWARM_LOG_FILE = "1";
       
       const { getLogger } = await import("./logger");
@@ -68,6 +77,7 @@ describe("Logger Infrastructure", () => {
 
     test("creates log file when SWARM_LOG_FILE=1", async () => {
       const testLogDir = join(tempRoot, `test-${Date.now()}-3`);
+      await mkdir(testLogDir, { recursive: true });
       process.env.SWARM_LOG_FILE = "1";
       
       const { getLogger } = await import("./logger");
@@ -85,6 +95,7 @@ describe("Logger Infrastructure", () => {
 
     test("writes log entries to file", async () => {
       const testLogDir = join(tempRoot, `test-${Date.now()}-4`);
+      await mkdir(testLogDir, { recursive: true });
       process.env.SWARM_LOG_FILE = "1";
       
       const { getLogger } = await import("./logger");
@@ -107,6 +118,7 @@ describe("Logger Infrastructure", () => {
   describe("createChildLogger", () => {
     test("creates child logger with module namespace", async () => {
       const testLogDir = join(tempRoot, `test-${Date.now()}-5`);
+      await mkdir(testLogDir, { recursive: true });
       process.env.SWARM_LOG_FILE = "1";
       
       const { createChildLogger } = await import("./logger");
@@ -118,6 +130,7 @@ describe("Logger Infrastructure", () => {
 
     test("child logger writes to module-specific file", async () => {
       const testLogDir = join(tempRoot, `test-${Date.now()}-6`);
+      await mkdir(testLogDir, { recursive: true });
       process.env.SWARM_LOG_FILE = "1";
       
       const { createChildLogger } = await import("./logger");
@@ -133,6 +146,7 @@ describe("Logger Infrastructure", () => {
 
     test("multiple child loggers write to separate files", async () => {
       const testLogDir = join(tempRoot, `test-${Date.now()}-7`);
+      await mkdir(testLogDir, { recursive: true });
       process.env.SWARM_LOG_FILE = "1";
       
       const { createChildLogger } = await import("./logger");

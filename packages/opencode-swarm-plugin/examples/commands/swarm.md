@@ -57,7 +57,7 @@ $ARGUMENTS
 │     → Caught worker blocked on database schema              │
 │     → Unblocked by coordinating with upstream worker        │
 │                                                             │
-│  ✅ Delegated planning to swarm/planner subagent            │
+│  ✅ Delegated planning to swarm-planner subagent            │
 │     → Main context stayed clean (only received JSON)        │
 │     → Scaled to 7 workers without context exhaustion        │
 │                                                             │
@@ -346,7 +346,7 @@ swarm_plan_interactive(
 >
 > **DO NOT decompose inline in the coordinator thread.** This consumes massive context with file reading, CASS queries, and reasoning.
 >
-> **ALWAYS delegate to a `swarm/planner` subagent** that returns only the validated CellTree JSON.
+> **ALWAYS delegate to a `swarm-planner` subagent** that returns only the validated CellTree JSON.
 
 **❌ Don't do this (inline planning):**
 
@@ -365,9 +365,9 @@ hive_create(title="Plan: <task>", type="task", description="Decompose into subta
 # 2. Get final prompt from swarm_plan_interactive (when ready_to_decompose=true)
 # final_prompt = <from last swarm_plan_interactive call>
 
-# 3. Delegate to swarm/planner subagent
+# 3. Delegate to swarm-planner subagent
 Task(
-  subagent_type="swarm/planner",
+  subagent_type="swarm-planner",
   description="Decompose task: <task>",
   prompt="
 You are a swarm planner. Generate a CellTree for this task.
@@ -459,7 +459,7 @@ See full skill list with skills_list().
 Then spawn:
 
 ```bash
-Task(subagent_type="swarm/worker", description="<bead-title>", prompt="<from swarm_spawn_subtask>")
+Task(subagent_type="swarm-worker", description="<bead-title>", prompt="<from swarm_spawn_subtask>")
 ```
 
 **Event tracked:** `worker_spawned` (for each worker)
@@ -639,7 +639,7 @@ These events are now tracked for coordinator evaluation:
 | `session_initialized`    | swarmmail_init called                     |
 | `skill_loaded`           | skills_use called                         |
 | `researcher_spawned`     | Task(subagent_type="swarm-researcher")    |
-| `worker_spawned`         | Task(subagent_type="swarm/worker")        |
+| `worker_spawned`         | Task(subagent_type="swarm-worker")        |
 | `decomposition_complete` | hive_create_epic called                   |
 | `inbox_checked`          | swarmmail_inbox called                    |
 | `blocker_resolved`       | Coordinator unblocked stuck worker        |
@@ -672,7 +672,7 @@ Not: Do Everything Inline → Run Out of Context → Fail
 - [ ] Knowledge gathered (semantic-memory, CASS, pdf-brain, skills)
 - [ ] **Skills loaded** → Event: `skill_loaded` (per skill)
 - [ ] **Researcher spawned if needed** → Event: `researcher_spawned`
-- [ ] **Planning delegated to swarm/planner subagent** (NOT inline)
+- [ ] **Planning delegated to swarm-planner subagent** (NOT inline)
 - [ ] CellTree validated (no file conflicts)
 - [ ] Epic + subtasks created → Event: `decomposition_complete`
 - [ ] **Coordinator did NOT reserve files** (workers do this themselves)

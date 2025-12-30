@@ -12,6 +12,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { getMainRepoPath } from "../db/worktree.js";
+import { migrateLocalDbToGlobal } from "./auto-migrate.js";
 
 // ============================================================================
 // Query Timeout Wrapper
@@ -77,32 +78,38 @@ export async function withTiming<T>(
 // ============================================================================
 
 /**
- * Get database file path with worktree resolution
+ * Get the database path for swarm-mail
  *
- * If projectPath is provided, returns {mainRepoPath}/.opencode/swarm.db
- * (resolving to main repo if path is a worktree).
- * If no projectPath, returns global ~/.config/swarm-tools/swarm.db
+ * ALWAYS returns the global database: ~/.config/swarm-tools/swarm.db
+ * 
+ * If a projectPath is provided and has a local swarm.db, it will be
+ * auto-migrated to the global database on first access.
  *
- * @param projectPath - Optional project path (resolves worktrees to main repo)
- * @returns Path to database file
+ * @param projectPath - Optional project path (triggers auto-migration if local DB exists)
+ * @returns Path to global database file
  */
 export function getDatabasePath(projectPath?: string): string {
-	if (projectPath) {
-		// Use worktree resolution - ensures DB is in main repo's .opencode, not worktree's
-		const mainRepoPath = getMainRepoPath(projectPath);
-		const opencodeDir = join(mainRepoPath, ".opencode");
-		if (!existsSync(opencodeDir)) {
-			mkdirSync(opencodeDir, { recursive: true });
-		}
-		return join(opencodeDir, "swarm.db");
-	}
-	
-	// No project path - use global database
 	const globalDir = join(homedir(), ".config", "swarm-tools");
 	if (!existsSync(globalDir)) {
 		mkdirSync(globalDir, { recursive: true });
 	}
-	return join(globalDir, "swarm.db");
+	const globalDbPath = join(globalDir, "swarm.db");
+	
+	// Auto-migrate project-local DBs to global DB
+	if (projectPath) {
+		const oldPaths = getOldProjectDbPaths(projectPath);
+		
+		// Check for old libSQL database (.opencode/streams.db)
+		if (existsSync(oldPaths.libsql)) {
+			// Trigger migration - runs async but we don't wait
+			// Idempotent: safe to call multiple times, skips if .migrated exists
+			migrateLocalDbToGlobal(oldPaths.libsql, globalDbPath).catch((err) => {
+				console.error(`[swarm-mail] Migration failed: ${err.message}`);
+			});
+		}
+	}
+	
+	return globalDbPath;
 }
 
 /**
@@ -173,3 +180,6 @@ export * from "./swarm-mail";
 
 // Decision trace store for observability
 export * from "./decision-trace-store";
+
+// Client buffer for backpressure handling
+export * from "./client-buffer";

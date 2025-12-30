@@ -45,7 +45,7 @@ Each task gets a fresh agent with clean context. No accumulated debugging cruft.
 // ✓ Fresh agent per task
 for (const subtask of subtasks) {
   Task({
-    subagent_type: "swarm/worker",
+    subagent_type: "swarm-worker",
     prompt: generatePrompt(subtask)  // Fresh context
   });
 }
@@ -273,13 +273,13 @@ const plan = await swarm_plan_prompt({ task });
 
 // ✓ Delegate to subagent (clean context)
 const result = await Task({
-  subagent_type: "swarm/planner",
+  subagent_type: "swarm-planner",
   prompt: "Generate BeadTree for: " + task
 });
 // Only receive final JSON, not reasoning
 ```
 
-**Fix:** Delegate planning to `swarm/planner` subagent.
+**Fix:** Delegate planning to `swarm-planner` subagent.
 
 ---
 
@@ -297,7 +297,7 @@ if (subagentFailed) {
 // ✓ Dispatch fix subagent (fresh context)
 if (subagentFailed) {
   Task({
-    subagent_type: "swarm/worker",
+    subagent_type: "swarm-worker",
     prompt: "Fix: " + failureDetails
   });
 }

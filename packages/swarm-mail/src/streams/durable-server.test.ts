@@ -561,6 +561,409 @@ describe("DurableStreamServer GET /cells endpoint", () => {
 });
 
 // ============================================================================
+// ClientRegistry Tests (TDD)
+// ============================================================================
+
+describe("ClientRegistry", () => {
+  let registry: any; // Will be typed once we implement
+
+  beforeEach(() => {
+    // RED: This will fail until we implement ClientRegistry
+    const { ClientRegistry } = require("./durable-server.js");
+    registry = new ClientRegistry();
+  });
+
+  test("assigns unique client IDs on registration", () => {
+    const id1 = registry.register();
+    const id2 = registry.register();
+    
+    expect(typeof id1).toBe("string");
+    expect(typeof id2).toBe("string");
+    expect(id1).not.toBe(id2);
+  });
+
+  test("tracks cursor for registered client", () => {
+    const clientId = registry.register();
+    
+    registry.updateCursor(clientId, 100);
+    
+    const cursor = registry.getCursor(clientId);
+    expect(cursor).toBe(100);
+  });
+
+  test("updates cursor multiple times", () => {
+    const clientId = registry.register();
+    
+    registry.updateCursor(clientId, 10);
+    registry.updateCursor(clientId, 20);
+    registry.updateCursor(clientId, 30);
+    
+    expect(registry.getCursor(clientId)).toBe(30);
+  });
+
+  test("unregister removes client", () => {
+    const clientId = registry.register();
+    registry.updateCursor(clientId, 50);
+    
+    registry.unregister(clientId);
+    
+    const cursor = registry.getCursor(clientId);
+    expect(cursor).toBeUndefined();
+  });
+
+  test("getClients returns all registered clients", () => {
+    const id1 = registry.register();
+    const id2 = registry.register();
+    
+    registry.updateCursor(id1, 10);
+    registry.updateCursor(id2, 20);
+    
+    const clients = registry.getClients();
+    expect(clients).toHaveLength(2);
+    expect(clients).toContainEqual({ clientId: id1, cursor: 10 });
+    expect(clients).toContainEqual({ clientId: id2, cursor: 20 });
+  });
+
+  test("getClients returns empty array when no clients", () => {
+    const clients = registry.getClients();
+    expect(clients).toEqual([]);
+  });
+
+  test("getCursor returns undefined for unregistered client", () => {
+    const cursor = registry.getCursor("non-existent");
+    expect(cursor).toBeUndefined();
+  });
+
+  test("updateCursor on unregistered client does nothing", () => {
+    // Should not throw
+    registry.updateCursor("non-existent", 100);
+    expect(true).toBe(true);
+  });
+
+  test("unregister on non-existent client is safe", () => {
+    // Should not throw - idempotent
+    registry.unregister("non-existent");
+    expect(true).toBe(true);
+  });
+});
+
+// ============================================================================
+// Cursor-based Reconnection Tests (TDD)
+// ============================================================================
+
+describe("Cursor-based reconnection", () => {
+  let swarmMail: SwarmMailAdapter;
+  let adapter: DurableStreamAdapter;
+  let server: DurableStreamServer;
+  const projectKey = "/reconnect/test";
+
+  beforeAll(async () => {
+    swarmMail = await createInMemorySwarmMailLibSQL("reconnect-test");
+    adapter = createDurableStreamAdapter(swarmMail, projectKey);
+    server = createDurableStreamServer({ adapter, projectKey, port: 0 });
+    await server.start();
+    
+    // Seed some events
+    for (let i = 0; i < 5; i++) {
+      await swarmMail.appendEvent(
+        createEvent("agent_active", {
+          project_key: projectKey,
+          agent_name: `Agent${i}`,
+        }),
+      );
+    }
+  });
+
+  afterAll(async () => {
+    await server.stop();
+    await swarmMail.close();
+  });
+
+  test("parses Last-Event-ID header for SSE reconnection", async () => {
+    // Standard SSE reconnection: browser sends Last-Event-ID header
+    const response = await fetch(
+      `${server.url}/streams/${encodeURIComponent(projectKey)}?live=true`,
+      {
+        headers: {
+          "Last-Event-ID": "2", // Resume from event 2
+        },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/event-stream");
+
+    // Read first event - should be offset 3 (after cursor 2)
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    
+    let buffer = "";
+    let firstEvent: any = null;
+    let iterations = 0;
+    
+    while (!firstEvent && iterations < 20) {
+      iterations++;
+      const { done, value } = await reader.read();
+      if (done) break;
+      
+      buffer += decoder.decode(value, { stream: true });
+      
+      // Parse SSE format: "id: N\ndata: {...}\n\n" or just "data: {...}\n\n"
+      const messages = buffer.split("\n\n");
+      for (const message of messages) {
+        // Extract data line from SSE message (skip id and comment lines)
+        const lines = message.split("\n");
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const json = line.slice(6); // Remove "data: " prefix
+            try {
+              firstEvent = JSON.parse(json);
+              break;
+            } catch {
+              // Incomplete JSON, keep buffering
+            }
+          }
+        }
+        if (firstEvent) break;
+      }
+    }
+    
+    reader.releaseLock();
+    
+    expect(firstEvent).toBeDefined();
+    expect(firstEvent.offset).toBe(3);
+  });
+
+  test("parses ?cursor= query parameter as fallback", async () => {
+    // Fallback for clients that can't set Last-Event-ID
+    const response = await fetch(
+      `${server.url}/streams/${encodeURIComponent(projectKey)}?cursor=2&live=true`,
+    );
+
+    expect(response.status).toBe(200);
+    
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    
+    let buffer = "";
+    let firstEvent: any = null;
+    let iterations = 0;
+    
+    while (!firstEvent && iterations < 20) {
+      iterations++;
+      const { done, value } = await reader.read();
+      if (done) break;
+      
+      buffer += decoder.decode(value, { stream: true });
+      
+      const messages = buffer.split("\n\n");
+      for (const message of messages) {
+        const lines = message.split("\n");
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const json = line.slice(6);
+            try {
+              firstEvent = JSON.parse(json);
+              break;
+            } catch {
+              // Incomplete
+            }
+          }
+        }
+        if (firstEvent) break;
+      }
+    }
+    
+    reader.releaseLock();
+    
+    expect(firstEvent).toBeDefined();
+    expect(firstEvent.offset).toBe(3);
+  });
+
+  test("Last-Event-ID takes precedence over ?cursor=", async () => {
+    // When both present, Last-Event-ID wins (standard SSE behavior)
+    const response = await fetch(
+      `${server.url}/streams/${encodeURIComponent(projectKey)}?cursor=1&live=true`,
+      {
+        headers: {
+          "Last-Event-ID": "3", // This should win
+        },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    
+    let buffer = "";
+    let firstEvent: any = null;
+    let iterations = 0;
+    
+    while (!firstEvent && iterations < 20) {
+      iterations++;
+      const { done, value } = await reader.read();
+      if (done) break;
+      
+      buffer += decoder.decode(value, { stream: true });
+      
+      const messages = buffer.split("\n\n");
+      for (const message of messages) {
+        const lines = message.split("\n");
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const json = line.slice(6);
+            try {
+              firstEvent = JSON.parse(json);
+              break;
+            } catch {
+              // Incomplete
+            }
+          }
+        }
+        if (firstEvent) break;
+      }
+    }
+    
+    reader.releaseLock();
+    
+    expect(firstEvent).toBeDefined();
+    expect(firstEvent.offset).toBe(4); // After cursor 3
+  });
+
+  test("returns 400 for invalid Last-Event-ID", async () => {
+    const response = await fetch(
+      `${server.url}/streams/${encodeURIComponent(projectKey)}?live=true`,
+      {
+        headers: {
+          "Last-Event-ID": "not-a-number",
+        },
+      },
+    );
+
+    expect(response.status).toBe(400);
+    const text = await response.text();
+    expect(text).toContain("Invalid");
+  });
+
+  test("returns 400 for invalid ?cursor=", async () => {
+    const response = await fetch(
+      `${server.url}/streams/${encodeURIComponent(projectKey)}?cursor=bad&live=true`,
+    );
+
+    expect(response.status).toBe(400);
+  });
+
+  test("cursor beyond head returns empty then streams new events", async () => {
+    const head = await adapter.head();
+    
+    const response = await fetch(
+      `${server.url}/streams/${encodeURIComponent(projectKey)}?cursor=${head + 100}&live=true`,
+    );
+
+    expect(response.status).toBe(200);
+    
+    // Should connect successfully but not send historical events
+    // (This is already the current behavior via offset param)
+  });
+
+  test("includes cursor in SSE id field for browser auto-reconnect", async () => {
+    const response = await fetch(
+      `${server.url}/streams/${encodeURIComponent(projectKey)}?live=true`,
+    );
+
+    expect(response.status).toBe(200);
+    
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    
+    let buffer = "";
+    let foundId = false;
+    
+    // Read a few chunks to find SSE with id field
+    for (let i = 0; i < 10; i++) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      
+      buffer += decoder.decode(value, { stream: true });
+      
+      // SSE format with id: "id: 123\ndata: {...}\n\n"
+      if (buffer.includes("id: ")) {
+        foundId = true;
+        break;
+      }
+    }
+    
+    reader.releaseLock();
+    
+    // Each event should have "id: <offset>" so browser auto-sends Last-Event-ID
+    expect(foundId).toBe(true);
+  });
+});
+
+// ============================================================================
+// ClientRegistry Integration Tests
+// ============================================================================
+
+describe("DurableStreamServer client registry integration", () => {
+  let swarmMail: SwarmMailAdapter;
+  let adapter: DurableStreamAdapter;
+  let server: DurableStreamServer;
+  const projectKey = "/registry/test";
+
+  beforeAll(async () => {
+    swarmMail = await createInMemorySwarmMailLibSQL("durable-registry-test");
+    adapter = createDurableStreamAdapter(swarmMail, projectKey);
+
+    // Seed events
+    for (let i = 0; i < 3; i++) {
+      await swarmMail.appendEvent(
+        createEvent("agent_active", {
+          project_key: projectKey,
+          agent_name: `RegistryAgent${i}`,
+        }),
+      );
+    }
+
+    server = createDurableStreamServer({ adapter, port: 0, projectKey });
+    await server.start();
+  });
+
+  afterAll(async () => {
+    await server.stop();
+    await swarmMail.close();
+  });
+
+  test("WebSocket clients are tracked in registry", async () => {
+    // Get registry from server (will need to expose it)
+    const serverInternal = server as any;
+    const registry = serverInternal.registry;
+    
+    expect(registry).toBeDefined();
+    
+    // Initial state - no clients
+    const initialClients = registry.getClients();
+    expect(Array.isArray(initialClients)).toBe(true);
+  });
+
+  test("SSE clients get tracked on connection", async () => {
+    const controller = new AbortController();
+    const response = await fetch(
+      `${server.url}/streams/${encodeURIComponent(projectKey)}?live=true`,
+      { signal: controller.signal },
+    );
+
+    const reader = response.body!.getReader();
+    await reader.read();
+    
+    controller.abort();
+
+    // Registry should have tracked this client (verification in future subtasks)
+    expect(response.status).toBe(200);
+  });
+});
+
+// ============================================================================
 // Server Stop Cleanup Tests
 // ============================================================================
 

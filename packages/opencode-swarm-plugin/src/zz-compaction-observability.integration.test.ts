@@ -4,7 +4,7 @@
  * Tests the full integration of metrics collection with the compaction hook.
  */
 
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { createCompactionHook } from "./compaction-hook";
 
 // Track log calls
@@ -25,32 +25,27 @@ const createMockLogger = () => ({
   },
 });
 
-// Mock dependencies
-mock.module("./hive", () => ({
-  getHiveWorkingDirectory: () => "/test/project",
-  getHiveAdapter: async () => ({
-    queryCells: async () => [],
-  }),
-}));
-
-mock.module("swarm-mail", () => ({
-  checkSwarmHealth: async () => ({
-    healthy: true,
-    database: "connected",
-    stats: {
-      events: 0,
-      agents: 0,
-      messages: 0,
-      reservations: 0,
-    },
-  }),
-}));
-
-mock.module("./logger", () => ({
-  createChildLogger: () => createMockLogger(),
-}));
-
 describe("Compaction Hook with Observability", () => {
+  // Create hook with DI - no mock.module() pollution
+  const createTestHook = () =>
+    createCompactionHook({
+      getHiveAdapter: async () => ({
+        queryCells: async () => [],
+      }),
+      checkSwarmHealth: async () => ({
+        healthy: true,
+        database: "connected",
+        stats: {
+          events: 0,
+          agents: 0,
+          messages: 0,
+          reservations: 0,
+        },
+      }),
+      getHiveWorkingDirectory: () => "/test/project",
+      logger: createMockLogger(),
+    });
+
   beforeEach(() => {
     logCalls = [];
   });
@@ -60,7 +55,7 @@ describe("Compaction Hook with Observability", () => {
   });
 
   it("logs structured metrics on compaction run", async () => {
-    const hook = createCompactionHook();
+    const hook = createTestHook();
     const input = { sessionID: "test-session-123" };
     const output = { context: [] as string[] };
 
@@ -83,7 +78,7 @@ describe("Compaction Hook with Observability", () => {
   });
 
   it("logs timing breakdown for each phase", async () => {
-    const hook = createCompactionHook();
+    const hook = createTestHook();
     await hook({ sessionID: "test" }, { context: [] });
 
     // Should have debug logs for swarm-mail and hive checks
@@ -101,7 +96,7 @@ describe("Compaction Hook with Observability", () => {
   });
 
   it("logs pattern extraction/skipping decisions", async () => {
-    const hook = createCompactionHook();
+    const hook = createTestHook();
     await hook({ sessionID: "test" }, { context: [] });
 
     // Should have detection complete log
@@ -113,7 +108,7 @@ describe("Compaction Hook with Observability", () => {
   });
 
   it("captures metrics summary in completion log", async () => {
-    const hook = createCompactionHook();
+    const hook = createTestHook();
     await hook({ sessionID: "test-metrics" }, { context: [] });
 
     const completeLog = logCalls.find(

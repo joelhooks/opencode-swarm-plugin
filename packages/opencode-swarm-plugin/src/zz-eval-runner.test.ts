@@ -76,6 +76,9 @@ afterAll(() => {
   if (fs.existsSync(EVALS_DIR)) {
     fs.rmSync(EVALS_DIR, { recursive: true, force: true });
   }
+  
+  // CRITICAL: Restore mocks after all tests to prevent pollution of other test files
+  mock.restore();
 });
 
 describe("runEvals", () => {

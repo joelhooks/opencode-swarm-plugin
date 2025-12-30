@@ -15,6 +15,7 @@ import {
 	detectSourceType,
 	getGlobalDbPath,
 	migrateLibSQLToGlobal,
+	migrateLocalDbToGlobal,
 	migrateProjectToGlobal,
 	needsMigration,
 } from "./auto-migrate.js";
@@ -267,5 +268,149 @@ describe("auto-migrate end-to-end", () => {
     const events = await globalDb.execute("SELECT COUNT(*) as count FROM events");
     expect(Number(events.rows[0].count)).toBeGreaterThan(0);
     globalDb.close();
+  });
+});
+
+describe("migrateLocalDbToGlobal", () => {
+  let testDir: string;
+  let localDbPath: string;
+  let globalDbPath: string;
+
+  beforeEach(async () => {
+    testDir = join(tmpdir(), `migrate-local-${Date.now()}`);
+    mkdirSync(testDir, { recursive: true });
+    localDbPath = join(testDir, "local.db");
+    globalDbPath = join(testDir, "global.db");
+
+    // Create local DB with test data
+    const localDb = await createLibSQLAdapter({ url: `file:${localDbPath}` });
+    await createLibSQLStreamsSchema(localDb);
+
+    // Insert data into multiple tables
+    await localDb.exec(`
+      INSERT INTO events (type, project_key, timestamp, data)
+      VALUES ('test_event', 'test-project', ${Date.now()}, '{"test": true}')
+    `);
+
+    await localDb.exec(`
+      INSERT INTO agents (project_key, name, registered_at, last_active_at)
+      VALUES ('test-project', 'test-agent', ${Date.now()}, ${Date.now()})
+    `);
+
+    await localDb.exec(`
+      INSERT INTO messages (project_key, from_agent, subject, body, thread_id, importance, ack_required, created_at)
+      VALUES ('test-project', 'test-agent', 'Test', 'Body', 'thread-1', 'normal', 0, ${Date.now()})
+    `);
+
+    await localDb.close();
+
+    // Create global DB with schema
+    const globalDb = await createLibSQLAdapter({ url: `file:${globalDbPath}` });
+    await createLibSQLStreamsSchema(globalDb);
+    await globalDb.close();
+  });
+
+  afterEach(() => {
+    if (existsSync(testDir)) {
+      rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  test("migrates all tables from local to global", async () => {
+    const stats = await migrateLocalDbToGlobal(localDbPath, globalDbPath);
+
+    // Verify data was migrated
+    expect(stats.events).toBe(1);
+    expect(stats.agents).toBe(1);
+    expect(stats.messages).toBe(1);
+
+    // Verify data exists in global DB
+    const globalDb = createClient({ url: `file:${globalDbPath}` });
+    const events = await globalDb.execute("SELECT COUNT(*) as count FROM events");
+    expect(Number(events.rows[0].count)).toBe(1);
+
+    const agents = await globalDb.execute("SELECT COUNT(*) as count FROM agents");
+    expect(Number(agents.rows[0].count)).toBe(1);
+
+    const messages = await globalDb.execute("SELECT COUNT(*) as count FROM messages");
+    expect(Number(messages.rows[0].count)).toBe(1);
+
+    globalDb.close();
+  });
+
+  test("is idempotent - running twice does not duplicate data", async () => {
+    // First migration
+    const stats1 = await migrateLocalDbToGlobal(localDbPath, globalDbPath);
+    expect(stats1.events).toBe(1);
+
+    // Second migration (should skip duplicates)
+    const stats2 = await migrateLocalDbToGlobal(localDbPath, globalDbPath);
+    expect(stats2.events).toBe(0); // INSERT OR IGNORE skips
+
+    // Verify only 1 row exists
+    const globalDb = createClient({ url: `file:${globalDbPath}` });
+    const events = await globalDb.execute("SELECT COUNT(*) as count FROM events");
+    expect(Number(events.rows[0].count)).toBe(1);
+    globalDb.close();
+  });
+
+  test("renames local DB to .migrated suffix after success", async () => {
+    await migrateLocalDbToGlobal(localDbPath, globalDbPath);
+
+    // Original DB should be renamed
+    expect(existsSync(localDbPath)).toBe(false);
+    expect(existsSync(`${localDbPath}.migrated`)).toBe(true);
+  });
+
+  test("skips migration if .migrated file already exists", async () => {
+    // Create .migrated file
+    writeFileSync(`${localDbPath}.migrated`, "");
+
+    const stats = await migrateLocalDbToGlobal(localDbPath, globalDbPath);
+
+    // Should skip entirely
+    expect(stats.events).toBe(0);
+    expect(stats.agents).toBe(0);
+
+    // Global DB should be empty
+    const globalDb = createClient({ url: `file:${globalDbPath}` });
+    const events = await globalDb.execute("SELECT COUNT(*) as count FROM events");
+    expect(Number(events.rows[0].count)).toBe(0);
+    globalDb.close();
+  });
+
+  test("skips migration if local DB doesn't exist", async () => {
+    const nonExistentPath = join(testDir, "nonexistent.db");
+    const stats = await migrateLocalDbToGlobal(nonExistentPath, globalDbPath);
+
+    // Should skip entirely
+    expect(stats.events).toBe(0);
+  });
+
+  test("handles schema differences gracefully (local has fewer columns)", async () => {
+    // Create minimal schema local DB
+    const minimalDbPath = join(testDir, "minimal.db");
+    const minimalDb = createClient({ url: `file:${minimalDbPath}` });
+    
+    // Only create events table with subset of columns
+    await minimalDb.execute(`
+      CREATE TABLE events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL,
+        project_key TEXT NOT NULL,
+        timestamp INTEGER NOT NULL,
+        data TEXT NOT NULL
+      )
+    `);
+
+    await minimalDb.execute(`
+      INSERT INTO events (type, project_key, timestamp, data)
+      VALUES ('test', 'proj', ${Date.now()}, '{}')
+    `);
+    minimalDb.close();
+
+    // Should not throw
+    const stats = await migrateLocalDbToGlobal(minimalDbPath, globalDbPath);
+    expect(stats.events).toBe(1);
   });
 });

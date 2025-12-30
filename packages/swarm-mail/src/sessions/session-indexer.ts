@@ -460,18 +460,15 @@ export class SessionIndexer {
 	 * @returns Effect with staleness result
 	 */
 	checkStaleness(filePath: string): Effect.Effect<StalenessResult, Error> {
-		const self = this;
-		return Effect.gen(function* (_) {
-			const indexInfo = self.indexedFiles.get(filePath);
+		const indexInfo = this.indexedFiles.get(filePath);
 
-			// Simple implementation: file is stale if never indexed
-			const isStale = !indexInfo;
+		// Simple implementation: file is stale if never indexed
+		const isStale = !indexInfo;
 
-			return {
-				isStale,
-				lastIndexed: indexInfo?.timestamp,
-				fileModified: undefined, // Would need fs.stat to get this
-			};
+		return Effect.succeed({
+			isStale,
+			lastIndexed: indexInfo?.timestamp,
+			fileModified: undefined, // Would need fs.stat to get this
 		});
 	}
 

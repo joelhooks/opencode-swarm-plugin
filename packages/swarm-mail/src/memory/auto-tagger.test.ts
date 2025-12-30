@@ -2,13 +2,23 @@
  * Auto-Tagger Tests
  *
  * Tests for automatic tag and keyword generation using LLM.
- * Requires AI_GATEWAY_API_KEY environment variable.
+ * Requires AI_GATEWAY_API_KEY environment variable AND working API.
+ * 
+ * These tests are skipped in CI or when the API is unavailable/rate-limited.
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, beforeAll } from "bun:test";
 import { generateTags } from "./auto-tagger.js";
 
 const HAS_API_KEY = Boolean(process.env.AI_GATEWAY_API_KEY);
+
+// Check if we're in CI environment
+const IS_CI = Boolean(process.env.CI);
+
+// Skip LLM tests unless explicitly enabled via RUN_LLM_TESTS=1
+// These tests require external API access and are flaky due to rate limits
+const RUN_LLM_TESTS = Boolean(process.env.RUN_LLM_TESTS);
+const SKIP_LLM_TESTS = !RUN_LLM_TESTS || !HAS_API_KEY || IS_CI;
 
 describe("generateTags", () => {
   // Config for tests - requires real API key
@@ -17,7 +27,7 @@ describe("generateTags", () => {
     apiKey: process.env.AI_GATEWAY_API_KEY || "",
   };
 
-  test.skipIf(!HAS_API_KEY)("generates valid AutoTagResult structure", async () => {
+  test.skipIf(SKIP_LLM_TESTS)("generates valid AutoTagResult structure", async () => {
     const content = "OAuth refresh tokens need 5min buffer before expiry to avoid race conditions";
     
     const result = await generateTags(content, undefined, testConfig);
@@ -30,7 +40,7 @@ describe("generateTags", () => {
     expect(typeof result.category).toBe("string");
   });
 
-  test.skipIf(!HAS_API_KEY)("generates tags in expected range (3-5 tags)", async () => {
+  test.skipIf(SKIP_LLM_TESTS)("generates tags in expected range (3-5 tags)", async () => {
     const content = "OAuth refresh tokens need 5min buffer before expiry to avoid race conditions";
     
     const result = await generateTags(content, undefined, testConfig);
@@ -41,7 +51,7 @@ describe("generateTags", () => {
     expect(result.tags.every(tag => tag.length > 0)).toBe(true);
   });
 
-  test.skipIf(!HAS_API_KEY)("generates keywords in expected range (5-10 keywords)", async () => {
+  test.skipIf(SKIP_LLM_TESTS)("generates keywords in expected range (5-10 keywords)", async () => {
     const content = "OAuth refresh tokens need 5min buffer before expiry to avoid race conditions";
     
     const result = await generateTags(content, undefined, testConfig);
@@ -52,7 +62,7 @@ describe("generateTags", () => {
     expect(result.keywords.every(kw => kw.length > 0)).toBe(true);
   });
 
-  test.skipIf(!HAS_API_KEY)("incorporates existing user-provided tags", async () => {
+  test.skipIf(SKIP_LLM_TESTS)("incorporates existing user-provided tags", async () => {
     const content = "OAuth refresh tokens need 5min buffer before expiry to avoid race conditions";
     const existingTags = ["auth", "tokens"];
     
@@ -64,7 +74,7 @@ describe("generateTags", () => {
     expect(allTags.includes("token")).toBe(true);
   });
 
-  test.skipIf(!HAS_API_KEY)("extracts relevant keywords from content", async () => {
+  test.skipIf(SKIP_LLM_TESTS)("extracts relevant keywords from content", async () => {
     const content = "OAuth refresh tokens need 5min buffer before expiry to avoid race conditions";
     
     const result = await generateTags(content, undefined, testConfig);
@@ -79,7 +89,7 @@ describe("generateTags", () => {
     ).toBe(true);
   });
 
-  test.skipIf(!HAS_API_KEY)("assigns appropriate category", async () => {
+  test.skipIf(SKIP_LLM_TESTS)("assigns appropriate category", async () => {
     const content = "OAuth refresh tokens need 5min buffer before expiry to avoid race conditions";
     
     const result = await generateTags(content, undefined, testConfig);
@@ -116,7 +126,7 @@ describe("generateTags", () => {
     expect(result.category).toBe("");
   });
 
-  test("different content produces different tags", async () => {
+  test.skipIf(SKIP_LLM_TESTS)("different content produces different tags", async () => {
     const content1 = "OAuth refresh tokens need 5min buffer";
     const content2 = "Database connection pool exhausted under load";
     
@@ -132,7 +142,7 @@ describe("generateTags", () => {
     expect(tags1).not.toBe(tags2);
   });
 
-  test("tags are lowercase and single words", async () => {
+  test.skipIf(SKIP_LLM_TESTS)("tags are lowercase and single words", async () => {
     const content = "OAuth refresh tokens need 5min buffer before expiry";
     
     const result = await generateTags(content, undefined, testConfig);
@@ -143,7 +153,7 @@ describe("generateTags", () => {
     });
   });
 
-  test("category is lowercase", async () => {
+  test.skipIf(SKIP_LLM_TESTS)("category is lowercase", async () => {
     const content = "OAuth refresh tokens need 5min buffer before expiry";
     
     const result = await generateTags(content, undefined, testConfig);

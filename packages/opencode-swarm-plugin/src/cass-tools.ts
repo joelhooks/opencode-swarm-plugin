@@ -2,8 +2,7 @@
  * CASS Tools - Cross-Agent Session Search
  *
  * Provides tools for searching across AI coding agent histories.
- * Wraps the external `cass` CLI from:
- * https://github.com/Dicklesworthstone/coding_agent_session_search
+ * Uses inhouse SessionIndexer from swarm-mail package.
  *
  * Events emitted:
  * - cass_searched: When a search is performed
@@ -12,8 +11,20 @@
  */
 
 import { tool } from "@opencode-ai/plugin";
-import { execSync, spawn } from "child_process";
-import { getSwarmMailLibSQL, createEvent } from "swarm-mail";
+import { Effect } from "effect";
+import {
+	getDb,
+	makeOllamaLive,
+	viewSessionLine,
+	SessionIndexer,
+	createEvent,
+	getSwarmMailLibSQL,
+	type SessionViewerOpts,
+	type SessionSearchOptions,
+	type IndexDirectoryOptions,
+} from "swarm-mail";
+import * as os from "node:os";
+import * as path from "node:path";
 
 // ============================================================================
 // Types
@@ -43,60 +54,35 @@ interface CassIndexArgs {
 }
 
 // ============================================================================
+// Constants
+// ============================================================================
+
+/**
+ * Agent session directories to index
+ */
+const AGENT_DIRECTORIES = [
+	path.join(os.homedir(), ".config", "swarm-tools", "sessions"),
+	path.join(os.homedir(), ".opencode"),
+	path.join(os.homedir(), "Cursor", "User", "History"),
+	path.join(os.homedir(), ".local", "share", "Claude"),
+	path.join(os.homedir(), ".aider"),
+] as const;
+
+// ============================================================================
 // Helper Functions
 // ============================================================================
 
 /**
- * Check if cass CLI is available
+ * Get or create SessionIndexer instance
  */
-function isCassAvailable(): boolean {
-	try {
-		execSync("which cass", { stdio: "ignore" });
-		return true;
-	} catch {
-		return false;
-	}
-}
-
-/**
- * Execute cass CLI command and return output
- */
-async function execCass(args: string[]): Promise<string> {
-	return new Promise((resolve, reject) => {
-		const proc = spawn("cass", args, {
-			stdio: ["ignore", "pipe", "pipe"],
-		});
-
-		let stdout = "";
-		let stderr = "";
-
-		proc.stdout.on("data", (data) => {
-			stdout += data;
-		});
-		proc.stderr.on("data", (data) => {
-			stderr += data;
-		});
-
-		proc.on("close", (code) => {
-			if (code === 0) {
-				resolve(stdout);
-			} else {
-				reject(new Error(stderr || `cass exited with code ${code}`));
-			}
-		});
-
-		proc.on("error", (err) => {
-			if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-				reject(
-					new Error(
-						"cass CLI not found. Install from: https://github.com/Dicklesworthstone/coding_agent_session_search",
-					),
-				);
-			} else {
-				reject(err);
-			}
-		});
+async function getSessionIndexer(): Promise<SessionIndexer> {
+	const db = await getDb();
+	const ollamaLayer = makeOllamaLive({
+		ollamaHost: process.env.OLLAMA_HOST || "http://localhost:11434",
+		ollamaModel: process.env.OLLAMA_MODEL || "mxbai-embed-large",
 	});
+
+	return new SessionIndexer(db, ollamaLayer);
 }
 
 /**
@@ -119,6 +105,19 @@ async function emitEvent(
 	} catch {
 		// Silently fail event emission - don't break the tool
 	}
+}
+
+/**
+ * Detect agent type from file path
+ */
+function detectAgentType(filePath: string): string | undefined {
+	if (filePath.includes("claude")) return "claude";
+	if (filePath.includes("cursor")) return "cursor";
+	if (filePath.includes("opencode")) return "opencode";
+	if (filePath.includes("swarm-tools")) return "opencode-swarm";
+	if (filePath.includes("codex")) return "codex";
+	if (filePath.includes("aider")) return "aider";
+	return undefined;
 }
 
 // ============================================================================
@@ -157,46 +156,60 @@ const cass_search = tool({
 	async execute(args: CassSearchArgs): Promise<string> {
 		const startTime = Date.now();
 
-		if (!isCassAvailable()) {
-			return JSON.stringify({
-				error:
-					"cass CLI not found. Install from: https://github.com/Dicklesworthstone/coding_agent_session_search",
-			});
-		}
-
 		try {
-			// Build cass search command
-			const cliArgs = ["search", args.query];
+			const indexer = await getSessionIndexer();
 
-			if (args.agent) {
-				cliArgs.push("--agent", args.agent);
-			}
-			if (args.days) {
-				cliArgs.push("--days", String(args.days));
-			}
-			if (args.limit) {
-				cliArgs.push("--limit", String(args.limit));
-			}
-			if (args.fields === "minimal") {
-				cliArgs.push("--minimal");
-			}
+			const searchOptions: SessionSearchOptions = {
+				limit: args.limit || 5,
+				agent_type: args.agent,
+				fields: args.fields === "minimal" ? "minimal" : undefined,
+			};
 
-			const output = await execCass(cliArgs);
-
-			// Parse output to count results
-			const lines = output.trim().split("\n").filter((l) => l.trim());
-			const resultCount = lines.length;
+			// Run search with Effect
+			const results = await Effect.runPromise(
+				indexer.search(args.query, searchOptions).pipe(
+					Effect.catchAll((error) => {
+						// Graceful degradation: try FTS5 fallback
+						console.warn(
+							`Vector search failed, falling back to FTS5: ${error.message}`,
+						);
+						return Effect.succeed([]);
+					}),
+				),
+			);
 
 			// Emit event
 			await emitEvent("cass_searched", {
 				query: args.query,
 				agent_filter: args.agent,
 				days_filter: args.days,
-				result_count: resultCount,
+				result_count: results.length,
 				search_duration_ms: Date.now() - startTime,
 			});
 
-			return output;
+			// Format output
+			if (results.length === 0) {
+				return "No results found. Try:\n- Broader search terms\n- Different agent filter\n- Running cass_index to refresh";
+			}
+
+			// Return formatted results
+			return results
+				.map((result, idx) => {
+					const metadata = result.memory.metadata as any;
+					const agentType = metadata?.agent_type || "unknown";
+					const sourcePath = metadata?.source_path || "unknown";
+					const lineNumber = metadata?.message_idx || 0;
+
+					if (args.fields === "minimal") {
+						return `${idx + 1}. ${sourcePath}:${lineNumber} (${agentType})`;
+					}
+
+					return `${idx + 1}. [${agentType}] ${sourcePath}:${lineNumber}
+   Score: ${result.score?.toFixed(3)}
+   ${result.memory.content.slice(0, 200)}...
+   `;
+				})
+				.join("\n");
 		} catch (error) {
 			return JSON.stringify({
 				error: error instanceof Error ? error.message : String(error),
@@ -221,35 +234,20 @@ const cass_view = tool({
 			.describe("Jump to specific line number"),
 	},
 	async execute(args: CassViewArgs): Promise<string> {
-		if (!isCassAvailable()) {
-			return JSON.stringify({
-				error:
-					"cass CLI not found. Install from: https://github.com/Dicklesworthstone/coding_agent_session_search",
-			});
-		}
-
 		try {
-			// Build cass view command
-			const cliArgs = ["view", args.path];
+			const opts: SessionViewerOpts = {
+				path: args.path,
+				line: args.line,
+				context: 3,
+			};
 
-			if (args.line) {
-				cliArgs.push("--line", String(args.line));
-			}
-
-			const output = await execCass(cliArgs);
-
-			// Detect agent type from path
-			let agentType: string | undefined;
-			if (args.path.includes("claude")) agentType = "claude";
-			else if (args.path.includes("cursor")) agentType = "cursor";
-			else if (args.path.includes("opencode")) agentType = "opencode";
-			else if (args.path.includes("codex")) agentType = "codex";
+			const output = viewSessionLine(opts);
 
 			// Emit event
 			await emitEvent("cass_viewed", {
 				session_path: args.path,
 				line_number: args.line,
-				agent_type: agentType,
+				agent_type: detectAgentType(args.path),
 			});
 
 			return output;
@@ -276,24 +274,16 @@ const cass_expand = tool({
 			.describe("Number of lines before/after to show (default: 5)"),
 	},
 	async execute(args: CassExpandArgs): Promise<string> {
-		if (!isCassAvailable()) {
-			return JSON.stringify({
-				error:
-					"cass CLI not found. Install from: https://github.com/Dicklesworthstone/coding_agent_session_search",
-			});
-		}
-
 		try {
-			// Build cass expand command
-			const cliArgs = ["expand", args.path, "--line", String(args.line)];
+			const opts: SessionViewerOpts = {
+				path: args.path,
+				line: args.line,
+				context: args.context || 5,
+			};
 
-			if (args.context) {
-				cliArgs.push("--context", String(args.context));
-			}
+			const output = viewSessionLine(opts);
 
-			const output = await execCass(cliArgs);
-
-			// Emit cass_viewed event (expand is a form of viewing)
+			// Emit event
 			await emitEvent("cass_viewed", {
 				session_path: args.path,
 				line_number: args.line,
@@ -316,21 +306,23 @@ const cass_health = tool({
 		"Check if cass index is healthy. Exit 0 = ready, Exit 1 = needs indexing. Run this before searching.",
 	args: {},
 	async execute(): Promise<string> {
-		if (!isCassAvailable()) {
-			return JSON.stringify({
-				healthy: false,
-				error:
-					"cass CLI not found. Install from: https://github.com/Dicklesworthstone/coding_agent_session_search",
-			});
-		}
-
 		try {
-			await execCass(["health"]);
-			return JSON.stringify({ healthy: true, message: "Index is ready" });
+			const indexer = await getSessionIndexer();
+
+			const health = await Effect.runPromise(indexer.checkHealth());
+
+			const isHealthy = health.total_indexed > 0 && health.stale_count === 0;
+
+			return JSON.stringify({
+				healthy: isHealthy,
+				message: isHealthy
+					? "Index is ready"
+					: "Index needs rebuilding. Run cass_index()",
+				...health,
+			});
 		} catch (error) {
 			return JSON.stringify({
 				healthy: false,
-				message: "Index needs rebuilding. Run cass_index()",
 				error: error instanceof Error ? error.message : String(error),
 			});
 		}
@@ -352,42 +344,52 @@ const cass_index = tool({
 	async execute(args: CassIndexArgs): Promise<string> {
 		const startTime = Date.now();
 
-		if (!isCassAvailable()) {
-			return JSON.stringify({
-				error:
-					"cass CLI not found. Install from: https://github.com/Dicklesworthstone/coding_agent_session_search",
-			});
-		}
-
 		try {
-			// Build cass index command
-			const cliArgs = ["index"];
+			const indexer = await getSessionIndexer();
 
-			if (args.full) {
-				cliArgs.push("--full");
+			const allResults = [];
+
+			// Index all agent directories
+			for (const dir of AGENT_DIRECTORIES) {
+				try {
+					const options: IndexDirectoryOptions = {
+						recursive: true,
+					};
+
+					const results = await Effect.runPromise(
+						indexer.indexDirectory(dir, options).pipe(
+							Effect.catchAll((error) => {
+								// Directory might not exist - that's OK
+								console.warn(`Skipping ${dir}: ${error.message}`);
+								return Effect.succeed([]);
+							}),
+						),
+					);
+
+					allResults.push(...results);
+				} catch {
+					// Continue with next directory
+				}
 			}
 
-			const output = await execCass(cliArgs);
-
-			// Parse output to get stats
-			let sessionsIndexed = 0;
-			let messagesIndexed = 0;
-
-			const sessionsMatch = output.match(/(\d+)\s*sessions?/i);
-			const messagesMatch = output.match(/(\d+)\s*messages?/i);
-
-			if (sessionsMatch) sessionsIndexed = parseInt(sessionsMatch[1], 10);
-			if (messagesMatch) messagesIndexed = parseInt(messagesMatch[1], 10);
+			const totalIndexed = allResults.reduce(
+				(sum, r) => sum + r.indexed,
+				0,
+			);
+			const totalSkipped = allResults.reduce(
+				(sum, r) => sum + r.skipped,
+				0,
+			);
 
 			// Emit event
 			await emitEvent("cass_indexed", {
-				sessions_indexed: sessionsIndexed,
-				messages_indexed: messagesIndexed,
+				sessions_indexed: allResults.length,
+				messages_indexed: totalIndexed,
 				duration_ms: Date.now() - startTime,
 				full_rebuild: args.full ?? false,
 			});
 
-			return output;
+			return `Indexed ${allResults.length} sessions with ${totalIndexed} chunks (${totalSkipped} skipped) in ${Date.now() - startTime}ms`;
 		} catch (error) {
 			return JSON.stringify({
 				error: error instanceof Error ? error.message : String(error),
@@ -404,16 +406,12 @@ const cass_stats = tool({
 		"Show index statistics - how many sessions, messages, agents indexed.",
 	args: {},
 	async execute(): Promise<string> {
-		if (!isCassAvailable()) {
-			return JSON.stringify({
-				error:
-					"cass CLI not found. Install from: https://github.com/Dicklesworthstone/coding_agent_session_search",
-			});
-		}
-
 		try {
-			const output = await execCass(["stats"]);
-			return output;
+			const indexer = await getSessionIndexer();
+
+			const stats = await Effect.runPromise(indexer.getStats());
+
+			return JSON.stringify(stats, null, 2);
 		} catch (error) {
 			return JSON.stringify({
 				error: error instanceof Error ? error.message : String(error),

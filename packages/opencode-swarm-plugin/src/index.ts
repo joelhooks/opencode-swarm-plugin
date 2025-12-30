@@ -46,14 +46,13 @@ import { reviewTools } from "./swarm-review";
 import { repoCrawlTools } from "./repo-crawl";
 import { skillsTools, setSkillsProjectDirectory } from "./skills";
 import { mandateTools } from "./mandates";
-import { memoryTools } from "./memory-tools";
+import { hivemindTools } from "./hivemind-tools";
 import { observabilityTools } from "./observability-tools";
 import { researchTools } from "./swarm-research";
 // NOTE: evalTools removed from main bundle - evalite is a devDependency
 // Use `bunx evalite run` directly for running evals
 // import { evalTools } from "./eval-runner";
 import { contributorTools } from "./contributor-tools";
-import { cassTools } from "./cass-tools";
 import {
   guardrailOutput,
   DEFAULT_GUARDRAIL_CONFIG,
@@ -83,7 +82,7 @@ import { createCompactionHook } from "./compaction-hook";
  * - repo-crawl:* - GitHub API tools for repository research
  * - skills:* - Agent skills discovery, activation, and execution
  * - mandate:* - Agent voting system for collaborative knowledge curation
- * - semantic-memory:* - Semantic memory with vector embeddings (Ollama + PGLite)
+ * - hivemind:* - Unified memory system (learnings + session history)
  * - contributor_lookup - GitHub contributor profile lookup with changeset credit generation
  *
  * @param input - Plugin context from OpenCode
@@ -156,19 +155,19 @@ const SwarmPlugin: Plugin = async (
   }
 
   return {
-    /**
-     * Register all tools from modules
-     *
-     * Tools are namespaced by module:
-     * - hive:create, hive:query, hive:update, etc. (primary)
-     * - beads:* - Legacy aliases (deprecated, use hive:* instead)
-     * - agent-mail:init, agent-mail:send, agent-mail:reserve, etc. (legacy MCP)
-     * - swarm-mail:init, swarm-mail:send, swarm-mail:reserve, etc. (embedded)
-  * - repo-crawl:readme, repo-crawl:structure, etc.
-  * - mandate:file, mandate:vote, mandate:query, etc.
-  * - semantic-memory:store, semantic-memory:find, semantic-memory:get, etc.
-  * - contributor_lookup - GitHub contributor profile lookup with changeset credits
- */
+     /**
+      * Register all tools from modules
+      *
+      * Tools are namespaced by module:
+      * - hive:create, hive:query, hive:update, etc. (primary)
+      * - beads:* - Legacy aliases (deprecated, use hive:* instead)
+      * - agent-mail:init, agent-mail:send, agent-mail:reserve, etc. (legacy MCP)
+      * - swarm-mail:init, swarm-mail:send, swarm-mail:reserve, etc. (embedded)
+	  * - repo-crawl:readme, repo-crawl:structure, etc.
+	  * - mandate:file, mandate:vote, mandate:query, etc.
+	  * - hivemind:* - Unified memory system (learnings + sessions)
+	  * - contributor_lookup - GitHub contributor profile lookup with changeset credits
+	 */
      tool: {
       ...hiveTools,
       ...swarmMailTools,
@@ -179,7 +178,7 @@ const SwarmPlugin: Plugin = async (
       ...repoCrawlTools,
       ...skillsTools,
       ...mandateTools,
-      ...memoryTools,
+      ...hivemindTools,
       ...observabilityTools,
       ...researchTools,
       // evalTools removed - evalite is devDependency, use `bunx evalite run` directly
@@ -229,7 +228,8 @@ const SwarmPlugin: Plugin = async (
       }
 
       // Detect coordinator by Task tool spawning swarm-worker agent
-      if (toolName === "task" && input.agentName?.toLowerCase().includes("swarm")) {
+      const taskArgs = output.args as { subagent_type?: string } | undefined;
+      if (toolName === "task" && taskArgs?.subagent_type?.toLowerCase().includes("swarm")) {
         setCoordinatorContext({
           isCoordinator: true,
           sessionId,
@@ -358,29 +358,36 @@ const SwarmPlugin: Plugin = async (
       const epicId = ctx.epicId || "unknown";
 
       // captureResearcherSpawned - Task tool with researcher subagent
-      if (toolName === "task" && input.agentName?.toLowerCase().includes("research")) {
+      // Note: In after hook, we only have output - args are not available
+      // We detect researcher tasks by checking the output for researcher-related content
+      if (toolName === "task") {
         try {
-          const { captureResearcherSpawned } = await import("./eval-capture.js");
           const result = output.output ? JSON.parse(output.output) : {};
-          await captureResearcherSpawned({
-            session_id: input.sessionID,
-            epic_id: epicId,
-            researcher_id: result.researcher_id || "unknown",
-            research_topic: result.research_topic || input.prompt?.substring(0, 100) || "unknown",
-            tools_used: result.tools_used || [],
-          });
+          // Check if this was a researcher task by looking at the result
+          if (result.researcher_id || result.research_topic || result.tools_used) {
+            const { captureResearcherSpawned } = await import("./eval-capture.js");
+            await captureResearcherSpawned({
+              session_id: input.sessionID,
+              epic_id: epicId,
+              researcher_id: result.researcher_id || "unknown",
+              research_topic: result.research_topic || "unknown",
+              tools_used: result.tools_used || [],
+            });
+          }
         } catch (err) {
           // Non-fatal - eval capture should never block tool execution
-          console.warn("[eval-capture] captureResearcherSpawned failed:", err);
+          // Also catches JSON parse errors for non-JSON output
         }
       }
 
       // captureSkillLoaded - skills_use tool
+      // Note: In after hook, we extract skill info from the output
       if (toolName === "skills_use") {
         try {
           const { captureSkillLoaded } = await import("./eval-capture.js");
-          const skillName = input.name || "unknown";
-          const context = input.context;
+          const result = output.output ? JSON.parse(output.output) : {};
+          const skillName = result.skill_name || result.name || "unknown";
+          const context = result.context;
           await captureSkillLoaded({
             session_id: input.sessionID,
             epic_id: epicId,
@@ -388,7 +395,7 @@ const SwarmPlugin: Plugin = async (
             context: context,
           });
         } catch (err) {
-          console.warn("[eval-capture] captureSkillLoaded failed:", err);
+          // Non-fatal - eval capture should never block tool execution
         }
       }
 
@@ -409,10 +416,11 @@ const SwarmPlugin: Plugin = async (
       }
 
       // captureBlockerResolved + captureBlockerDetected - hive_update tool
+      // Note: In after hook, we extract all info from the output result
       if (toolName === "hive_update") {
         try {
           const result = output.output ? JSON.parse(output.output) : {};
-          const newStatus = result.status || input.status;
+          const newStatus = result.status;
           const previousStatus = result.previous_status;
 
           // captureBlockerResolved - status changed FROM blocked
@@ -422,7 +430,7 @@ const SwarmPlugin: Plugin = async (
               session_id: input.sessionID,
               epic_id: epicId,
               worker_id: result.worker_id || "unknown",
-              subtask_id: result.id || input.id || "unknown",
+              subtask_id: result.id || "unknown",
               blocker_type: result.blocker_type || "unknown",
               resolution: result.resolution || "Status changed to " + newStatus,
             });
@@ -435,37 +443,41 @@ const SwarmPlugin: Plugin = async (
               session_id: input.sessionID,
               epic_id: epicId,
               worker_id: result.worker_id || "unknown",
-              subtask_id: result.id || input.id || "unknown",
+              subtask_id: result.id || "unknown",
               blocker_type: result.blocker_type || "unknown",
               blocker_description: result.blocker_description || result.description || "No description provided",
             });
           }
         } catch (err) {
-          console.warn("[eval-capture] hive_update capture failed:", err);
+          // Non-fatal - eval capture should never block tool execution
         }
       }
 
       // captureScopeChangeDecision - swarmmail_send with "Scope Change" in subject
-      if (toolName === "swarmmail_send" && input.subject?.includes("Scope Change")) {
+      // Note: In after hook, we detect scope change from the output
+      if (toolName === "swarmmail_send") {
         try {
-          const { captureScopeChangeDecision } = await import("./eval-capture.js");
           const result = output.output ? JSON.parse(output.output) : {};
-          const threadId = input.thread_id || epicId;
-          
-          await captureScopeChangeDecision({
-            session_id: input.sessionID,
-            epic_id: threadId,
-            worker_id: result.worker_id || "unknown",
-            subtask_id: result.subtask_id || "unknown",
-            approved: result.approved ?? false,
-            original_scope: result.original_scope,
-            new_scope: result.new_scope,
-            requested_scope: result.requested_scope,
-            rejection_reason: result.rejection_reason,
-            estimated_time_add: result.estimated_time_add,
-          });
+          // Check if this was a scope change message by looking at the result
+          if (result.scope_change || result.original_scope || result.new_scope) {
+            const { captureScopeChangeDecision } = await import("./eval-capture.js");
+            const threadId = result.thread_id || epicId;
+            
+            await captureScopeChangeDecision({
+              session_id: input.sessionID,
+              epic_id: threadId,
+              worker_id: result.worker_id || "unknown",
+              subtask_id: result.subtask_id || "unknown",
+              approved: result.approved ?? false,
+              original_scope: result.original_scope,
+              new_scope: result.new_scope,
+              requested_scope: result.requested_scope,
+              rejection_reason: result.rejection_reason,
+              estimated_time_add: result.estimated_time_add,
+            });
+          }
         } catch (err) {
-          console.warn("[eval-capture] captureScopeChangeDecision failed:", err);
+          // Non-fatal - eval capture should never block tool execution
         }
       }
     },
@@ -641,6 +653,7 @@ export {
  * Each tool has an `execute` function that takes (args, ctx) and returns a string.
  *
  * Note: hiveTools includes both hive_* and beads_* (legacy aliases)
+ * Note: hivemindTools includes both hivemind_* and deprecated semantic-memory_* + cass_* aliases
  */
 export const allTools = {
   ...hiveTools,
@@ -652,10 +665,9 @@ export const allTools = {
   ...repoCrawlTools,
   ...skillsTools,
   ...mandateTools,
-  ...memoryTools,
+  ...hivemindTools,
   ...observabilityTools,
   ...contributorTools,
-  ...cassTools,
 } as const;
 
 /**

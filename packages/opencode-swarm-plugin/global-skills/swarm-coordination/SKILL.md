@@ -310,7 +310,7 @@ Synthesize findings into `shared_context` for workers.
 >
 > **NEVER do planning inline in the coordinator thread.** Decomposition work (file reading, CASS searching, reasoning about task breakdown) consumes massive amounts of context and will exhaust your token budget on long swarms.
 >
-> **ALWAYS delegate planning to a `swarm/planner` subagent** and receive only the structured CellTree JSON result back.
+> **ALWAYS delegate planning to a `swarm-planner` subagent** and receive only the structured CellTree JSON result back.
 
 **❌ Anti-Pattern (Context-Heavy):**
 
@@ -332,9 +332,9 @@ await hive_create({
   description: `Decompose into subtasks. Context: ${synthesizedContext}`,
 });
 
-// 2. Delegate to swarm/planner subagent
+// 2. Delegate to swarm-planner subagent
 const planningResult = await Task({
-  subagent_type: "swarm/planner",
+  subagent_type: "swarm-planner",
   description: `Decompose task: ${taskTitle}`,
   prompt: `
 You are a swarm planner. Generate a CellTree for this task.
@@ -438,7 +438,7 @@ for (const subtask of subtasks) {
 
   // Spawn via Task tool
   Task({
-    subagent_type: "swarm/worker",
+    subagent_type: "swarm-worker",
     prompt: prompt.worker_prompt,
   });
 }
@@ -520,7 +520,7 @@ swarm_complete({ ... });
 
 // Coordinator immediately spawns next worker
 // ⚠️ WRONG - No quality gate!
-Task({ subagent_type: "swarm/worker", prompt: nextWorkerPrompt });
+Task({ subagent_type: "swarm-worker", prompt: nextWorkerPrompt });
 ```
 
 **✅ Correct Pattern (Review Before Proceeding):**
@@ -535,7 +535,7 @@ swarm_review({ ... });
 swarm_review_feedback({ status: "approved" });
 
 // ONLY THEN spawn next worker
-Task({ subagent_type: "swarm/worker", prompt: nextWorkerPrompt });
+Task({ subagent_type: "swarm-worker", prompt: nextWorkerPrompt });
 ```
 
 **Review Workflow (3-Strike Rule):**

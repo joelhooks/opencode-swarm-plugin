@@ -282,7 +282,7 @@ Each agent has fresh context:
 // Coordinator spawns workers with clean context
 for (const subtask of subtasks) {
   Task({
-    subagent_type: 'swarm/worker',
+    subagent_type: 'swarm-worker',
     prompt: generatePrompt(subtask)  // Fresh context
   });
 }

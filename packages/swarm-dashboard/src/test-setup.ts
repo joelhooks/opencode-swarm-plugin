@@ -6,6 +6,7 @@
 
 import { Window } from "happy-dom";
 import { beforeEach, afterEach, spyOn } from "bun:test";
+import { cleanup } from "@testing-library/react";
 
 // Create happy-dom window and inject globals SYNCHRONOUSLY at module load time
 // CRITICAL: This happens during import, before @testing-library/react code runs
@@ -19,6 +20,29 @@ Object.defineProperty(globalThis, "navigator", { value: window.navigator, writab
 Object.defineProperty(globalThis, "HTMLElement", { value: window.HTMLElement, writable: true, configurable: true });
 Object.defineProperty(globalThis, "Element", { value: window.Element, writable: true, configurable: true });
 Object.defineProperty(globalThis, "Node", { value: window.Node, writable: true, configurable: true });
+
+// LocalStorage mock for cursor persistence
+class LocalStorageMock {
+  private store: Map<string, string> = new Map();
+
+  getItem(key: string): string | null {
+    return this.store.get(key) || null;
+  }
+
+  setItem(key: string, value: string): void {
+    this.store.set(key, value);
+  }
+
+  removeItem(key: string): void {
+    this.store.delete(key);
+  }
+
+  clear(): void {
+    this.store.clear();
+  }
+}
+
+Object.defineProperty(globalThis, "localStorage", { value: new LocalStorageMock(), writable: true, configurable: true });
 
 // Default cell fixtures for tests
 export const mockCellFixtures = [
@@ -61,6 +85,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // Clean up rendered components between tests
+  cleanup();
+  
   if (fetchSpy) {
     fetchSpy.mockRestore();
   }

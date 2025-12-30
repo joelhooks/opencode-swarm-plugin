@@ -22,6 +22,12 @@ export interface ConnectionStatusProps {
   connectionState: "connecting" | "connected" | "disconnected";
   error?: string;
   onReconnect: () => void;
+  /** Time of last received event (for "time since" display) */
+  lastEventTime?: Date | null;
+  /** Number of reconnection attempts */
+  reconnectAttempts?: number;
+  /** Current SSE cursor position (optional debug info) */
+  cursorPosition?: number;
 }
 
 /**
@@ -52,13 +58,29 @@ function getStateLabel(state: ConnectionStatusProps["connectionState"]): string 
   }
 }
 
+/**
+ * Format time difference as human-readable string
+ */
+function formatTimeSince(date: Date): string {
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+  
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  return `${Math.floor(seconds / 86400)}d ago`;
+}
+
 export function ConnectionStatus({
   connectionState,
   error,
   onReconnect,
+  lastEventTime,
+  reconnectAttempts = 0,
+  cursorPosition,
 }: ConnectionStatusProps) {
   const isPulsing = connectionState === "connecting";
   const showRetryButton = connectionState === "disconnected";
+  const showReconnectAttempts = reconnectAttempts > 0;
 
   const containerStyle: CSSProperties = {
     display: "flex",
@@ -105,6 +127,13 @@ export function ConnectionStatus({
     paddingLeft: "1rem",
   };
 
+  const metadataStyle: CSSProperties = {
+    fontSize: "0.75rem",
+    color: "var(--subtext0, #a6adc8)",
+    margin: 0,
+    paddingLeft: "1rem",
+  };
+
   return (
     <div style={containerStyle}>
       <div style={statusRowStyle}>
@@ -135,6 +164,15 @@ export function ConnectionStatus({
         )}
       </div>
       {error && <p style={errorStyle}>{error}</p>}
+      
+      {/* Metadata row: time since last event, reconnect attempts, cursor */}
+      {(lastEventTime || showReconnectAttempts || cursorPosition !== undefined) && (
+        <div style={{ ...metadataStyle, display: "flex", gap: "1rem", flexWrap: "wrap" }}>
+          {lastEventTime && <span>Last event: {formatTimeSince(lastEventTime)}</span>}
+          {showReconnectAttempts && <span>Reconnect attempt {reconnectAttempts}</span>}
+          {cursorPosition !== undefined && <span>Cursor: {cursorPosition}</span>}
+        </div>
+      )}
       
       {/* Inline keyframes for pulse animation */}
       <style>{`

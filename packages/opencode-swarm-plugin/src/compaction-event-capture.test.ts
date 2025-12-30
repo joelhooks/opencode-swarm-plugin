@@ -5,8 +5,11 @@
  * Separated from main compaction-hook.test.ts to avoid conflicts.
  * 
  * TDD: Write failing tests first, then implement event capture wiring.
+ * 
+ * IMPORTANT: All spyOn() calls MUST be restored in afterEach to prevent
+ * pollution of other test files. Bun's spies persist globally.
  */
-import { describe, test, expect, beforeEach, spyOn } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { createCompactionHook } from "./compaction-hook";
 import * as evalCapture from "./eval-capture";
 
@@ -17,6 +20,11 @@ describe("prompt_generated event capture", () => {
   beforeEach(() => {
     // Spy on captureCompactionEvent to track calls
     captureCompactionEventSpy = spyOn(evalCapture, "captureCompactionEvent").mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    // CRITICAL: Restore spy to prevent pollution of other test files
+    captureCompactionEventSpy.mockRestore();
   });
 
   test("RED: should capture prompt_generated when full swarm context is injected", async () => {
@@ -109,6 +117,11 @@ describe("prompt_generated event capture", () => {
 describe("detection_complete event ordering", () => {
   beforeEach(() => {
     captureCompactionEventSpy = spyOn(evalCapture, "captureCompactionEvent").mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    // CRITICAL: Restore spy to prevent pollution of other test files
+    captureCompactionEventSpy.mockRestore();
   });
 
   test("RED: detection_complete should be emitted before prompt_generated", async () => {

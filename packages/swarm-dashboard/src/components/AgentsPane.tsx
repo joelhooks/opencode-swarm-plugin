@@ -1,11 +1,11 @@
 /**
  * Agents pane component
  * 
- * Shows active agents with real-time updates via SSE.
+ * Shows active agents grouped by project with real-time updates via SSE.
  * Uses WebTUI theme variables for dark/light mode support.
  */
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { AgentCard } from "./AgentCard";
 import type {
   AgentActiveEvent,
@@ -22,12 +22,32 @@ interface Agent {
   status: "active" | "idle";
   lastActiveTime: number;
   currentTask?: string;
+  projectKey: string;
+}
+
+interface ProjectGroup {
+  projectKey: string;
+  displayName: string;
+  agents: Agent[];
+  hasActiveAgent: boolean;
+  lastActivityTime: number;
 }
 
 /**
  * Agent is considered active if last seen within 5 minutes
  */
 const ACTIVE_THRESHOLD_MS = 5 * 60 * 1000;
+
+/**
+ * Get display name for project path (last 2 segments for long paths)
+ */
+function getProjectDisplayName(projectKey: string): string {
+  const parts = projectKey.split('/').filter(Boolean);
+  if (parts.length <= 2) {
+    return parts.join('/') || projectKey;
+  }
+  return parts.slice(-2).join('/');
+}
 
 export interface AgentsPaneProps {
   /** Events array from useSwarmEvents or useWebSocket hook */
@@ -39,8 +59,11 @@ export interface AgentsPaneProps {
 export function AgentsPane({ events, state }: AgentsPaneProps) {
   console.log("[AgentsPane] events:", events.length, "state:", state);
   
-  // Derive agent state from events
-  const agents = useMemo<Agent[]>(() => {
+  // Track collapsed projects
+  const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set());
+  
+  // Derive project groups from events
+  const projectGroups = useMemo<ProjectGroup[]>(() => {
     console.log("[AgentsPane] Computing agents from", events.length, "events");
     // Helper to filter events by type
     const getEventsByType = <T extends AgentEvent["type"]>(type: T) => {
@@ -67,6 +90,7 @@ export function AgentsPane({ events, state }: AgentsPaneProps) {
         status: "idle",
         lastActiveTime: event.timestamp,
         currentTask: event.task_description,
+        projectKey: event.project_key,
       });
     }
 
@@ -111,14 +135,58 @@ export function AgentsPane({ events, state }: AgentsPaneProps) {
       agent.status = now - agent.lastActiveTime < ACTIVE_THRESHOLD_MS ? "active" : "idle";
     }
 
-    // Sort by status (active first), then by last active time
-    return Array.from(agentMap.values()).sort((a, b) => {
-      if (a.status !== b.status) {
-        return a.status === "active" ? -1 : 1;
+    // Group agents by project
+    const projectMap = new Map<string, ProjectGroup>();
+    
+    for (const agent of agentMap.values()) {
+      if (!projectMap.has(agent.projectKey)) {
+        projectMap.set(agent.projectKey, {
+          projectKey: agent.projectKey,
+          displayName: getProjectDisplayName(agent.projectKey),
+          agents: [],
+          hasActiveAgent: false,
+          lastActivityTime: 0,
+        });
       }
-      return b.lastActiveTime - a.lastActiveTime;
+      
+      const project = projectMap.get(agent.projectKey)!;
+      project.agents.push(agent);
+      if (agent.status === "active") {
+        project.hasActiveAgent = true;
+      }
+      project.lastActivityTime = Math.max(project.lastActivityTime, agent.lastActiveTime);
+    }
+
+    // Sort agents within each project (active first, then by last active time)
+    for (const project of projectMap.values()) {
+      project.agents.sort((a, b) => {
+        if (a.status !== b.status) {
+          return a.status === "active" ? -1 : 1;
+        }
+        return b.lastActiveTime - a.lastActiveTime;
+      });
+    }
+
+    // Sort projects: active first, then by most recent activity
+    return Array.from(projectMap.values()).sort((a, b) => {
+      if (a.hasActiveAgent !== b.hasActiveAgent) {
+        return a.hasActiveAgent ? -1 : 1;
+      }
+      return b.lastActivityTime - a.lastActivityTime;
     });
   }, [events]);
+
+  const toggleProject = (projectKey: string) => {
+    setCollapsedProjects((prev) => {
+      const next = new Set(prev);
+      if (next.has(projectKey)) {
+        next.delete(projectKey);
+      } else {
+        next.add(projectKey);
+      }
+      return next;
+    });
+  };
 
   return (
     <div
@@ -184,9 +252,9 @@ export function AgentsPane({ events, state }: AgentsPaneProps) {
         </div>
       </div>
 
-      {/* Agent cards */}
+      {/* Project groups */}
       <div style={{ flex: 1, overflowY: "auto", padding: "0.5rem" }}>
-        {agents.length === 0 ? (
+        {projectGroups.length === 0 ? (
           <div
             style={{
               display: "flex",
@@ -205,16 +273,108 @@ export function AgentsPane({ events, state }: AgentsPaneProps) {
             </p>
           </div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-            {agents.map((agent) => (
-              <AgentCard
-                key={agent.name}
-                name={agent.name}
-                status={agent.status}
-                lastActiveTime={agent.lastActiveTime}
-                currentTask={agent.currentTask}
-              />
-            ))}
+          <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+            {projectGroups.map((project) => {
+              const isCollapsed = collapsedProjects.has(project.projectKey);
+              
+              return (
+                <div key={project.projectKey}>
+                  {/* Project header */}
+                  <div
+                    data-project-header
+                    onClick={() => toggleProject(project.projectKey)}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.5rem",
+                      padding: "0.5rem",
+                      cursor: "pointer",
+                      borderRadius: "0.25rem",
+                      transition: "background-color 0.2s",
+                      userSelect: "none",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = "var(--surface0, #313244)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = "transparent";
+                    }}
+                  >
+                    {/* Project status indicator */}
+                    <span
+                      style={{
+                        height: "0.5rem",
+                        width: "0.5rem",
+                        borderRadius: "50%",
+                        backgroundColor: project.hasActiveAgent
+                          ? "var(--green, #a6e3a1)"
+                          : "var(--overlay0, #6c7086)",
+                        flexShrink: 0,
+                      }}
+                      title={project.hasActiveAgent ? "Active" : "Idle"}
+                    />
+                    
+                    {/* Collapse/expand arrow */}
+                    <span
+                      style={{
+                        fontSize: "0.75rem",
+                        color: "var(--subtext0, #a6adc8)",
+                        transition: "transform 0.2s",
+                        transform: isCollapsed ? "rotate(-90deg)" : "rotate(0deg)",
+                      }}
+                    >
+                      ▼
+                    </span>
+                    
+                    {/* Project name */}
+                    <span
+                      style={{
+                        fontSize: "0.875rem",
+                        fontWeight: 500,
+                        color: "var(--subtext1, #bac2de)",
+                        flex: 1,
+                      }}
+                    >
+                      {project.displayName}
+                    </span>
+                    
+                    {/* Agent count */}
+                    <span
+                      style={{
+                        fontSize: "0.75rem",
+                        color: "var(--overlay1, #7f849c)",
+                        fontFamily: "monospace",
+                      }}
+                    >
+                      {project.agents.length} {project.agents.length === 1 ? "agent" : "agents"}
+                    </span>
+                  </div>
+                  
+                  {/* Agent cards */}
+                  {!isCollapsed && (
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "0.5rem",
+                        paddingLeft: "1.5rem",
+                        marginTop: "0.5rem",
+                      }}
+                    >
+                      {project.agents.map((agent) => (
+                        <AgentCard
+                          key={agent.name}
+                          name={agent.name}
+                          status={agent.status}
+                          lastActiveTime={agent.lastActiveTime}
+                          currentTask={agent.currentTask}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

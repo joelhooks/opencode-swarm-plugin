@@ -21,6 +21,7 @@ import {
   readFileSync,
   readdirSync,
   renameSync,
+  rmdirSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -1616,13 +1617,15 @@ async function setup(forceReinstall = false, nonInteractive = false) {
 
   const pluginPath = join(pluginDir, "swarm.ts");
   const commandPath = join(commandDir, "swarm.md");
+  // OpenCode expects flat agent paths with hyphens (swarm-worker.md), not nested (swarm/worker.md)
+  const plannerAgentPath = join(agentDir, "swarm-planner.md");
+  const workerAgentPath = join(agentDir, "swarm-worker.md");
+  const researcherAgentPath = join(agentDir, "swarm-researcher.md");
+  // Legacy nested paths (for detection/cleanup)
   const swarmAgentDir = join(agentDir, "swarm");
-  const plannerAgentPath = join(swarmAgentDir, "planner.md");
-  const workerAgentPath = join(swarmAgentDir, "worker.md");
-  const researcherAgentPath = join(swarmAgentDir, "researcher.md");
-  // Legacy flat paths (for detection/cleanup)
-  const legacyPlannerPath = join(agentDir, "swarm-planner.md");
-  const legacyWorkerPath = join(agentDir, "swarm-worker.md");
+  const legacyPlannerPath = join(swarmAgentDir, "planner.md");
+  const legacyWorkerPath = join(swarmAgentDir, "worker.md");
+  const legacyResearcherPath = join(swarmAgentDir, "researcher.md");
 
   const existingFiles = [
     pluginPath,
@@ -1632,6 +1635,7 @@ async function setup(forceReinstall = false, nonInteractive = false) {
     researcherAgentPath,
     legacyPlannerPath,
     legacyWorkerPath,
+    legacyResearcherPath,
   ].filter((f) => existsSync(f));
 
   if (existingFiles.length > 0 && !forceReinstall) {
@@ -2139,19 +2143,28 @@ async function setup(forceReinstall = false, nonInteractive = false) {
   stats[writeFileWithStatus(pluginPath, pluginContent, "Plugin")]++;
   stats[writeFileWithStatus(commandPath, SWARM_COMMAND, "Command")]++;
 
-  // Write nested agent files (swarm/planner.md, swarm/worker.md, swarm/researcher.md)
-  // This is the format used by Task(subagent_type="swarm/worker")
+  // Write nested agent files (swarm-planner.md, swarm-worker.md, swarm-researcher.md)
+  // This is the format used by Task(subagent_type="swarm-worker")
   p.log.step("Writing agent configuration...");
   stats[writeFileWithStatus(plannerAgentPath, getPlannerAgent(coordinatorModel as string), "Planner agent")]++;
   stats[writeFileWithStatus(workerAgentPath, getWorkerAgent(workerModel as string), "Worker agent")]++;
   stats[writeFileWithStatus(researcherAgentPath, getResearcherAgent(workerModel as string), "Researcher agent")]++;
 
-  // Clean up legacy flat agent files if they exist
-  if (existsSync(legacyPlannerPath) || existsSync(legacyWorkerPath)) {
-    p.log.step("Cleaning up legacy agent files...");
+  // Clean up legacy nested agent files if they exist (swarm/planner.md -> swarm-planner.md)
+  if (existsSync(legacyPlannerPath) || existsSync(legacyWorkerPath) || existsSync(legacyResearcherPath)) {
+    p.log.step("Cleaning up legacy nested agent files...");
   }
-  rmWithStatus(legacyPlannerPath, "legacy planner");
-  rmWithStatus(legacyWorkerPath, "legacy worker");
+  rmWithStatus(legacyPlannerPath, "legacy swarm/planner");
+  rmWithStatus(legacyWorkerPath, "legacy swarm/worker");
+  rmWithStatus(legacyResearcherPath, "legacy swarm/researcher");
+  // Clean up empty swarm directory if it exists
+  if (existsSync(swarmAgentDir)) {
+    try {
+      rmdirSync(swarmAgentDir);
+    } catch {
+      // Directory not empty or doesn't exist, ignore
+    }
+  }
 
   p.log.message(dim(`  Skills directory: ${skillsDir}`));
 
@@ -2427,10 +2440,11 @@ function config() {
   const configDir = join(homedir(), ".config", "opencode");
   const pluginPath = join(configDir, "plugin", "swarm.ts");
   const commandPath = join(configDir, "command", "swarm.md");
-  const swarmAgentDir = join(configDir, "agent", "swarm");
-  const plannerAgentPath = join(swarmAgentDir, "planner.md");
-  const workerAgentPath = join(swarmAgentDir, "worker.md");
-  const researcherAgentPath = join(swarmAgentDir, "researcher.md");
+  const agentDir = join(configDir, "agent");
+  // OpenCode expects flat agent paths with hyphens (swarm-worker.md)
+  const plannerAgentPath = join(agentDir, "swarm-planner.md");
+  const workerAgentPath = join(agentDir, "swarm-worker.md");
+  const researcherAgentPath = join(agentDir, "swarm-researcher.md");
   const globalSkillsPath = join(configDir, "skills");
 
   console.log(yellow(BANNER));
@@ -2442,9 +2456,9 @@ function config() {
   const files = [
     { path: pluginPath, desc: "Plugin loader", emoji: "🔌" },
     { path: commandPath, desc: "/swarm command prompt", emoji: "📜" },
-    { path: plannerAgentPath, desc: "@swarm/planner agent", emoji: "🤖" },
-    { path: workerAgentPath, desc: "@swarm/worker agent", emoji: "🐝" },
-    { path: researcherAgentPath, desc: "@swarm/researcher agent", emoji: "🔬" },
+    { path: plannerAgentPath, desc: "@swarm-planner agent", emoji: "🤖" },
+    { path: workerAgentPath, desc: "@swarm-worker agent", emoji: "🐝" },
+    { path: researcherAgentPath, desc: "@swarm-researcher agent", emoji: "🔬" },
   ];
 
   for (const { path, desc, emoji } of files) {
@@ -3075,16 +3089,16 @@ ${cyan("Observability Commands:")}
 
 ${cyan("Usage in OpenCode:")}
   /swarm "Add user authentication with OAuth"
-  @swarm/planner "Decompose this into parallel tasks"
-  @swarm/worker "Execute this specific subtask"
-  @swarm/researcher "Research Next.js caching APIs"
+  @swarm-planner "Decompose this into parallel tasks"
+  @swarm-worker "Execute this specific subtask"
+  @swarm-researcher "Research Next.js caching APIs"
 
 ${cyan("Customization:")}
   Edit the generated files to customize behavior:
   ${dim("~/.config/opencode/command/swarm.md")}           - /swarm command prompt
-  ${dim("~/.config/opencode/agent/swarm/planner.md")}     - @swarm/planner (coordinator)
-  ${dim("~/.config/opencode/agent/swarm/worker.md")}      - @swarm/worker (task executor)
-  ${dim("~/.config/opencode/agent/swarm/researcher.md")}  - @swarm/researcher (read-only research)
+  ${dim("~/.config/opencode/agent/swarm-planner.md")}     - @swarm-planner (coordinator)
+  ${dim("~/.config/opencode/agent/swarm-worker.md")}      - @swarm-worker (task executor)
+  ${dim("~/.config/opencode/agent/swarm-researcher.md")}  - @swarm-researcher (read-only research)
   ${dim("~/.config/opencode/plugin/swarm.ts")}           - Plugin loader
 
 ${dim("Docs: https://github.com/joelhooks/opencode-swarm-plugin")}

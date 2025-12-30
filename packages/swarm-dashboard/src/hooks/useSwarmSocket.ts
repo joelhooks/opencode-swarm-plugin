@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState, useRef } from "react";
 import { useWebSocket as usePartyWebSocket } from "partysocket/react";
 import type { AgentEvent } from "../lib/types";
+import { useCursorPersistence } from "./useCursorPersistence";
 
 export type WebSocketState = 
   | "connecting" 
@@ -43,6 +44,9 @@ export function useSwarmSocket(url: string, options: UseSwarmSocketOptions = {})
   // Track if we've sent subscribe message
   const subscribedRef = useRef(false);
   const unmountedRef = useRef(false);
+  
+  // Cursor persistence for resumable streams
+  const { getCursor, setCursor } = useCursorPersistence(url);
 
   // Handlers for partysocket
   const handleOpen = useCallback((event: WebSocketEventMap["open"]) => {
@@ -50,12 +54,15 @@ export function useSwarmSocket(url: string, options: UseSwarmSocketOptions = {})
     console.log("[WS] OPEN - connected");
     setState("connected");
     
-    // Send subscribe message
+    // Send subscribe message with cursor if available
     const ws = event.target as WebSocket;
-    console.log("[WS] Sending subscribe...");
-    ws.send(JSON.stringify({ type: "subscribe", offset: 0 }));
+    const lastCursor = getCursor();
+    const offset = lastCursor ? Number(lastCursor) : 0;
+    
+    console.log("[WS] Sending subscribe with offset:", offset);
+    ws.send(JSON.stringify({ type: "subscribe", offset }));
     subscribedRef.current = true;
-  }, []);
+  }, [getCursor]);
 
   const handleMessage = useCallback((event: WebSocketEventMap["message"]) => {
     if (unmountedRef.current) return;
@@ -76,6 +83,11 @@ export function useSwarmSocket(url: string, options: UseSwarmSocketOptions = {})
       // Process event
       if (data.type === "event" && data.data) {
         const agentEvent = JSON.parse(data.data) as AgentEvent;
+        
+        // Track cursor from event offset (WebSocket doesn't have Last-Event-ID header)
+        if (data.offset !== undefined) {
+          setCursor(String(data.offset));
+        }
         
         // Deduplicate by id - only add if not already present
         setEvents((prev) => {
@@ -103,7 +115,7 @@ export function useSwarmSocket(url: string, options: UseSwarmSocketOptions = {})
     } catch (err) {
       console.error("[WS] Parse error:", err);
     }
-  }, []);
+  }, [setCursor]);
 
   const handleClose = useCallback((event: WebSocketEventMap["close"]) => {
     if (unmountedRef.current) return;

@@ -10,7 +10,7 @@
 
 import { tool } from "@opencode-ai/plugin";
 import { z } from "zod";
-import { getMemoryAdapter } from "./memory-tools";
+import { getHivemindAdapter } from "./hivemind-tools";
 
 // ============================================================================
 // Types
@@ -94,7 +94,7 @@ async function storeContributorMemory(
 	issueNumber?: number,
 ): Promise<boolean> {
 	try {
-		const adapter = await getMemoryAdapter();
+		const adapter = await getHivemindAdapter();
 
 		const twitterPart = user.twitter_username
 			? ` (@${user.twitter_username} on Twitter)`

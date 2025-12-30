@@ -476,7 +476,7 @@ describe("swarm_plan_prompt", () => {
       {
         task: "Add user profile",
         context: "We use Next.js App Router with server components",
-        query_cass: false,
+        query_cass: false, // Skip hivemind session search
       },
       mockContext,
     );
@@ -1308,12 +1308,12 @@ describe("swarm_init", () => {
   });
 
   describe("Graceful Degradation", () => {
-  it("swarm_decompose works without CASS", async () => {
-    // This should work regardless of CASS availability
+  it("swarm_decompose works without hivemind sessions", async () => {
+    // This should work regardless of hivemind session search availability
     const result = await swarm_decompose.execute(
       {
         task: "Add user authentication",
-        query_cass: true, // Request CASS but it may not be available
+        query_cass: true, // Request hivemind session search but it may not be available
       },
       mockContext,
     );
@@ -1324,16 +1324,16 @@ describe("swarm_init", () => {
     expect(parsed).toHaveProperty("prompt");
     expect(parsed.prompt).toContain("Add user authentication");
 
-    // CASS history should indicate whether it was queried
+    // hivemind history should indicate whether it was queried
     expect(parsed).toHaveProperty("cass_history");
     expect(parsed.cass_history).toHaveProperty("queried");
   });
 
-  it("swarm_decompose can skip CASS explicitly", async () => {
+  it("swarm_decompose can skip hivemind session search explicitly", async () => {
     const result = await swarm_decompose.execute(
       {
         task: "Add user authentication",
-        query_cass: false, // Explicitly skip CASS
+        query_cass: false, // Explicitly skip hivemind session search
       },
       mockContext,
     );
@@ -1503,9 +1503,9 @@ describe("Swarm Prompt V2 (with Swarm Mail/Beads)", () => {
       expect(SUBTASK_PROMPT_V2).toContain("CRITICAL");
     });
 
-    it("contains survival checklist: semantic-memory_find", () => {
+    it("contains survival checklist: hivemind_find", () => {
       // Step 2: Query past learnings BEFORE starting work
-      expect(SUBTASK_PROMPT_V2).toContain("semantic-memory_find");
+      expect(SUBTASK_PROMPT_V2).toContain("hivemind_find");
       expect(SUBTASK_PROMPT_V2).toContain("Query Past Learnings");
       expect(SUBTASK_PROMPT_V2).toContain("BEFORE starting work");
       expect(SUBTASK_PROMPT_V2).toContain("If you skip this step, you WILL waste time solving already-solved problems");
@@ -1544,9 +1544,9 @@ describe("Swarm Prompt V2 (with Swarm Mail/Beads)", () => {
       expect(SUBTASK_PROMPT_V2).toContain("preserve context");
     });
 
-    it("contains survival checklist: semantic-memory_store for learnings", () => {
+    it("contains survival checklist: hivemind_store for learnings", () => {
       // Step 8: Store discoveries and learnings
-      expect(SUBTASK_PROMPT_V2).toContain("semantic-memory_store");
+      expect(SUBTASK_PROMPT_V2).toContain("hivemind_store");
       expect(SUBTASK_PROMPT_V2).toContain("STORE YOUR LEARNINGS");
       expect(SUBTASK_PROMPT_V2).toContain("Solved a tricky bug");
       expect(SUBTASK_PROMPT_V2).toContain("The WHY matters more than the WHAT");
@@ -1635,10 +1635,10 @@ describe("Swarm Prompt V2 (with Swarm Mail/Beads)", () => {
     );
 
     it.skipIf(!beadsAvailable)(
-      "attempts to store in semantic-memory when available",
+      "attempts to store in hivemind when available",
       async () => {
         const createResult =
-          await Bun.$`bd create "Test semantic-memory storage" -t task --json`
+          await Bun.$`bd create "Test hivemind storage" -t task --json`
             .quiet()
             .nothrow();
 
@@ -1667,11 +1667,11 @@ describe("Swarm Prompt V2 (with Swarm Mail/Beads)", () => {
 
           const parsed = JSON.parse(result);
 
-          // If semantic-memory is available, stored should be true
+          // If hivemind is available, stored should be true
           // If not, error should explain why
           if (parsed.memory_capture.stored) {
             expect(parsed.memory_capture.note).toContain(
-              "automatically stored in semantic-memory",
+              "automatically stored in hivemind",
             );
           } else {
             expect(parsed.memory_capture.error).toBeDefined();

@@ -1,20 +1,27 @@
 /**
  * Tests for Swarm-Aware Compaction Hook
+ * 
+ * IMPORTANT: This file uses DEPENDENCY INJECTION instead of mock.module().
+ * Bun's mock.module() is global and persists across test files, causing pollution.
+ * All tests that need mocked behavior pass options to createCompactionHook().
  */
 
-import { describe, expect, it, mock, beforeEach } from "bun:test";
+import { describe, expect, it, beforeEach } from "bun:test";
 import {
   SWARM_COMPACTION_CONTEXT,
   SWARM_DETECTION_FALLBACK,
   createCompactionHook,
   scanSessionMessages,
   type ScannedSwarmState,
+  type CompactionHookOptions,
 } from "./compaction-hook";
 
 // Track log calls for verification
 let logCalls: Array<{ level: string; data: any; message?: string }> = [];
 
-// Mock logger factory
+/**
+ * Create a mock logger that captures all log calls
+ */
 const createMockLogger = () => ({
   info: (data: any, message?: string) => {
     logCalls.push({ level: "info", data, message });
@@ -30,15 +37,15 @@ const createMockLogger = () => ({
   },
 });
 
-// Mock the dependencies
-mock.module("./hive", () => ({
+/**
+ * Default mock options for tests that need isolated/mocked behavior.
+ * Use this instead of file-level mock.module() calls.
+ */
+const createDefaultMockOptions = (): CompactionHookOptions => ({
   getHiveWorkingDirectory: () => "/test/project",
   getHiveAdapter: async () => ({
     queryCells: async () => [],
   }),
-}));
-
-mock.module("swarm-mail", () => ({
   checkSwarmHealth: async () => ({
     healthy: true,
     database: "connected",
@@ -49,12 +56,8 @@ mock.module("swarm-mail", () => ({
       reservations: 0,
     },
   }),
-}));
-
-// Mock logger module
-mock.module("./logger", () => ({
-  createChildLogger: () => createMockLogger(),
-}));
+  logger: createMockLogger(),
+});
 
 describe("Compaction Hook", () => {
   beforeEach(() => {
@@ -108,6 +111,19 @@ describe("Compaction Hook", () => {
       expect(SWARM_COMPACTION_CONTEXT).toContain("swarm_spawn_retry");
     });
 
+    it("uses hivemind tools not semantic-memory tools (ADR-011)", () => {
+      // ADR-011: Hivemind Memory Unification
+      // All semantic-memory_* references should be updated to hivemind_*
+      
+      // Should contain hivemind_* tools
+      expect(SWARM_COMPACTION_CONTEXT).toContain("hivemind_find");
+      
+      // Should NOT contain deprecated semantic-memory_* tools
+      expect(SWARM_COMPACTION_CONTEXT).not.toContain("semantic-memory_find");
+      expect(SWARM_COMPACTION_CONTEXT).not.toContain("semantic-memory_store");
+      expect(SWARM_COMPACTION_CONTEXT).not.toContain("semantic-memory");
+    });
+
     it("contains forbidden tools section with ALL forbidden tools", () => {
       // Repository fetching
       expect(SWARM_COMPACTION_CONTEXT).toContain("repo-crawl_file");
@@ -150,12 +166,12 @@ describe("Compaction Hook", () => {
 
   describe("createCompactionHook", () => {
     it("returns a function", () => {
-      const hook = createCompactionHook();
+      const hook = createCompactionHook(createDefaultMockOptions());
       expect(typeof hook).toBe("function");
     });
 
     it("accepts input and output parameters", async () => {
-      const hook = createCompactionHook();
+      const hook = createCompactionHook(createDefaultMockOptions());
       const input = { sessionID: "test-session" };
       const output = { context: [] as string[] };
 
@@ -164,7 +180,7 @@ describe("Compaction Hook", () => {
     });
 
     it("does not inject context when no swarm detected", async () => {
-      const hook = createCompactionHook();
+      const hook = createCompactionHook(createDefaultMockOptions());
       const output = { context: [] as string[] };
 
       await hook({ sessionID: "test" }, output);
@@ -284,8 +300,8 @@ describe("Compaction Hook", () => {
 
   describe("Specific swarm state injection (TDD red phase)", () => {
     it("includes specific epic ID when in_progress epic exists", async () => {
-      // Mock hive with an in_progress epic
-      mock.module("./hive", () => ({
+      // Use DI instead of mock.module
+      const hook = createCompactionHook({
         getHiveWorkingDirectory: () => "/test/project",
         getHiveAdapter: async () => ({
           queryCells: async () => [
@@ -299,9 +315,13 @@ describe("Compaction Hook", () => {
             },
           ],
         }),
-      }));
+        checkSwarmHealth: async () => ({
+          healthy: true,
+          database: "connected",
+          stats: { events: 0, agents: 0, messages: 0, reservations: 0 },
+        }),
+      });
 
-      const hook = createCompactionHook();
       const input = { sessionID: "test-session" };
       const output = { context: [] as string[] };
 
@@ -315,8 +335,8 @@ describe("Compaction Hook", () => {
     });
 
     it("includes subtask status summary in injected context", async () => {
-      // Mock hive with epic + subtasks in various states
-      mock.module("./hive", () => ({
+      // Use DI instead of mock.module
+      const hook = createCompactionHook({
         getHiveWorkingDirectory: () => "/test/project",
         getHiveAdapter: async () => ({
           queryCells: async () => [
@@ -354,9 +374,13 @@ describe("Compaction Hook", () => {
             },
           ],
         }),
-      }));
+        checkSwarmHealth: async () => ({
+          healthy: true,
+          database: "connected",
+          stats: { events: 0, agents: 0, messages: 0, reservations: 0 },
+        }),
+      });
 
-      const hook = createCompactionHook();
       const input = { sessionID: "test-session" };
       const output = { context: [] as string[] };
 
@@ -372,7 +396,8 @@ describe("Compaction Hook", () => {
     });
 
     it("includes project path in context", async () => {
-      mock.module("./hive", () => ({
+      // Use DI instead of mock.module
+      const hook = createCompactionHook({
         getHiveWorkingDirectory: () => "/Users/joel/test-project",
         getHiveAdapter: async () => ({
           queryCells: async () => [
@@ -386,9 +411,13 @@ describe("Compaction Hook", () => {
             },
           ],
         }),
-      }));
+        checkSwarmHealth: async () => ({
+          healthy: true,
+          database: "connected",
+          stats: { events: 0, agents: 0, messages: 0, reservations: 0 },
+        }),
+      });
 
-      const hook = createCompactionHook();
       const input = { sessionID: "test-session" };
       const output = { context: [] as string[] };
 
@@ -402,7 +431,8 @@ describe("Compaction Hook", () => {
     });
 
     it("includes actionable swarm_status call with epic ID", async () => {
-      mock.module("./hive", () => ({
+      // Use DI instead of mock.module
+      const hook = createCompactionHook({
         getHiveWorkingDirectory: () => "/test/project",
         getHiveAdapter: async () => ({
           queryCells: async () => [
@@ -416,9 +446,13 @@ describe("Compaction Hook", () => {
             },
           ],
         }),
-      }));
+        checkSwarmHealth: async () => ({
+          healthy: true,
+          database: "connected",
+          stats: { events: 0, agents: 0, messages: 0, reservations: 0 },
+        }),
+      });
 
-      const hook = createCompactionHook();
       const input = { sessionID: "test-session" };
       const output = { context: [] as string[] };
 
@@ -433,8 +467,8 @@ describe("Compaction Hook", () => {
     });
 
     it("includes coordinator role reminder - NOT worker commands", async () => {
-      // Mock an in-progress epic with subtasks
-      mock.module("./hive", () => ({
+      // Use DI instead of mock.module
+      const hook = createCompactionHook({
         getHiveWorkingDirectory: () => "/test/project",
         getHiveAdapter: async () => ({
           queryCells: async () => [
@@ -455,9 +489,13 @@ describe("Compaction Hook", () => {
             },
           ],
         }),
-      }));
+        checkSwarmHealth: async () => ({
+          healthy: true,
+          database: "connected",
+          stats: { events: 0, agents: 0, messages: 0, reservations: 0 },
+        }),
+      });
 
-      const hook = createCompactionHook();
       const input = { sessionID: "test-session" };
       const output = { context: [] as string[] };
 
@@ -476,9 +514,93 @@ describe("Compaction Hook", () => {
     });
   });
 
+  describe("Dependency Injection", () => {
+    it("accepts custom getHiveAdapter function", async () => {
+      const customAdapter = {
+        queryCells: async () => [
+          {
+            id: "custom-epic",
+            title: "Custom Epic",
+            type: "epic" as const,
+            status: "in_progress" as const,
+            parent_id: null,
+            updated_at: Date.now(),
+          },
+        ],
+      };
+
+      const hook = createCompactionHook({
+        getHiveWorkingDirectory: () => "/custom/path",
+        getHiveAdapter: async () => customAdapter,
+        checkSwarmHealth: async () => ({
+          healthy: true,
+          database: "connected",
+          stats: { events: 0, agents: 0, messages: 0, reservations: 0 },
+        }),
+      });
+
+      const output = { context: [] as string[] };
+      await hook({ sessionID: "test" }, output);
+
+      expect(output.context.length).toBeGreaterThan(0);
+      expect(output.context[0]).toContain("custom-epic");
+    });
+
+    it("accepts custom checkSwarmHealth function", async () => {
+      const hook = createCompactionHook({
+        checkSwarmHealth: async () => ({
+          healthy: true,
+          database: "connected" as const,
+          stats: {
+            events: 5,
+            agents: 2,
+            messages: 10,
+            reservations: 3,
+          },
+        }),
+      });
+
+      const output = { context: [] as string[] };
+      await hook({ sessionID: "test" }, output);
+
+      // Should detect swarm due to reservations
+      expect(output.context.length).toBeGreaterThan(0);
+    });
+
+    it("accepts custom getHiveWorkingDirectory function", async () => {
+      const hook = createCompactionHook({
+        getHiveWorkingDirectory: () => "/custom/path",
+        getHiveAdapter: async () => ({
+          queryCells: async () => [
+            {
+              id: "test-epic",
+              title: "Test Epic",
+              type: "epic" as const,
+              status: "in_progress" as const,
+              parent_id: null,
+              updated_at: Date.now(),
+            },
+          ],
+        }),
+        checkSwarmHealth: async () => ({
+          healthy: true,
+          database: "connected",
+          stats: { events: 0, agents: 0, messages: 0, reservations: 0 },
+        }),
+      });
+
+      const output = { context: [] as string[] };
+      await hook({ sessionID: "test" }, output);
+
+      // Should detect swarm and include custom path
+      expect(output.context.length).toBeGreaterThan(0);
+      expect(output.context[0]).toContain("/custom/path");
+    });
+  });
+
   describe("Logging instrumentation", () => {
     it("logs compaction start with session_id", async () => {
-      const hook = createCompactionHook();
+      const hook = createCompactionHook(createDefaultMockOptions());
       const input = { sessionID: "test-session-123" };
       const output = { context: [] as string[] };
 
@@ -492,7 +614,7 @@ describe("Compaction Hook", () => {
     });
 
     it("logs detection phase with confidence and reasons", async () => {
-      const hook = createCompactionHook();
+      const hook = createCompactionHook(createDefaultMockOptions());
       const input = { sessionID: "test-session" };
       const output = { context: [] as string[] };
 
@@ -509,12 +631,8 @@ describe("Compaction Hook", () => {
     });
 
     it("logs context injection when swarm detected", async () => {
-      const hook = createCompactionHook();
-      const input = { sessionID: "test-session" };
-      const output = { context: [] as string[] };
-
-      // Mock detection to return medium confidence
-      mock.module("./hive", () => ({
+      // Use DI with mock logger
+      const hook = createCompactionHook({
         getHiveWorkingDirectory: () => "/test/project",
         getHiveAdapter: async () => ({
           queryCells: async () => [
@@ -527,7 +645,16 @@ describe("Compaction Hook", () => {
             },
           ],
         }),
-      }));
+        checkSwarmHealth: async () => ({
+          healthy: true,
+          database: "connected",
+          stats: { events: 0, agents: 0, messages: 0, reservations: 0 },
+        }),
+        logger: createMockLogger(),
+      });
+
+      const input = { sessionID: "test-session" };
+      const output = { context: [] as string[] };
 
       await hook(input, output);
 
@@ -541,7 +668,7 @@ describe("Compaction Hook", () => {
     });
 
     it("logs completion with duration and success", async () => {
-      const hook = createCompactionHook();
+      const hook = createCompactionHook(createDefaultMockOptions());
       const input = { sessionID: "test-session" };
       const output = { context: [] as string[] };
 
@@ -557,7 +684,7 @@ describe("Compaction Hook", () => {
     });
 
     it("logs detailed detection sources (hive, swarm-mail)", async () => {
-      const hook = createCompactionHook();
+      const hook = createCompactionHook(createDefaultMockOptions());
       const input = { sessionID: "test-session" };
       const output = { context: [] as string[] };
 
@@ -577,17 +704,17 @@ describe("Compaction Hook", () => {
     });
 
     it("logs errors without throwing when detection fails", async () => {
-      // Mock hive to throw
-      mock.module("./hive", () => ({
+      // Use DI to make hive throw
+      const hook = createCompactionHook({
         getHiveWorkingDirectory: () => {
           throw new Error("Hive not available");
         },
         getHiveAdapter: async () => {
           throw new Error("Hive not available");
         },
-      }));
+        logger: createMockLogger(),
+      });
 
-      const hook = createCompactionHook();
       const input = { sessionID: "test-session" };
       const output = { context: [] as string[] };
 
@@ -602,7 +729,7 @@ describe("Compaction Hook", () => {
     });
 
     it("includes context size when injecting", async () => {
-      const hook = createCompactionHook();
+      const hook = createCompactionHook(createDefaultMockOptions());
       const input = { sessionID: "test-session" };
       const output = { context: [] as string[] };
 

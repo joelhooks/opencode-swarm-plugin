@@ -8,7 +8,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { closeAllSwarmMail } from "swarm-mail";
 import { contributorTools, resetContributorCache } from "./contributor-tools";
-import { resetMemoryCache } from "./memory-tools";
+import { resetHivemindCache } from "./hivemind-tools";
 
 interface ToolContext {
 	sessionID: string;
@@ -17,7 +17,7 @@ interface ToolContext {
 describe("contributor tools integration", () => {
 	afterAll(async () => {
 		resetContributorCache();
-		resetMemoryCache();
+		resetHivemindCache();
 		await closeAllSwarmMail();
 	});
 

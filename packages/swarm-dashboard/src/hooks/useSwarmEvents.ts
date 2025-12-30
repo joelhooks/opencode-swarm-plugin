@@ -51,6 +51,7 @@ export function useSwarmEvents(options: UseSwarmEventsOptions = {}) {
 
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [latestEvent, setLatestEvent] = useState<AgentEvent | null>(null);
+  const [lastEventTime, setLastEventTime] = useState<Date | null>(null);
 
   const handleMessage = useCallback(
     (messageEvent: MessageEvent) => {
@@ -74,6 +75,7 @@ export function useSwarmEvents(options: UseSwarmEventsOptions = {}) {
         // Update state
         setLatestEvent(event);
         setEvents((prev) => [...prev, event]);
+        setLastEventTime(new Date());
 
         // Call event callback
         onEvent?.(event);
@@ -94,6 +96,7 @@ export function useSwarmEvents(options: UseSwarmEventsOptions = {}) {
   const clearEvents = useCallback(() => {
     setEvents([]);
     setLatestEvent(null);
+    setLastEventTime(null);
   }, []);
 
   const getEventsByType = useCallback(
@@ -140,6 +143,12 @@ export function useSwarmEvents(options: UseSwarmEventsOptions = {}) {
     getEventsByAgent,
     /** Get events for a specific epic */
     getEventsByEpic,
+    /** Connection state for health UI */
+    connectionState: eventSourceState.state,
+    /** Time of last received event */
+    lastEventTime,
+    /** Number of reconnection attempts */
+    reconnectAttempts: eventSourceState.retryCount,
   };
 }
 

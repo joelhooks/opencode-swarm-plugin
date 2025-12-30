@@ -65,7 +65,7 @@ import {
 import {
   semantic_memory_store,
   semantic_memory_find,
-} from "./memory-tools";
+} from "./hivemind-tools";
 
 import type { Bead, EpicCreateResult } from "./schemas";
 
