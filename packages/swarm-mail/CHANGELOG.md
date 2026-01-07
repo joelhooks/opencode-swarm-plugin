@@ -1,5 +1,23 @@
 # swarm-mail
 
+## 1.9.2
+
+### Patch Changes
+
+- [`6e9538d`](https://github.com/joelhooks/swarm-tools/commit/6e9538d95bebac8817feec6c3d52053fc5e8bd2b) Thanks [@joelhooks](https://github.com/joelhooks)! - ## Fix: Remove stale `created_at` column references
+
+  Fixes `SQLITE_ERROR: table events has no column named created_at` that occurred during database migrations.
+
+  **What happened:** The events table schema was updated to remove `created_at`, but migration code and schema checks still referenced it.
+
+  **Fixed locations:**
+
+  - `auto-migrate.ts` - migration column checks
+  - `libsql-schema.ts` - required columns validation
+  - `streams.ts` - schema definitions
+
+  No data migration needed - the column never existed in production databases.
+
 ## 1.9.1
 
 ### Patch Changes
