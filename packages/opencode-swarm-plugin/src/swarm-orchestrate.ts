@@ -1641,7 +1641,133 @@ This will be recorded as a negative learning signal.`;
         );
       }
 
-      // Extract epic ID
+      // Score outcome and update pattern maturity
+      let outcomeScored = false;
+      let outcomeFeedbackType: string | undefined;
+      let outcomeScore: number | undefined;
+      let outcomeReasoning: string | undefined;
+      try {
+        const { scoreOutcome, OutcomeSignalsSchema } = await import("./learning");
+        const { getStorage } = await import("./storage");
+        const { updatePatternMaturity } = await import("./pattern-maturity");
+        
+        // Build outcome signals
+        const durationMs = args.start_time ? Date.now() - args.start_time : 0;
+        const signals = OutcomeSignalsSchema.parse({
+          bead_id: args.bead_id,
+          duration_ms: durationMs,
+          error_count: args.error_count ?? 0,
+          retry_count: args.retry_count ?? 0,
+          success: true, // swarm_complete only runs on success
+          files_touched: args.files_touched || [],
+          timestamp: new Date().toISOString(),
+          strategy: undefined, // TODO: Extract strategy from decomposition event
+        });
+
+        // Score the outcome
+        const outcome = scoreOutcome(signals);
+        outcomeScored = true;
+        outcomeFeedbackType = outcome.type;
+        outcomeScore = outcome.score;
+        outcomeReasoning = outcome.reasoning;
+
+        // Store feedback event
+        const storage = await getStorage();
+        const { outcomeToFeedback, scoreImplicitFeedback } = await import("./learning");
+        const scoredOutcome = scoreImplicitFeedback(signals);
+        const feedbackEvent = outcomeToFeedback(scoredOutcome, "task_completion");
+        await storage.storeFeedback(feedbackEvent);
+
+        // Update pattern maturity (if strategy was used)
+        if (signals.strategy) {
+          const maturity = await storage.getMaturity(signals.strategy);
+          if (maturity) {
+            const allFeedback = await storage.getMaturityFeedback(signals.strategy);
+            const updated = updatePatternMaturity(maturity, allFeedback);
+            await storage.storeMaturity(updated);
+          }
+        }
+      } catch (error) {
+        // Non-fatal - don't block completion if scoring fails
+        console.warn(
+          `[swarm_complete] Failed to score outcome (non-fatal): ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+
+      // Record pattern observations for anti-pattern auto-deprecation
+      const patternObservations = {
+        extracted_patterns: [] as string[],
+        recorded_count: 0,
+        inversions: [] as any[],
+      };
+      
+      try {
+        const {
+          extractPatternsFromDescription,
+          recordPatternObservation,
+          createPattern,
+          InMemoryPatternStorage,
+        } = await import("./anti-patterns");
+        
+        // Determine epic ID: use parent_id if available, otherwise fall back to extracting from bead_id
+        // The cell was already fetched earlier, so we can reuse it
+        const epicIdForPattern = cell.parent_id || (args.bead_id.includes(".")
+          ? args.bead_id.split(".")[0]
+          : args.bead_id);
+        
+        // Get epic to extract patterns from description
+        const epicCell = await adapter.getCell(args.project_key, epicIdForPattern);
+        if (epicCell?.description) {
+          const patterns = extractPatternsFromDescription(epicCell.description);
+          patternObservations.extracted_patterns = patterns;
+          
+          if (patterns.length > 0) {
+            // Initialize storage (in-memory for now, can integrate with persistent storage later)
+            const patternStorage = new InMemoryPatternStorage();
+            
+            // Record observation for each pattern (success=true since swarm_complete only runs on success)
+            for (const patternContent of patterns) {
+              // Find or create pattern
+              const existingPatterns = await patternStorage.findByContent(patternContent);
+              let pattern = existingPatterns[0];
+              
+              if (!pattern) {
+                // Create new pattern
+                pattern = createPattern(patternContent, ["decomposition", "auto-detected"]);
+                await patternStorage.store(pattern);
+              }
+              
+              // Record successful observation
+              const result = recordPatternObservation(
+                pattern,
+                true, // success=true (swarm_complete only runs on success)
+                args.bead_id,
+              );
+              
+              // Update storage with new counts
+              await patternStorage.store(result.pattern);
+              patternObservations.recorded_count++;
+              
+              // If pattern was inverted, store the anti-pattern
+              if (result.inversion) {
+                await patternStorage.store(result.inversion.inverted);
+                patternObservations.inversions.push({
+                  original: result.inversion.original.content,
+                  inverted: result.inversion.inverted.content,
+                  reason: result.inversion.reason,
+                });
+              }
+            }
+          }
+        }
+      } catch (error) {
+        // Non-fatal - don't block completion if pattern observation fails
+        console.warn(
+          `[swarm_complete] Failed to record pattern observations (non-fatal): ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+
+      // Extract epic ID (for message sending)
       const epicId = args.bead_id.includes(".")
         ? args.bead_id.split(".")[0]
         : args.bead_id;
@@ -1741,6 +1867,19 @@ Files touched: ${args.files_touched?.join(", ") || "none recorded"}`,
             ? "Learning automatically stored in hivemind"
             : `Failed to store: ${memoryError}. Learning lost unless hivemind is available.`,
         },
+        // Outcome scoring (learning system integration)
+        outcome_scoring: outcomeScored
+          ? {
+              scored: true,
+              feedback_type: outcomeFeedbackType,
+              score: outcomeScore,
+              reasoning: outcomeReasoning,
+              note: "Outcome scored and stored for pattern maturity tracking",
+            }
+          : {
+              scored: false,
+              note: "Outcome scoring failed (non-fatal)",
+            },
         // Contract validation result
         contract_validation: contractValidation
           ? {
@@ -1756,6 +1895,8 @@ Files touched: ${args.files_touched?.join(", ") || "none recorded"}`,
               validated: false,
               reason: "No files_owned contract found (non-epic subtask or decomposition event missing)",
             },
+        // Pattern observations for anti-pattern auto-deprecation
+        pattern_observations: patternObservations,
       };
 
       // Capture subtask completion outcome for eval data

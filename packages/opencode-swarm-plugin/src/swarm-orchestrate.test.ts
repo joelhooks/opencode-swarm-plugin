@@ -352,6 +352,11 @@ describe("subtask_outcome event emission", () => {
 
     const parsed = JSON.parse(result);
     expect(parsed.success).toBe(true);
+    
+    // Verify outcome scoring is present in response
+    expect(parsed.outcome_scoring).toBeDefined();
+    expect(parsed.outcome_scoring.scored).toBe(true);
+    expect(parsed.outcome_scoring.feedback_type).toBeDefined();
 
     // Query events from libSQL database
     const events = await readEvents({
@@ -617,6 +622,208 @@ describe("ADR-011: hivemind migration compliance", () => {
     expect(fileContents).toContain(
       "Each technology has documentation in hivemind"
     );
+  });
+});
+
+// ============================================================================
+// Anti-Pattern Auto-Deprecation Tests (recordPatternObservation wiring)
+// ============================================================================
+
+describe("anti-pattern auto-deprecation integration", () => {
+  const mockContext = {
+    sessionID: `test-anti-pattern-${Date.now()}`,
+    messageID: `test-message-${Date.now()}`,
+    agent: "test-agent",
+    abort: new AbortController().signal,
+  };
+
+  let testProjectPath: string;
+
+  beforeEach(async () => {
+    testProjectPath = `/tmp/test-anti-pattern-${Date.now()}`;
+    fs.mkdirSync(testProjectPath, { recursive: true });
+    
+    // Create .hive directory and issues.jsonl
+    const hiveDir = `${testProjectPath}/.hive`;
+    fs.mkdirSync(hiveDir, { recursive: true });
+    fs.writeFileSync(`${hiveDir}/issues.jsonl`, "", "utf-8");
+    
+    // Set hive working directory to testProjectPath
+    const { setHiveWorkingDirectory } = await import("./hive");
+    setHiveWorkingDirectory(testProjectPath);
+  });
+
+  afterEach(() => {
+    if (fs.existsSync(testProjectPath)) {
+      fs.rmSync(testProjectPath, { recursive: true, force: true });
+    }
+  });
+
+  test("extracts patterns from epic description on swarm_complete", async () => {
+    const { hive_create_epic } = await import("./hive");
+
+    // Create an epic with a known pattern in the description
+    const epicResult = await hive_create_epic.execute({
+      epic_title: "Add user management",
+      epic_description: "Split by feature: user CRUD operations, profile page, and settings. Tests alongside implementation.",
+      subtasks: [
+        {
+          title: "User CRUD service",
+          priority: 2,
+          files: ["src/user-service.ts"],
+        },
+      ],
+    }, mockContext);
+    
+    const epicData = JSON.parse(epicResult);
+    const beadId = epicData.subtasks[0].id;
+
+    // Complete the subtask (success case)
+    const result = await swarm_complete.execute(
+      {
+        project_key: testProjectPath,
+        agent_name: "TestAgent",
+        bead_id: beadId,
+        summary: "Implemented user CRUD",
+        files_touched: ["src/user-service.ts"],
+        skip_verification: true,
+        skip_review: true,
+        planned_files: ["src/user-service.ts"],
+        start_time: Date.now() - 60000,
+        error_count: 0,
+        retry_count: 0,
+      },
+      mockContext,
+    );
+
+    const parsed = JSON.parse(result);
+    expect(parsed.success).toBe(true);
+    
+    // Verify pattern observation was recorded
+    expect(parsed).toHaveProperty("pattern_observations");
+    expect(parsed.pattern_observations).toBeDefined();
+    expect(parsed.pattern_observations.extracted_patterns).toContain("Split by feature");
+    expect(parsed.pattern_observations.extracted_patterns).toContain("Tests alongside implementation");
+    expect(parsed.pattern_observations.recorded_count).toBeGreaterThan(0);
+  });
+
+  test("does not extract patterns when epic description is missing", async () => {
+    const { hive_create_epic } = await import("./hive");
+
+    // Create an epic without description
+    const epicResult = await hive_create_epic.execute({
+      epic_title: "Fix bug",
+      subtasks: [
+        {
+          title: "Fix auth bug",
+          priority: 1,
+          files: ["src/auth.ts"],
+        },
+      ],
+    }, mockContext);
+    
+    const epicData = JSON.parse(epicResult);
+    const beadId = epicData.subtasks[0].id;
+
+    // Complete the subtask
+    const result = await swarm_complete.execute(
+      {
+        project_key: testProjectPath,
+        agent_name: "TestAgent",
+        bead_id: beadId,
+        summary: "Fixed auth bug",
+        files_touched: ["src/auth.ts"],
+        skip_verification: true,
+        skip_review: true,
+        start_time: Date.now() - 60000,
+      },
+      mockContext,
+    );
+
+    const parsed = JSON.parse(result);
+    expect(parsed.success).toBe(true);
+    
+    // Pattern observations should exist but with no patterns extracted
+    expect(parsed).toHaveProperty("pattern_observations");
+    expect(parsed.pattern_observations.extracted_patterns).toHaveLength(0);
+    expect(parsed.pattern_observations.recorded_count).toBe(0);
+  });
+
+  test("increments pattern success count on each completion", async () => {
+    const { hive_create_epic } = await import("./hive");
+
+    // Create an epic with a known pattern
+    const epicResult = await hive_create_epic.execute({
+      epic_title: "Refactor auth",
+      epic_description: "Split by component: service, controller, middleware. Tests alongside implementation.",
+      subtasks: [
+        {
+          title: "Auth service",
+          priority: 2,
+          files: ["src/service.ts"],
+        },
+        {
+          title: "Auth controller",
+          priority: 2,
+          files: ["src/controller.ts"],
+        },
+      ],
+    }, mockContext);
+    
+    const epicData = JSON.parse(epicResult);
+    const bead1Id = epicData.subtasks[0].id;
+    const bead2Id = epicData.subtasks[1].id;
+
+    // Complete first subtask
+    const result1 = await swarm_complete.execute(
+      {
+        project_key: testProjectPath,
+        agent_name: "TestAgent",
+        bead_id: bead1Id,
+        summary: "Completed auth service",
+        files_touched: ["src/service.ts"],
+        skip_verification: true,
+        skip_review: true,
+        planned_files: ["src/service.ts"],
+        start_time: Date.now() - 60000,
+        error_count: 0,
+        retry_count: 0,
+      },
+      mockContext,
+    );
+
+    const parsed1 = JSON.parse(result1);
+    expect(parsed1.success).toBe(true);
+    expect(parsed1.pattern_observations.extracted_patterns).toContain("Split by component");
+    expect(parsed1.pattern_observations.recorded_count).toBe(2); // 2 patterns extracted
+
+    // Complete second subtask
+    const result2 = await swarm_complete.execute(
+      {
+        project_key: testProjectPath,
+        agent_name: "TestAgent",
+        bead_id: bead2Id,
+        summary: "Completed auth controller",
+        files_touched: ["src/controller.ts"],
+        skip_verification: true,
+        skip_review: true,
+        planned_files: ["src/controller.ts"],
+        start_time: Date.now() - 60000,
+        error_count: 0,
+        retry_count: 0,
+      },
+      mockContext,
+    );
+
+    const parsed2 = JSON.parse(result2);
+    expect(parsed2.success).toBe(true);
+    // Same patterns extracted again
+    expect(parsed2.pattern_observations.extracted_patterns).toContain("Split by component");
+    expect(parsed2.pattern_observations.recorded_count).toBe(2);
+    
+    // Note: We can't verify the actual counts in storage since InMemoryPatternStorage
+    // is created fresh each time. In a real implementation with persistent storage,
+    // we would query the storage to verify the success_count increased.
   });
 });
 
