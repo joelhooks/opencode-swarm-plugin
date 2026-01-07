@@ -1185,6 +1185,30 @@ const swarm_review_feedback = tool({
 });
 
 // =============================================================================
+// Adversarial Review Tools (VDD/Chainlink-inspired)
+// =============================================================================
+
+const swarm_adversarial_review = tool({
+  description: `VDD-style adversarial code review using hostile, fresh-context agent.
+
+Spawns Sarcasmotron - a hyper-critical reviewer with zero tolerance for slop.
+Fresh context per review prevents "relationship drift" (becoming lenient over time).
+
+Returns structured critique with verdict:
+- APPROVED: Code is solid
+- NEEDS_CHANGES: Real issues found
+- HALLUCINATING: Adversary invented issues (code is excellent!)
+
+Credit: VDD methodology from https://github.com/Vomikron/VDD
+Credit: Chainlink patterns from https://github.com/dollspace-gay/chainlink`,
+  args: {
+    diff: tool.schema.string().describe("Git diff of changes to review"),
+    test_output: tool.schema.string().optional().describe("Test output (optional)"),
+  },
+  execute: (args, ctx) => execTool("swarm_adversarial_review", args, ctx),
+});
+
+// =============================================================================
 // Skills Tools
 // =============================================================================
 
@@ -2617,6 +2641,8 @@ const SwarmPlugin: Plugin = async (
       // Structured Review
       swarm_review,
       swarm_review_feedback,
+      // Adversarial Review (VDD/Chainlink)
+      swarm_adversarial_review,
       // Skills
       skills_list,
       skills_read,
