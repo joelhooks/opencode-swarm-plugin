@@ -454,13 +454,24 @@ function showUpdateNotification(info: UpdateInfo) {
 // Types
 // ============================================================================
 
+type InstallType = "brew" | "npm" | "bun" | "pnpm" | "yarn" | "paru" | "choco" | "scoop" | "manual";
+
+interface InstallMethod {
+  name: string;
+  command: string;
+  type: InstallType;
+  platforms?: ("darwin" | "linux" | "win32")[];
+  requires?: string; // Command that must exist for this method to work
+}
+
 interface Dependency {
   name: string;
   command: string;
   checkArgs: string[];
   required: boolean;
   install: string;
-  installType: "brew" | "curl" | "go" | "npm" | "manual";
+  installType: InstallType;
+  installMethods?: InstallMethod[]; // Multiple installation options
   description: string;
 }
 
@@ -473,6 +484,77 @@ interface CheckResult {
 // ============================================================================
 // Dependencies
 // ============================================================================
+
+/**
+ * All available installation methods for OpenCode.
+ * Ordered by recommendation (curl first as it's most universal).
+ */
+const OPENCODE_INSTALL_METHODS: InstallMethod[] = [
+  // Universal (works on macOS and Linux)
+  {
+    name: "curl (recommended)",
+    command: "curl -fsSL https://opencode.ai/install | bash",
+    type: "manual",
+    platforms: ["darwin", "linux"],
+    requires: "curl",
+  },
+  // macOS and Linux package managers
+  {
+    name: "Homebrew",
+    command: "brew install opencode",
+    type: "brew",
+    platforms: ["darwin", "linux"],
+    requires: "brew",
+  },
+  // Node.js package managers (cross-platform)
+  {
+    name: "npm",
+    command: "npm install -g opencode-ai",
+    type: "npm",
+    requires: "npm",
+  },
+  {
+    name: "Bun",
+    command: "bun install -g opencode-ai",
+    type: "bun",
+    requires: "bun",
+  },
+  {
+    name: "pnpm",
+    command: "pnpm install -g opencode-ai",
+    type: "pnpm",
+    requires: "pnpm",
+  },
+  {
+    name: "Yarn",
+    command: "yarn global add opencode-ai",
+    type: "yarn",
+    requires: "yarn",
+  },
+  // Linux-specific
+  {
+    name: "paru (Arch Linux)",
+    command: "paru -S opencode-bin",
+    type: "paru",
+    platforms: ["linux"],
+    requires: "paru",
+  },
+  // Windows-specific
+  {
+    name: "Chocolatey",
+    command: "choco install opencode",
+    type: "choco",
+    platforms: ["win32"],
+    requires: "choco",
+  },
+  {
+    name: "Scoop",
+    command: "scoop bucket add extras && scoop install extras/opencode",
+    type: "scoop",
+    platforms: ["win32"],
+    requires: "scoop",
+  },
+];
 
 const DEPENDENCIES: Dependency[] = [
   {
@@ -489,8 +571,9 @@ const DEPENDENCIES: Dependency[] = [
     command: "opencode",
     checkArgs: ["--version"],
     required: true,
-    install: "brew install sst/tap/opencode",
-    installType: "brew",
+    install: "curl -fsSL https://opencode.ai/install | bash", // Default to curl
+    installType: "manual",
+    installMethods: OPENCODE_INSTALL_METHODS,
     description: "AI coding assistant (plugin host)",
   },
   // Note: Beads CLI (bd) is NO LONGER required - we use HiveAdapter from swarm-mail
@@ -582,6 +665,81 @@ async function checkAllDependencies(): Promise<CheckResult[]> {
     results.push({ dep, available, version });
   }
   return results;
+}
+
+/**
+ * Get available installation methods for a dependency based on:
+ * - Current platform (darwin, linux, win32)
+ * - Available package managers on the system
+ */
+async function getAvailableInstallMethods(
+  methods: InstallMethod[],
+): Promise<InstallMethod[]> {
+  const platform = process.platform as "darwin" | "linux" | "win32";
+  const available: InstallMethod[] = [];
+
+  for (const method of methods) {
+    // Check platform compatibility
+    if (method.platforms && !method.platforms.includes(platform)) {
+      continue;
+    }
+
+    // Check if required command is available
+    if (method.requires) {
+      const { available: cmdAvailable } = await checkCommand(method.requires, ["--version"]);
+      // Some commands don't support --version, try --help as fallback
+      if (!cmdAvailable) {
+        const { available: helpAvailable } = await checkCommand(method.requires, ["--help"]);
+        if (!helpAvailable) {
+          // Special case: curl doesn't have --version on some systems, check with -V
+          if (method.requires === "curl") {
+            const { available: curlAvailable } = await checkCommand("curl", ["-V"]);
+            if (!curlAvailable) continue;
+          } else {
+            continue;
+          }
+        }
+      }
+    }
+
+    available.push(method);
+  }
+
+  return available;
+}
+
+/**
+ * Prompt user to select an installation method for a dependency
+ */
+async function promptInstallMethod(
+  dep: Dependency,
+  availableMethods: InstallMethod[],
+): Promise<InstallMethod | null> {
+  if (availableMethods.length === 0) {
+    p.log.error(`No installation methods available for ${dep.name} on this system`);
+    p.log.message(dim("  You may need to install it manually"));
+    return null;
+  }
+
+  if (availableMethods.length === 1) {
+    // Only one option, use it directly
+    return availableMethods[0];
+  }
+
+  const selected = await p.select({
+    message: `How would you like to install ${dep.name}?`,
+    options: availableMethods.map((method) => ({
+      value: method,
+      label: method.name,
+      hint: method.command,
+    })),
+  });
+
+  if (p.isCancel(selected)) {
+    return null;
+  }
+
+  return selected;
 }
 
 // ============================================================================
@@ -1588,16 +1746,24 @@ Begin by executing Step 1 (swarmmail_init).
 
 /**
  * Get the fix command for a dependency
- * Returns null for manual installs (those show a link instead)
+ * Returns platform-appropriate install suggestions
  */
 function getFixCommand(dep: Dependency): string | null {
+  const platform = process.platform;
+  
   switch (dep.name) {
     case "OpenCode":
-      return "brew install sst/tap/opencode";
+      // Show platform-appropriate suggestions
+      if (platform === "win32") {
+        return "choco install opencode  OR  scoop bucket add extras && scoop install extras/opencode  OR  npm install -g opencode-ai";
+      } else {
+        return "curl -fsSL https://opencode.ai/install | bash  OR  brew install opencode  OR  npm install -g opencode-ai";
+      }
     case "Ollama":
+      if (platform === "win32") {
+        return "See: https://ollama.ai/download (then: ollama pull mxbai-embed-large)";
+      }
       return "brew install ollama && ollama pull mxbai-embed-large";
-    case "Redis":
-      return "brew install redis && brew services start redis";
     case "CASS (Coding Agent Session Search)":
       return "See: https://github.com/Dicklesworthstone/coding_agent_session_search";
     default:
@@ -1965,8 +2131,7 @@ async function setup(forceReinstall = false, nonInteractive = false) {
     p.log.step("Missing " + requiredMissing.length + " required dependencies");
 
     for (const { dep } of requiredMissing) {
-      // In non-interactive mode, auto-install required deps
-      const shouldInstall = nonInteractive ? true : await p.confirm({
+      const shouldInstall = await p.confirm({
         message: "Install " + dep.name + "? (" + dep.description + ")",
         initialValue: true,
       });
@@ -1977,16 +2142,47 @@ async function setup(forceReinstall = false, nonInteractive = false) {
       }
 
       if (shouldInstall) {
-        const installSpinner = p.spinner();
-        installSpinner.start("Installing " + dep.name + "...");
+        // Check if this dependency has multiple installation methods
+        if (dep.installMethods && dep.installMethods.length > 0) {
+          // Detect available methods on this system
+          const detectSpinner = p.spinner();
+          detectSpinner.start("Detecting available installation methods...");
+          const availableMethods = await getAvailableInstallMethods(dep.installMethods);
+          detectSpinner.stop(`Found ${availableMethods.length} installation method(s)`);
 
-        const success = await runInstall(dep.install);
+          // Prompt user to select method
+          const selectedMethod = await promptInstallMethod(dep, availableMethods);
+          
+          if (!selectedMethod) {
+            p.log.warn("Skipping " + dep.name + " - no installation method selected");
+            continue;
+          }
 
-        if (success) {
-          installSpinner.stop(dep.name + " installed");
+          const installSpinner = p.spinner();
+          installSpinner.start(`Installing ${dep.name} via ${selectedMethod.name}...`);
+
+          const success = await runInstall(selectedMethod.command);
+
+          if (success) {
+            installSpinner.stop(dep.name + " installed");
+          } else {
+            installSpinner.stop("Failed to install " + dep.name);
+            p.log.error("Command failed: " + selectedMethod.command);
+            p.log.message(dim("  Try running the command manually in your terminal"));
+          }
         } else {
-          installSpinner.stop("Failed to install " + dep.name);
-          p.log.error("Manual install: " + dep.install);
+          // Fallback to single install command
+          const installSpinner = p.spinner();
+          installSpinner.start("Installing " + dep.name + "...");
+
+          const success = await runInstall(dep.install);
+
+          if (success) {
+            installSpinner.stop(dep.name + " installed");
+          } else {
+            installSpinner.stop("Failed to install " + dep.name);
+            p.log.error("Manual install: " + dep.install);
+          }
         }
       } else {
         p.log.warn("Skipping " + dep.name + " - swarm may not work correctly");
