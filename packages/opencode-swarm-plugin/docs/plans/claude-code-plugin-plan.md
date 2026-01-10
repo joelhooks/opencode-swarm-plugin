@@ -19,7 +19,7 @@ Create a Claude Code plugin that exposes swarm functionality through:
 packages/opencode-swarm-plugin/
 ├── claude-plugin/                    # Plugin root (bundled with package)
 │   ├── .claude-plugin/
-│   │   └── plugin.json               # Plugin manifest
+│   │   └── plugin.json               # Plugin manifest (ONLY file in .claude-plugin)
 │   ├── commands/
 │   │   ├── swarm.md                  # /swarm:swarm - decompose & coordinate
 │   │   ├── hive.md                   # /swarm:hive - task management
@@ -33,11 +33,19 @@ packages/opencode-swarm-plugin/
 │   │   └── swarm-coordination/
 │   │       └── SKILL.md              # Auto-invoked coordination knowledge
 │   ├── hooks/
-│   │   └── hooks.json                # SessionStart, PreCompact hooks
-│   └── .mcp.json                     # MCP server configuration
+│   │   └── hooks.json                # SessionStart, UserPromptSubmit hooks
+│   ├── .mcp.json                     # MCP server configuration (standard schema)
+│   ├── .lsp.json                     # Optional LSP config
+│   └── bin/
+│       └── swarm-mcp-server.ts       # MCP server entrypoint (inside plugin root)
 └── bin/
-    └── swarm.ts                      # Add claude subcommands here
+    └── swarm.ts                      # CLI (outside plugin root)
 ```
+
+**Plugin root rules (Claude Code docs):**
+- `.claude-plugin/` contains **only** `plugin.json`.
+- Everything needed at runtime must live **inside** the plugin root.
+- Installed plugins are cached, so avoid any `../` references or external paths.
 
 ## Phase 1: Plugin Foundation
 
@@ -62,35 +70,42 @@ packages/opencode-swarm-plugin/
 }
 ```
 
+**Note:** `plugin.json` can also embed `mcpServers` instead of a separate `.mcp.json`.
+
 ### 1.2 MCP Server Configuration
 
-**File**: `claude-plugin/.mcp.json`
+**File**: `claude-plugin/.mcp.json` **or** `claude-plugin/.claude-plugin/plugin.json`
 
-Two options to consider:
+Claude Code expects the **standard MCP schema**:
 
-**Option A: External process (simpler)**
 ```json
 {
-  "swarm-tools": {
-    "command": "swarm",
-    "args": ["mcp-serve"],
-    "description": "Swarm multi-agent coordination tools"
+  "mcpServers": {
+    "swarm-tools": {
+      "command": "swarm",
+      "args": ["mcp-serve"],
+      "description": "Swarm multi-agent coordination tools"
+    }
   }
 }
 ```
 
-**Option B: Bun script (more direct)**
+**Option B (embedded entrypoint inside plugin root)**
 ```json
 {
-  "swarm-tools": {
-    "command": "bun",
-    "args": ["run", "${PLUGIN_DIR}/../bin/swarm-mcp-server.ts"],
-    "description": "Swarm multi-agent coordination tools"
+  "mcpServers": {
+    "swarm-tools": {
+      "command": "bun",
+      "args": ["run", "${CLAUDE_PLUGIN_ROOT}/bin/swarm-mcp-server.ts"],
+      "description": "Swarm multi-agent coordination tools"
+    }
   }
 }
 ```
 
-**Decision needed**: Which approach? Option A requires adding `swarm mcp-serve` command.
+**Decision**: Use the standard schema and keep all paths inside the plugin root. No `../` references.
+
+**Lifecycle note**: Claude Code auto-launches the MCP process from `mcpServers` config. No manual server run is required; `swarm mcp-serve` is debug-only.
 
 ### 1.3 Core Skill
 
@@ -214,6 +229,9 @@ Does:
 name: coordinator
 description: Orchestrates parallel task execution across multiple worker agents
 model: opus
+skills:
+  - swarm-coordination
+# Avoid `mcp__swarm-tools__*` if we decide to curate tools later.
 tools:
   - mcp__swarm-tools__*
   - Task
@@ -240,6 +258,9 @@ Instructions for:
 name: worker
 description: Executes a single subtask with file reservation and status reporting
 model: sonnet
+skills:
+  - swarm-coordination
+# Background subagents do NOT get MCP access. Keep workers foreground if tools are required.
 tools:
   - mcp__swarm-tools__swarmmail_*
   - mcp__swarm-tools__hive_*
@@ -259,6 +280,10 @@ Instructions for:
 - Close task when complete
 - Release reservations
 
+**Claude Code subagent constraints:**
+- Subagents do **not** inherit skills automatically; list `skills` explicitly.
+- Background subagents do **not** get MCP access, so keep tool-using workers in the foreground.
+
 ## Phase 4: Hooks
 
 **File**: `claude-plugin/hooks/hooks.json`
@@ -273,6 +298,17 @@ Instructions for:
           {
             "type": "command",
             "command": "swarm claude session-start"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "swarm claude user-prompt"
           }
         ]
       }
@@ -303,16 +339,24 @@ Instructions for:
 }
 ```
 
+**Hook stdout behavior (Claude Code docs):**
+- Only `SessionStart` and `UserPromptSubmit` hook output is injected into context.
+- Use structured JSON: `{ "additionalContext": "..." }` for reliable injection.
+- `PreCompact` and `SessionEnd` output is **not** injected (use for side effects only).
+
 ### Hook Commands to Implement
 
 ```bash
-# Called on session start - detect active swarm, inject context
+# Called on session start - detect active swarm, output JSON additionalContext
 swarm claude session-start
 
-# Called before compaction - preserve swarm state
+# Called on each prompt submit - refresh swarm context when needed
+swarm claude user-prompt
+
+# Called before compaction - preserve swarm state (no context injection)
 swarm claude pre-compact
 
-# Called on session end - cleanup reservations
+# Called on session end - cleanup reservations (no context injection)
 swarm claude session-end
 ```
 
@@ -323,27 +367,31 @@ Add to `bin/swarm.ts`:
 ### 5.1 Installation Commands
 
 ```bash
-# Show plugin path (for --plugin-dir)
+# Show plugin path (for --plugin-dir during development)
 swarm claude path
 # Output: /Users/joel/.bun/lib/.../claude-plugin
 
-# Install plugin globally (symlink to ~/.claude/plugins/)
+# Dev-only: symlink for local testing (NOT primary install path)
 swarm claude install
 # Creates: ~/.claude/plugins/swarm -> /path/to/claude-plugin
 
-# Install to current project (copy to .claude/)
+# Project-local install for offline usage
 swarm claude init
 # Creates: .claude/commands/swarm.md, etc. (standalone mode)
 
-# Uninstall global plugin
+# Uninstall dev symlink
 swarm claude uninstall
 # Removes: ~/.claude/plugins/swarm
 ```
 
-### 5.2 MCP Server Command
+**Install flow guidance:**
+- Primary flow is Claude Code `/plugin` marketplace install or `claude /plugin install <name>`.
+- Symlink install is for local development only; installed plugins are cached, so avoid external paths.
+
+### 5.2 MCP Server Command (Debug Only)
 
 ```bash
-# Run MCP server (for .mcp.json)
+# Debug-only manual run (Claude Code auto-launches via mcpServers)
 swarm mcp-serve
 # Starts stdio MCP server exposing all swarm tools
 ```
@@ -359,17 +407,19 @@ swarm claude session-end     # Cleanup
 
 ## Phase 6: MCP Server Implementation
 
-**File**: `bin/swarm-mcp-server.ts`
+**File**: `claude-plugin/bin/swarm-mcp-server.ts`
 
 ```typescript
 #!/usr/bin/env bun
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { allTools } from "../src/index";
+import { allTools } from "../dist/index.js";
 
 // Expose all swarm tools via MCP protocol
 // Tools available as: mcp__swarm-tools__<tool_name>
 ```
+
+**Note:** Keep the MCP server entrypoint inside the plugin root and import from bundled output that ships with the plugin.
 
 Key considerations:
 - Direct tool execution (no CLI spawn)
@@ -489,31 +539,43 @@ swarm claude install
 
 ---
 
+## Resolved Decisions (Claude Code Docs)
+
+1. **Plugin root layout**: `.claude-plugin/` contains only `plugin.json`; all other files live at plugin root.
+2. **No external paths**: installed plugins are cached, so avoid `../` references or paths outside plugin root.
+3. **Path variable**: use `${CLAUDE_PLUGIN_ROOT}` for any absolute plugin paths.
+4. **MCP schema**: `.mcp.json` uses top-level `mcpServers` (or embed in `plugin.json`).
+5. **Hook output**: only `SessionStart` and `UserPromptSubmit` inject stdout; use JSON `{ "additionalContext": "..." }`.
+6. **Subagents**: skills must be explicitly listed; background subagents do not have MCP access.
+7. **Install flow**: `/plugin` marketplace is primary; symlink install is dev-only.
+
 ## Open Questions
 
-1. **MCP Server Process**: Should the MCP server be:
+1. **MCP Server Process**: Standard schema is set, but do we prefer:
    - A standalone `swarm mcp-serve` command?
-   - A bun script in the plugin?
-   - Does Claude Code manage the lifecycle or do we need to handle it?
+   - An embedded entrypoint under `claude-plugin/bin/`?
+   - If Claude Code manages lifecycle, do we need any health checks?
 
-2. **Tool Filtering**: Should we expose ALL 80+ tools or a curated subset?
-   - All tools = maximum flexibility
-   - Curated = cleaner UX, less confusion
+2. **Tool Filtering + Wildcard Risk**: `mcp__swarm-tools__*` grants all tools.
+   - Risk: accidental access to destructive or internal tools
+   - Decision: expose all vs curated subset (safe-by-default)
 
 3. **Session ID**: How to maintain session identity across:
    - Multiple Claude Code sessions
    - Coordinator spawning workers
    - Context compaction
 
-4. **Hooks Execution**: Claude Code hooks are shell commands that:
-   - Must complete quickly (blocking)
-   - Output to stdout goes... where?
-   - How to inject context back into Claude?
+4. **Worker Spawning**: Coordinators use foreground subagents for MCP tools.
+   - How do we enforce/guide this in the prompt templates?
+   - Do we need separate entrypoints for background-only workers?
 
-5. **Worker Spawning**: When coordinator spawns workers via Task tool:
-   - Do workers get the plugin loaded?
-   - How to pass swarm context?
-   - Same MCP server or separate instances?
+## Mitigations for Unknowns
+
+- **Tool wildcard risk**: Default to a curated allowlist in agent configs; provide an opt-in `mcp__swarm-tools__*` mode for power users; document any destructive tools explicitly.
+- **Session ID continuity**: Prefer Claude Code session ID if provided; otherwise persist a stable session ID in swarm-mail per project and rehydrate via hooks.
+- **MCP lifecycle**: Rely on Claude Code auto-launch from `mcpServers` (no manual run); add a lightweight tool health check for diagnostics; ensure tool handlers are idempotent on restart.
+- **Hook injection limits**: Only `SessionStart` + `UserPromptSubmit` inject context; always emit JSON `{ "additionalContext": "..." }` and keep payloads small; treat `PreCompact`/`SessionEnd` as side-effect-only.
+- **Subagent MCP access**: Keep tool-using workers in the foreground; add a separate background worker template that avoids MCP tools; make coordinator prompts enforce the correct worker type.
 
 ## Testing Strategy
 

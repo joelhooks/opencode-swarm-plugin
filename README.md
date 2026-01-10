@@ -45,6 +45,27 @@ That's it. The coordinator breaks the task into pieces, spawns parallel workers,
 
 ---
 
+## Claude Code Plugin
+
+Install from the Claude Code marketplace:
+
+```
+/plugin
+```
+
+Then pick **Marketplace → opencode-swarm-plugin → Install**.
+
+**Local dev (unpacked plugin):**
+
+```bash
+# From the repo root
+claude --plugin-dir ./packages/opencode-swarm-plugin
+```
+
+**MCP auto-launch:** Claude Code starts MCP servers declared in the plugin `mcpServers` config automatically. You only need `swarm mcp-serve` when debugging outside Claude Code.
+
+---
+
 ## Your First Swarm
 
 In any OpenCode session:

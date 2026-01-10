@@ -682,6 +682,7 @@ export const allTools = {
   ...mandateTools,
   ...hivemindTools,
   ...observabilityTools,
+  ...researchTools,
   ...contributorTools,
 } as const;
 

@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "swarm-tools": {
+      "command": "bun",
+      "args": ["run", "${CLAUDE_PLUGIN_ROOT}/bin/swarm-mcp-server.ts"],
+      "cwd": "${CLAUDE_PLUGIN_ROOT}",
+      "description": "Swarm multi-agent coordination tools"
+    }
+  }
+}

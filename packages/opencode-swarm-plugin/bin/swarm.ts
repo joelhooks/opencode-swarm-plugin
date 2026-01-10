@@ -8,6 +8,8 @@
  *   swarm setup    - Interactive installer for all dependencies
  *   swarm doctor   - Check dependency health with detailed status
  *   swarm init     - Initialize swarm in current project
+ *   swarm claude   - Claude Code integration commands
+ *   swarm mcp-serve - Debug-only MCP server (Claude auto-launches)
  *   swarm version  - Show version info
  *   swarm          - Interactive mode (same as setup)
  */
@@ -17,17 +19,20 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
+  readlinkSync,
   readdirSync,
   renameSync,
   rmdirSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "fs";
 import { homedir } from "os";
-import { basename, dirname, join } from "path";
+import { basename, dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import {
   checkBeadsMigrationNeeded,
@@ -117,6 +122,8 @@ const pkgPath = existsSync(join(__dirname, "..", "package.json"))
   : join(__dirname, "..", "..", "package.json");
 const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
 const VERSION: string = pkg.version;
+const PACKAGE_ROOT = dirname(pkgPath);
+const CLAUDE_PLUGIN_NAME = "swarm";
 
 // ============================================================================
 // ASCII Art & Branding
@@ -493,6 +500,15 @@ const DEPENDENCIES: Dependency[] = [
     installType: "brew",
     description: "AI coding assistant (plugin host)",
   },
+  {
+    name: "Claude Code",
+    command: "claude",
+    checkArgs: ["--version"],
+    required: false,
+    install: "https://docs.anthropic.com/claude-code",
+    installType: "manual",
+    description: "Claude Code CLI (optional host)",
+  },
   // Note: Beads CLI (bd) is NO LONGER required - we use HiveAdapter from swarm-mail
   // which provides the same functionality programmatically without external dependencies
   {
@@ -582,6 +598,134 @@ async function checkAllDependencies(): Promise<CheckResult[]> {
     results.push({ dep, available, version });
   }
   return results;
+}
+
+// ============================================================================
+// Claude Code Helpers
+// ============================================================================
+
+interface ClaudeHookInput {
+  project?: { path?: string };
+  cwd?: string;
+  session?: { id?: string };
+  metadata?: { cwd?: string };
+}
+
+/**
+ * Resolve the Claude Code plugin root bundled with the package.
+ */
+function getClaudePluginRoot(): string {
+  return join(PACKAGE_ROOT, "claude-plugin");
+}
+
+/**
+ * Resolve the Claude Code config directory.
+ */
+function getClaudeConfigDir(): string {
+  return join(homedir(), ".claude");
+}
+
+/**
+ * Read JSON input from stdin for Claude Code hooks.
+ */
+async function readHookInput<T>(): Promise<T | null> {
+  if (process.stdin.isTTY) return null;
+  const chunks: string[] = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(chunk.toString());
+  }
+  const raw = chunks.join("").trim();
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the project path for Claude Code hook executions.
+ */
+function resolveClaudeProjectPath(input: ClaudeHookInput | null): string {
+  return (
+    input?.project?.path ||
+    input?.cwd ||
+    input?.metadata?.cwd ||
+    process.env.CLAUDE_PROJECT_DIR ||
+    process.env.PWD ||
+    process.cwd()
+  );
+}
+
+/**
+ * Format hook output for Claude Code context injection.
+ */
+function writeClaudeHookContext(additionalContext: string): void {
+  if (!additionalContext.trim()) return;
+  process.stdout.write(
+    `${JSON.stringify({
+      additionalContext,
+    })}\n`,
+  );
+}
+
+interface ClaudeInstallStatus {
+  pluginRoot: string;
+  globalPluginPath: string;
+  globalPluginTarget?: string;
+  globalPluginExists: boolean;
+  globalPluginLinked: boolean;
+  projectClaudeDir: string;
+  projectConfigExists: boolean;
+  projectConfigPaths: string[];
+}
+
+/**
+ * Inspect Claude Code install state for global and project scopes.
+ */
+function getClaudeInstallStatus(projectPath: string): ClaudeInstallStatus {
+  const pluginRoot = getClaudePluginRoot();
+  const claudeConfigDir = getClaudeConfigDir();
+  const globalPluginPath = join(claudeConfigDir, "plugins", CLAUDE_PLUGIN_NAME);
+
+  let globalPluginExists = false;
+  let globalPluginLinked = false;
+  let globalPluginTarget: string | undefined;
+
+  if (existsSync(globalPluginPath)) {
+    globalPluginExists = true;
+    try {
+      const stat = lstatSync(globalPluginPath);
+      if (stat.isSymbolicLink()) {
+        globalPluginLinked = true;
+        const target = readlinkSync(globalPluginPath);
+        globalPluginTarget = resolve(dirname(globalPluginPath), target);
+      }
+    } catch {
+      // Ignore errors
+    }
+  }
+
+  const projectClaudeDir = join(projectPath, ".claude");
+  const projectConfigPaths = [
+    join(projectClaudeDir, "commands"),
+    join(projectClaudeDir, "agents"),
+    join(projectClaudeDir, "skills"),
+    join(projectClaudeDir, "hooks"),
+    join(projectClaudeDir, ".mcp.json"),
+  ];
+  const projectConfigExists = projectConfigPaths.some((path) => existsSync(path));
+
+  return {
+    pluginRoot,
+    globalPluginPath,
+    globalPluginTarget,
+    globalPluginExists,
+    globalPluginLinked,
+    projectClaudeDir,
+    projectConfigExists,
+    projectConfigPaths,
+  };
 }
 
 // ============================================================================
@@ -1594,6 +1738,8 @@ function getFixCommand(dep: Dependency): string | null {
   switch (dep.name) {
     case "OpenCode":
       return "brew install sst/tap/opencode";
+    case "Claude Code":
+      return "See: https://docs.anthropic.com/claude-code";
     case "Ollama":
       return "brew install ollama && ollama pull mxbai-embed-large";
     case "Redis":
@@ -1726,6 +1872,42 @@ async function doctor(debug = false) {
       } catch {
         // Ignore
       }
+    }
+  }
+
+  // Claude Code checks
+  p.log.step("Claude Code:");
+  const claudeResult = results.find((result) => result.dep.name === "Claude Code");
+  const claudeStatus = getClaudeInstallStatus(process.cwd());
+
+  if (!claudeResult?.available) {
+    p.log.warn("Claude Code CLI not detected (optional)");
+    p.log.message(dim("  Install: https://docs.anthropic.com/claude-code"));
+  } else {
+    p.log.success(`Claude Code CLI detected${claudeResult.version ? ` v${claudeResult.version}` : ""}`);
+
+    if (existsSync(claudeStatus.pluginRoot)) {
+      p.log.message(dim(`  Plugin bundle: ${claudeStatus.pluginRoot}`));
+    } else {
+      p.log.warn(`Claude plugin bundle missing: ${claudeStatus.pluginRoot}`);
+    }
+
+    if (claudeStatus.globalPluginExists) {
+      if (claudeStatus.globalPluginLinked) {
+        p.log.success(`Global plugin symlink: ${claudeStatus.globalPluginPath}`);
+      } else {
+        p.log.warn(`Global plugin exists but is not a symlink: ${claudeStatus.globalPluginPath}`);
+      }
+    } else {
+      p.log.warn("Global Claude plugin not installed");
+      p.log.message(dim("  Run: swarm claude install"));
+    }
+
+    if (claudeStatus.projectConfigExists) {
+      p.log.success(`Project Claude config: ${claudeStatus.projectClaudeDir}`);
+    } else {
+      p.log.warn("Project Claude config not found");
+      p.log.message(dim("  Run: swarm claude init"));
     }
   }
 
@@ -2545,6 +2727,36 @@ async function setup(forceReinstall = false, nonInteractive = false) {
     }
   }
 
+  // Claude Code checks
+  p.log.step("Claude Code integration (optional)...");
+  const claudeResult = results.find((result) => result.dep.name === "Claude Code");
+  const claudeStatus = getClaudeInstallStatus(cwd);
+
+  if (!claudeResult?.available) {
+    p.log.warn("Claude Code not detected (optional)");
+    p.log.message(dim("  Install: https://docs.anthropic.com/claude-code"));
+  } else {
+    const versionInfo = claudeResult.version ? ` v${claudeResult.version}` : "";
+    p.log.success(`Claude Code detected${versionInfo}`);
+    p.log.message(dim(`  Plugin bundle: ${claudeStatus.pluginRoot}`));
+
+    if (claudeStatus.globalPluginExists) {
+      if (claudeStatus.globalPluginLinked) {
+        p.log.success(`Claude plugin linked: ${claudeStatus.globalPluginPath}`);
+      } else {
+        p.log.warn(`Claude plugin exists but is not a symlink: ${claudeStatus.globalPluginPath}`);
+      }
+    } else {
+      p.log.message(dim("  Run 'swarm claude install' for a dev symlink"));
+    }
+
+    if (claudeStatus.projectConfigExists) {
+      p.log.success(`Project Claude config: ${claudeStatus.projectClaudeDir}`);
+    } else {
+      p.log.message(dim("  Run 'swarm claude init' to create .claude/ config"));
+    }
+  }
+
   // Show setup summary
   const totalFiles = stats.created + stats.updated + stats.unchanged;
   const summaryParts: string[] = [];
@@ -2561,6 +2773,299 @@ async function setup(forceReinstall = false, nonInteractive = false) {
   );
 
   p.outro("Run 'swarm doctor' to verify installation.");
+}
+
+// ============================================================================
+// Claude Code Commands
+// ============================================================================
+
+/**
+ * Handle Claude Code subcommands.
+ */
+async function claudeCommand() {
+  const args = process.argv.slice(3);
+  const subcommand = args[0];
+
+  if (!subcommand || ["help", "--help", "-h"].includes(subcommand)) {
+    showClaudeHelp();
+    return;
+  }
+
+  switch (subcommand) {
+    case "path":
+      claudePath();
+      break;
+    case "install":
+      await claudeInstall();
+      break;
+    case "uninstall":
+      await claudeUninstall();
+      break;
+    case "init":
+      await claudeInit();
+      break;
+    case "session-start":
+      await claudeSessionStart();
+      break;
+    case "user-prompt":
+      await claudeUserPrompt();
+      break;
+    case "pre-compact":
+      await claudePreCompact();
+      break;
+    case "session-end":
+      await claudeSessionEnd();
+      break;
+    default:
+      console.error(`Unknown subcommand: ${subcommand}`);
+      showClaudeHelp();
+      process.exit(1);
+  }
+}
+
+function showClaudeHelp() {
+  console.log(`
+Usage: swarm claude <command>
+
+Commands:
+  path                Print Claude plugin path (for --plugin-dir)
+  install             Symlink plugin into ~/.claude/plugins/${CLAUDE_PLUGIN_NAME}
+  uninstall           Remove Claude plugin symlink
+  init                Create project-local .claude/ config
+  session-start       Hook: session start context (JSON output)
+  user-prompt         Hook: prompt submit context (JSON output)
+  pre-compact         Hook: pre-compaction handler
+  session-end         Hook: session cleanup
+`);
+}
+
+/**
+ * Print the bundled Claude plugin path.
+ */
+function claudePath() {
+  const pluginRoot = getClaudePluginRoot();
+  if (!existsSync(pluginRoot)) {
+    console.error(`Claude plugin not found at ${pluginRoot}`);
+    process.exit(1);
+  }
+  console.log(pluginRoot);
+}
+
+/**
+ * Install the Claude plugin symlink for local development.
+ */
+async function claudeInstall() {
+  p.intro("swarm claude install");
+  const pluginRoot = getClaudePluginRoot();
+  if (!existsSync(pluginRoot)) {
+    p.log.error(`Claude plugin not found at ${pluginRoot}`);
+    p.outro("Aborted");
+    process.exit(1);
+  }
+
+  const claudeConfigDir = getClaudeConfigDir();
+  const pluginsDir = join(claudeConfigDir, "plugins");
+  const pluginPath = join(pluginsDir, CLAUDE_PLUGIN_NAME);
+
+  mkdirWithStatus(pluginsDir);
+
+  if (existsSync(pluginPath)) {
+    const stat = lstatSync(pluginPath);
+    if (!stat.isSymbolicLink()) {
+      p.log.error(`Existing path is not a symlink: ${pluginPath}`);
+      p.outro("Aborted");
+      process.exit(1);
+    }
+
+    const target = readlinkSync(pluginPath);
+    const resolved = resolve(dirname(pluginPath), target);
+    if (resolved === pluginRoot) {
+      p.log.success("Claude plugin already linked");
+      p.outro("Done");
+      return;
+    }
+
+    rmSync(pluginPath, { force: true });
+  }
+
+  symlinkSync(pluginRoot, pluginPath);
+  p.log.success(`Linked ${CLAUDE_PLUGIN_NAME} → ${pluginRoot}`);
+  p.log.message(dim("  Claude Code will auto-launch MCP from .mcp.json"));
+  p.outro("Claude plugin installed");
+}
+
+/**
+ * Remove the Claude plugin symlink.
+ */
+async function claudeUninstall() {
+  p.intro("swarm claude uninstall");
+  const pluginPath = join(getClaudeConfigDir(), "plugins", CLAUDE_PLUGIN_NAME);
+
+  if (!existsSync(pluginPath)) {
+    p.log.warn("Claude plugin symlink not found");
+    p.outro("Nothing to remove");
+    return;
+  }
+
+  rmSync(pluginPath, { recursive: true, force: true });
+  p.log.success(`Removed ${pluginPath}`);
+  p.outro("Claude plugin uninstalled");
+}
+
+/**
+ * Create project-local Claude Code config from bundled plugin assets.
+ */
+async function claudeInit() {
+  p.intro("swarm claude init");
+  const projectPath = process.cwd();
+  const pluginRoot = getClaudePluginRoot();
+
+  if (!existsSync(pluginRoot)) {
+    p.log.error(`Claude plugin not found at ${pluginRoot}`);
+    p.outro("Aborted");
+    process.exit(1);
+  }
+
+  const projectClaudeDir = join(projectPath, ".claude");
+  const commandDir = join(projectClaudeDir, "commands");
+  const agentDir = join(projectClaudeDir, "agents");
+  const skillsDir = join(projectClaudeDir, "skills");
+  const hooksDir = join(projectClaudeDir, "hooks");
+
+  for (const dir of [projectClaudeDir, commandDir, agentDir, skillsDir, hooksDir]) {
+    mkdirWithStatus(dir);
+  }
+
+  const copyMap = [
+    { src: join(pluginRoot, "commands"), dest: commandDir, label: "Commands" },
+    { src: join(pluginRoot, "agents"), dest: agentDir, label: "Agents" },
+    { src: join(pluginRoot, "skills"), dest: skillsDir, label: "Skills" },
+    { src: join(pluginRoot, "hooks"), dest: hooksDir, label: "Hooks" },
+  ];
+
+  for (const { src, dest, label } of copyMap) {
+    if (existsSync(src)) {
+      copyDirRecursiveSync(src, dest);
+      p.log.success(`${label}: ${dest}`);
+    }
+  }
+
+  const mcpSourcePath = join(pluginRoot, ".mcp.json");
+  if (existsSync(mcpSourcePath)) {
+    const mcpDestPath = join(projectClaudeDir, ".mcp.json");
+    const content = readFileSync(mcpSourcePath, "utf-8");
+    writeFileWithStatus(mcpDestPath, content, "MCP config");
+  }
+
+  const lspSourcePath = join(pluginRoot, ".lsp.json");
+  if (existsSync(lspSourcePath)) {
+    const lspDestPath = join(projectClaudeDir, ".lsp.json");
+    const content = readFileSync(lspSourcePath, "utf-8");
+    writeFileWithStatus(lspDestPath, content, "LSP config");
+  }
+
+  p.log.message(dim("  Uses ${CLAUDE_PLUGIN_ROOT} in MCP config"));
+  p.outro("Claude project config ready");
+}
+
+/**
+ * Claude hook: start a session and emit context for Claude Code.
+ */
+async function claudeSessionStart() {
+  try {
+    const input = await readHookInput<ClaudeHookInput>();
+    const projectPath = resolveClaudeProjectPath(input);
+    const swarmMail = await getSwarmMailLibSQL(projectPath);
+    const db = await swarmMail.getDatabase(projectPath);
+    const adapter = createHiveAdapter(db, projectPath);
+
+    await adapter.runMigrations();
+
+    const session = await adapter.startSession(projectPath, {});
+    const contextLines = [
+      `Swarm session started: ${session.id}`,
+    ];
+
+    if (session.active_cell_id) {
+      contextLines.push(`Active cell: ${session.active_cell_id}`);
+    }
+
+    if (session.previous_handoff_notes) {
+      contextLines.push("Previous handoff notes:");
+      contextLines.push(session.previous_handoff_notes);
+    }
+
+    writeClaudeHookContext(contextLines.join("\n"));
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+  }
+}
+
+/**
+ * Claude hook: provide active session context on prompt submission.
+ */
+async function claudeUserPrompt() {
+  try {
+    const input = await readHookInput<ClaudeHookInput>();
+    const projectPath = resolveClaudeProjectPath(input);
+    const swarmMail = await getSwarmMailLibSQL(projectPath);
+    const db = await swarmMail.getDatabase(projectPath);
+    const adapter = createHiveAdapter(db, projectPath);
+
+    await adapter.runMigrations();
+
+    const session = await adapter.getCurrentSession(projectPath);
+    if (!session) return;
+
+    const contextLines = [`Active swarm session: ${session.id}`];
+    if (session.active_cell_id) {
+      contextLines.push(`Active cell: ${session.active_cell_id}`);
+    }
+
+    writeClaudeHookContext(contextLines.join("\n"));
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+  }
+}
+
+/**
+ * Claude hook: prepare for compaction (best-effort).
+ */
+async function claudePreCompact() {
+  try {
+    const input = await readHookInput<ClaudeHookInput>();
+    const projectPath = resolveClaudeProjectPath(input);
+    const swarmMail = await getSwarmMailLibSQL(projectPath);
+    const db = await swarmMail.getDatabase(projectPath);
+    const adapter = createHiveAdapter(db, projectPath);
+
+    await adapter.runMigrations();
+    await adapter.getCurrentSession(projectPath);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+  }
+}
+
+/**
+ * Claude hook: end the active session.
+ */
+async function claudeSessionEnd() {
+  try {
+    const input = await readHookInput<ClaudeHookInput>();
+    const projectPath = resolveClaudeProjectPath(input);
+    const swarmMail = await getSwarmMailLibSQL(projectPath);
+    const db = await swarmMail.getDatabase(projectPath);
+    const adapter = createHiveAdapter(db, projectPath);
+
+    await adapter.runMigrations();
+
+    const currentSession = await adapter.getCurrentSession(projectPath);
+    if (!currentSession) return;
+
+    await adapter.endSession(projectPath, currentSession.id, {});
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+  }
 }
 
 async function init() {
@@ -3292,10 +3797,12 @@ ${cyan("Commands:")}
   swarm doctor          Health check - shows status of all dependencies
   swarm init      Initialize beads in current project
   swarm config    Show paths to generated config files
+  swarm claude    Claude Code integration (path/install/uninstall/init/hooks)
   swarm agents    Update AGENTS.md with skill awareness
   swarm migrate   Migrate PGlite database to libSQL
   swarm serve     Start SSE server for real-time event streaming (port 4483 - HIVE)
     --port <n>          Port to listen on (default: 4483)
+  swarm mcp-serve Debug-only MCP server (Claude auto-launches via .mcp.json)
   swarm viz       Alias for 'swarm serve' (deprecated, use serve)
     --port <n>          Port to listen on (default: 4483)
   swarm cells     List or get cells from database (replaces 'swarm tool hive_query')
@@ -3409,6 +3916,16 @@ ${cyan("Usage in OpenCode:")}
   @swarm-planner "Decompose this into parallel tasks"
   @swarm-worker "Execute this specific subtask"
   @swarm-researcher "Research Next.js caching APIs"
+
+${cyan("Claude Code:")}
+  swarm claude path                 Show bundled Claude plugin path
+  swarm claude install              Symlink plugin into ~/.claude/plugins
+  swarm claude uninstall            Remove Claude plugin symlink
+  swarm claude init                 Create project-local .claude config
+  swarm claude session-start        Hook: session start context
+  swarm claude user-prompt          Hook: prompt submit context
+  swarm claude pre-compact          Hook: pre-compaction handler
+  swarm claude session-end          Hook: session cleanup
 
 ${cyan("Customization:")}
   Edit the generated files to customize behavior:
@@ -5664,6 +6181,40 @@ async function evalRun() {
 }
 
 // ============================================================================
+// MCP Server (Debug Only)
+// ============================================================================
+
+/**
+ * Start the MCP server over stdio (debug only).
+ */
+async function mcpServe() {
+  p.intro("swarm mcp-serve");
+
+  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT || getClaudePluginRoot();
+  const candidates = [
+    join(pluginRoot, "bin", "swarm-mcp-server.ts"),
+    join(PACKAGE_ROOT, "bin", "swarm-mcp-server.ts"),
+  ];
+  const serverPath = candidates.find((path) => existsSync(path));
+
+  if (!serverPath) {
+    p.log.error("MCP server entrypoint not found");
+    p.log.message(dim(`  Looked for: ${candidates.join(", ")}`));
+    p.log.message(dim("  Claude Code auto-launches MCP via .mcp.json; use for debugging only"));
+    p.outro("Aborted");
+    process.exit(1);
+  }
+
+  p.log.step("Starting MCP server...");
+  p.log.message(dim(`  Using: ${serverPath}`));
+
+  const proc = spawn("bun", ["run", serverPath], { stdio: "inherit" });
+  proc.on("close", (exitCode) => {
+    process.exit(exitCode ?? 0);
+  });
+}
+
+// ============================================================================
 // Serve Command - Start SSE Server
 // ============================================================================
 
@@ -6207,6 +6758,12 @@ switch (command) {
     break;
   case "config":
     config();
+    break;
+  case "claude":
+    await claudeCommand();
+    break;
+  case "mcp-serve":
+    await mcpServe();
     break;
   case "serve":
     await serve();
