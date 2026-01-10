@@ -893,6 +893,12 @@ describe("COORDINATOR_PROMPT", () => {
     expect(COORDINATOR_PROMPT).toContain("swarm_review_feedback");
   });
 
+  test("does not reference deprecated cass or semantic-memory tools", () => {
+    expect(COORDINATOR_PROMPT).not.toContain("cass_search");
+    expect(COORDINATOR_PROMPT).not.toContain("semantic_memory_find");
+    expect(COORDINATOR_PROMPT).not.toContain("semantic_memory_store");
+  });
+
   test("Phase 1.5 positioned between Phase 1 (Initialize) and Phase 2 (Knowledge)", () => {
     const phase1Pos = COORDINATOR_PROMPT.indexOf("Phase 1:");
     const phase15Pos = COORDINATOR_PROMPT.indexOf("Phase 1.5:");

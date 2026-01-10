@@ -24,8 +24,9 @@ tools:
   - swarmmail_reserve
   - swarmmail_release
   - swarmmail_health
-  - semantic-memory_find
-  - cass_search
+  - hivemind_find
+  - hivemind_store
+  - hivemind_validate
   - pdf-brain_search
   - skills_list
 references:
@@ -77,7 +78,7 @@ swarmmail_init({
 });
 
 // 2. QUERY LEARNINGS - Check what past agents learned
-semantic_memory_find({
+hivemind_find({
   query: "task keywords domain",
   limit: 5
 });
@@ -114,7 +115,7 @@ swarm_checkpoint({
 });
 
 // 8. STORE LEARNINGS - Capture what you discovered
-semantic_memory_store({
+hivemind_store({
   information: "OAuth refresh tokens need 5min buffer...",
   metadata: "auth, oauth, tokens"
 });
@@ -290,10 +291,10 @@ Before decomposing, query ALL knowledge sources:
 
 ```typescript
 // 1. Past learnings from this project
-semantic_memory_find({ query: "<task keywords>", limit: 5 });
+hivemind_find({ query: "<task keywords>", limit: 5 });
 
 // 2. How similar tasks were solved before
-cass_search({ query: "<task description>", limit: 5 });
+hivemind_find({ query: "<task description>", limit: 5, collection: "sessions" });
 
 // 3. Design patterns and prior art
 pdf_brain_search({ query: "<domain concepts>", limit: 5 });
@@ -308,7 +309,7 @@ Synthesize findings into `shared_context` for workers.
 
 > **⚠️ CRITICAL: Context Preservation Pattern**
 >
-> **NEVER do planning inline in the coordinator thread.** Decomposition work (file reading, CASS searching, reasoning about task breakdown) consumes massive amounts of context and will exhaust your token budget on long swarms.
+> **NEVER do planning inline in the coordinator thread.** Decomposition work (file reading, Hivemind session searching, reasoning about task breakdown) consumes massive amounts of context and will exhaust your token budget on long swarms.
 >
 > **ALWAYS delegate planning to a `swarm-planner` subagent** and receive only the structured CellTree JSON result back.
 
@@ -346,7 +347,7 @@ ${taskDescription}
 ${synthesizedContext}
 
 ## Instructions
-1. Use swarm_plan_prompt(task="...", max_subtasks=5, query_cass=true)
+1. Use swarm_plan_prompt(task="...", max_subtasks=5)
 2. Reason about decomposition strategy
 3. Generate CellTree JSON
 4. Validate with swarm_validate_decomposition
@@ -588,11 +589,11 @@ Long-running swarms exhaust context windows. These patterns keep you alive.
 
 **Problem:** Repeating solved problems wastes tokens on rediscovery.
 
-**Solution:** Query semantic memory FIRST.
+**Solution:** Query the hivemind FIRST.
 
 ```typescript
 // At swarm start (coordinator)
-const learnings = await semantic_memory_find({
+const learnings = await hivemind_find({
   query: "auth oauth tokens",
   limit: 5
 });
@@ -604,7 +605,7 @@ ${learnings.map(l => `- ${l.information}`).join('\n')}
 `;
 
 // At worker start (survival checklist step 2)
-const relevantLearnings = await semantic_memory_find({
+const relevantLearnings = await hivemind_find({
   query: "task-specific keywords",
   limit: 3
 });
@@ -662,7 +663,7 @@ await swarm_restore_checkpoint({
 // ✅ CORRECT - Store immediately when discovered
 // ... debug for 30 minutes ...
 // ... find root cause ...
-await semantic_memory_store({
+await hivemind_store({
   information: "OAuth refresh tokens need 5min buffer to avoid race conditions. Without buffer, token refresh can fail mid-request if expiry happens between check and use.",
   metadata: "auth, oauth, tokens, race-conditions"
 });
@@ -693,7 +694,7 @@ await swarm_progress({
 
 ### Pattern 5: Delegate Heavy Research to Subagents
 
-**Problem:** Reading 10+ files or doing deep CASS searches pollutes main thread.
+**Problem:** Reading 10+ files or doing deep Hivemind searches pollutes main thread.
 
 **Solution:** Subagent researches, returns summary only.
 
@@ -715,7 +716,7 @@ const summary = await Task({
 **When to Delegate:**
 
 - Reading >3 files
-- Multiple CASS searches
+- Multiple Hivemind searches
 - Deep file tree exploration
 - Analyzing large logs
 
@@ -749,7 +750,7 @@ const summary = await swarmmail_summarize_thread({ thread_id: "bd-123" });
 
 ### Context Survival Checklist
 
-- [ ] Query semantic memory at start
+- [ ] Query the hivemind at start
 - [ ] Checkpoint before risky operations
 - [ ] Store learnings immediately when discovered
 - [ ] Use `swarm_progress` for auto-checkpoints
@@ -838,7 +839,7 @@ One blocker affects multiple subtasks.
 | **Under-Specified**         | "Implement backend"                        | Clear goal, files, criteria          |
 | **Inline Planning** ⚠️      | Context pollution, exhaustion on long runs | Delegate planning to subagent        |
 | **Heavy File Reading**      | Coordinator reading 10+ files              | Subagent reads, returns summary only |
-| **Deep CASS Drilling**      | Multiple cass_search calls inline          | Subagent searches, summarizes        |
+| **Deep Hivemind Drilling**  | Multiple hivemind_find calls inline        | Subagent searches, summarizes        |
 | **Manual Decomposition**    | Hand-crafting subtasks without validation  | Use swarm_plan_prompt + validation   |
 
 ## Shared Context Template
@@ -858,8 +859,8 @@ One blocker affects multiple subtasks.
 
 ## Prior Art
 
-- Similar tasks: {from CASS}
-- Learnings: {from semantic-memory}
+- Similar tasks: {from hivemind sessions}
+- Learnings: {from hivemind}
 
 ## Coordination
 
@@ -895,8 +896,8 @@ One blocker affects multiple subtasks.
 swarmmail_init({ project_path: "$PWD", task_description: "..." });
 
 // 2. Gather knowledge
-semantic_memory_find({ query });
-cass_search({ query });
+hivemind_find({ query });
+hivemind_find({ query, collection: "sessions" });
 pdf_brain_search({ query });
 skills_list();
 

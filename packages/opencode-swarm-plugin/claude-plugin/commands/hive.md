@@ -4,7 +4,7 @@ description: Query and manage swarm tasks (cells)
 
 # /swarm:hive
 
-Manage Hive cells with the `hive_*` tools (never the deprecated `bd` CLI).
+Manage Hive cells with the `hive_*` tools (no deprecated CLI references).
 
 ## Common actions
 - List ready work: `hive_ready()`

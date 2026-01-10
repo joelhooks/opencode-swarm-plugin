@@ -108,7 +108,7 @@ export const STRATEGY_DECOMPOSITION_PROMPT = `You are decomposing a task into pa
 
 {context_section}
 
-{cass_history}
+{hivemind_history}
 
 {skills_context}
 
@@ -2064,7 +2064,7 @@ export const swarm_evaluation_prompt = tool({
  */
 export const swarm_plan_prompt = tool({
   description:
-    "Generate strategy-specific decomposition prompt. Auto-selects strategy or uses provided one. Queries CASS for similar tasks.",
+    "Generate strategy-specific decomposition prompt. Auto-selects strategy or uses provided one. Queries Hivemind sessions for similar tasks.",
   args: {
     task: tool.schema.string().min(1).describe("Task description to decompose"),
     strategy: tool.schema
@@ -2078,13 +2078,13 @@ export const swarm_plan_prompt = tool({
     query_cass: tool.schema
       .boolean()
       .optional()
-      .describe("Query CASS for similar past tasks (default: true)"),
+      .describe("Query Hivemind sessions for similar past tasks (default: true)"),
     cass_limit: tool.schema
       .number()
       .int()
       .min(1)
       .optional()
-      .describe("Max CASS results to include (default: 3)"),
+      .describe("Max Hivemind session results to include (default: 3)"),
     include_skills: tool.schema
       .boolean()
       .optional()
@@ -2154,11 +2154,11 @@ export const swarm_plan_prompt = tool({
         ? `## Additional Context\n(none provided)\n\n${insights}`
         : "## Additional Context\n(none provided)";
 
-    // Build the prompt (without CASS - we'll let the module handle that)
+    // Build the prompt (without Hivemind history - we'll let the module handle that)
     const prompt = STRATEGY_DECOMPOSITION_PROMPT.replace("{task}", args.task)
       .replace("{strategy_guidelines}", strategyGuidelines)
       .replace("{context_section}", contextSection)
-      .replace("{cass_history}", "") // Empty for now
+      .replace("{hivemind_history}", "") // Empty for now
       .replace("{skills_context}", skillsContext || "");
 
     return JSON.stringify(
