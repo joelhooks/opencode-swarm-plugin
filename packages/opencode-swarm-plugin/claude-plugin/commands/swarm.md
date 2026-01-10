@@ -6,6 +6,8 @@ description: Decompose a task into parallel subtasks and coordinate execution
 
 Use this command to kick off a multi-agent swarm.
 
+If no task is provided, ask the user for the task description before proceeding.
+
 ## Workflow
 1. Clarify scope and success criteria if needed.
 2. `swarmmail_init()` to register the session.
