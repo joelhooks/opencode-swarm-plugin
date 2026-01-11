@@ -7,5 +7,13 @@
   },
   "repository": "https://github.com/joelhooks/opencode-swarm-plugin",
   "keywords": ["multi-agent", "coordination", "tasks", "parallel"],
+  "mcpServers": {
+    "swarm-tools": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/mcp/swarm-mcp-server.js"],
+      "cwd": "${CLAUDE_PLUGIN_ROOT}",
+      "description": "Swarm multi-agent coordination tools"
+    }
+  },
   "license": "MIT"
 }

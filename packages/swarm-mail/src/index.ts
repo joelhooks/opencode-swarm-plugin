@@ -15,7 +15,7 @@
  * ```
  */
 
-export const SWARM_MAIL_VERSION = "1.10.0";
+export const SWARM_MAIL_VERSION = "1.10.1";
 
 // ============================================================================
 // Debug Logging

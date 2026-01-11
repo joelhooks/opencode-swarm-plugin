@@ -13,19 +13,25 @@ type McpServerConfig = {
   description?: string;
 };
 
-type McpConfig = {
-  mcpServers: Record<string, McpServerConfig>;
+type ClaudePluginManifest = {
+  mcpServers?: Record<string, McpServerConfig>;
 };
 
 const PLUGIN_ROOT = resolve(process.cwd(), "claude-plugin");
-const MCP_CONFIG_PATH = resolve(PLUGIN_ROOT, ".mcp.json");
+const PLUGIN_MANIFEST_PATH = resolve(
+  PLUGIN_ROOT,
+  ".claude-plugin",
+  "plugin.json",
+);
 const MCP_SERVER_PATH = resolve(PLUGIN_ROOT, "bin", "swarm-mcp-server.ts");
 
 /**
- * Reads the Claude plugin MCP config JSON from disk.
+ * Reads the Claude plugin manifest JSON from disk.
  */
-function readMcpConfig(): McpConfig {
-  return JSON.parse(readFileSync(MCP_CONFIG_PATH, "utf-8")) as McpConfig;
+function readPluginManifest(): ClaudePluginManifest {
+  return JSON.parse(
+    readFileSync(PLUGIN_MANIFEST_PATH, "utf-8"),
+  ) as ClaudePluginManifest;
 }
 
 /**
@@ -36,24 +42,23 @@ function readMcpServerSource(): string {
 }
 
 describe("claude-plugin MCP config", () => {
-  it("locates the MCP config in the plugin root", () => {
-    expect(existsSync(MCP_CONFIG_PATH)).toBe(true);
+  it("locates the plugin manifest in the plugin root", () => {
+    expect(existsSync(PLUGIN_MANIFEST_PATH)).toBe(true);
   });
 
   it("registers the swarm-tools MCP server", () => {
-    const config = readMcpConfig();
+    const manifest = readPluginManifest();
 
-    expect(config).toHaveProperty("mcpServers");
-    expect(config.mcpServers).toHaveProperty("swarm-tools");
+    expect(manifest).toHaveProperty("mcpServers");
+    expect(manifest.mcpServers).toHaveProperty("swarm-tools");
 
-    const server = config.mcpServers["swarm-tools"];
-    expect(server.command).toBe("bun");
-    expect(server.args).toEqual([
-      "run",
-      "${CLAUDE_PLUGIN_ROOT}/bin/swarm-mcp-server.ts",
+    const server = manifest.mcpServers?.["swarm-tools"];
+    expect(server?.command).toBe("node");
+    expect(server?.args).toEqual([
+      "${CLAUDE_PLUGIN_ROOT}/dist/mcp/swarm-mcp-server.js",
     ]);
-    expect(server.cwd).toBe("${CLAUDE_PLUGIN_ROOT}");
-    expect(server.description).toBeTruthy();
+    expect(server?.cwd).toBe("${CLAUDE_PLUGIN_ROOT}");
+    expect(server?.description).toBeTruthy();
   });
 
   it("loads runtime tools from the plugin dist bundle", () => {

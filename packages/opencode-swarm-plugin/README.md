@@ -480,6 +480,27 @@ bun test
 bun run typecheck
 ```
 
+### Release (Changesets)
+
+Create changeset files manually (avoid `bunx changeset`).
+
+```bash
+# From monorepo root
+cat > .changeset/your-change.md << 'EOF'
+---
+"opencode-swarm-plugin": patch
+---
+
+Describe the change
+EOF
+
+git add .changeset/your-change.md
+git commit -m "chore: add changeset"
+git push
+```
+
+Changesets CI opens a release PR. Merge it to publish via npm OIDC.
+
 ### Evaluation Pipeline
 
 Test decomposition quality and coordinator discipline with **Evalite** (TypeScript-native eval framework):
