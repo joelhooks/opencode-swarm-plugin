@@ -31,6 +31,57 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      - name: Build packages
+        run: bun turbo build --filter=opencode-swarm-plugin
+
+      - name: Verify package tarballs
+        run: |
+          set -euo pipefail
+          verify_package() {
+            local package_dir="$1"
+            local package_name="$2"
+            shift 2
+
+            for expected in "$@"; do
+              if [ ! -e "$package_dir/$expected" ]; then
+                echo "Missing build artifact: $package_dir/$expected"
+                exit 1
+              fi
+            done
+
+            local pack_dir
+            pack_dir=$(mktemp -d)
+
+            (cd "$package_dir" && bun pm pack --destination "$pack_dir")
+
+            local tarball
+            tarball=$(ls "$pack_dir/${package_name}-"*.tgz)
+
+            if [ -z "$tarball" ]; then
+              echo "No tarball produced for ${package_name}"
+              exit 1
+            fi
+
+            if [ "$(echo "$tarball" | wc -l | tr -d ' ')" -ne 1 ]; then
+              echo "Expected a single tarball for ${package_name}, got:"
+              echo "$tarball"
+              exit 1
+            fi
+
+            local contents_file
+            contents_file="$pack_dir/contents.txt"
+            tar -tzf "$tarball" > "$contents_file"
+
+            for expected in "$@"; do
+              grep -q "package/${expected}" "$contents_file"
+            done
+
+            rm -rf "$pack_dir"
+          }
+
+          verify_package "packages/opencode-swarm-plugin" "opencode-swarm-plugin" "dist/index.js" "dist/index.d.ts" "claude-plugin/dist/"
+          verify_package "packages/swarm-mail" "swarm-mail" "dist/index.js" "dist/index.d.ts"
+
       - name: Type check
         run: bun turbo typecheck
 

@@ -21,20 +21,26 @@ type ToolDefinition = {
 /**
  * Resolve the tool registry entrypoint for the MCP server.
  */
-export function resolveToolRegistryPath(): string {
-  const currentDir = dirname(fileURLToPath(import.meta.url));
+export function resolveToolRegistryPath({
+  currentDir = dirname(fileURLToPath(import.meta.url)),
+}: {
+  currentDir?: string;
+} = {}): string {
   const pluginDistPath = resolve(currentDir, "../dist/index.js");
-  const packageDistPath = resolve(currentDir, "../../dist/index.js");
 
   if (existsSync(pluginDistPath)) {
     return pluginDistPath;
   }
 
-  if (existsSync(packageDistPath)) {
-    return packageDistPath;
+  const sourcePath = resolve(currentDir, "../../src/index.ts");
+  if (existsSync(sourcePath)) {
+    return sourcePath;
   }
 
-  return resolve(currentDir, "../../src/index.ts");
+  throw new Error(
+    `[swarm-mcp] Missing Claude plugin runtime bundle. Expected ${pluginDistPath}. ` +
+      "Rebuild the package so claude-plugin/dist is populated.",
+  );
 }
 
 /**
