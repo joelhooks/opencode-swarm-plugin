@@ -600,7 +600,17 @@ export const swarm_validate_decomposition = tool({
     }
 
     try {
-      const parsed = JSON.parse(args.response);
+      // Handle both string and object inputs (MCP may pass already-parsed objects)
+      let parsed: unknown;
+      if (typeof args.response === "string") {
+        parsed = JSON.parse(args.response);
+        // Handle double-stringified edge case
+        if (typeof parsed === "string") {
+          parsed = JSON.parse(parsed);
+        }
+      } else {
+        parsed = args.response;
+      }
       const validated = CellTreeSchema.parse(parsed);
 
       // Additional validation: check for file conflicts
