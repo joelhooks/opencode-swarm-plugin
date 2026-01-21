@@ -698,18 +698,17 @@ Scripts run in the skill's directory with the project directory as an argument.`
     const scriptPath = join(skill.directory, "scripts", args.script);
     const scriptArgs = args.args || [];
 
-    try {
-      // Execute script using Bun.spawn with timeout
-      const TIMEOUT_MS = 60_000; // 60 second timeout
-      const proc = Bun.spawn(
-        [scriptPath, skillsProjectDirectory, ...scriptArgs],
-        {
-          cwd: skill.directory,
-          stdout: "pipe",
-          stderr: "pipe",
-        },
-      );
+    const TIMEOUT_MS = 60_000; // 60 second timeout
+    const proc = Bun.spawn(
+      [scriptPath, skillsProjectDirectory, ...scriptArgs],
+      {
+        cwd: skill.directory,
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
 
+    try {
       // Race between script completion and timeout
       const timeoutPromise = new Promise<{ timedOut: true }>((resolve) => {
         setTimeout(() => resolve({ timedOut: true }), TIMEOUT_MS);
@@ -727,7 +726,6 @@ Scripts run in the skill's directory with the project directory as an argument.`
       const result = await Promise.race([resultPromise, timeoutPromise]);
 
       if (result.timedOut) {
-        proc.kill();
         return `Script timed out after ${TIMEOUT_MS / 1000} seconds.`;
       }
 
@@ -739,6 +737,9 @@ Scripts run in the skill's directory with the project directory as an argument.`
       }
     } catch (error) {
       return `Failed to execute script: ${error instanceof Error ? error.message : String(error)}`;
+    } finally {
+      // Ensure process is killed on error or timeout
+      proc.kill();
     }
   },
 });

@@ -84,9 +84,14 @@ async function execSemanticMemory(
     });
 
     try {
+      const TIMEOUT_MS = 30_000;
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Process timed out after 30s")), TIMEOUT_MS)
+      );
+
       const stdout = Buffer.from(await new Response(proc.stdout).arrayBuffer());
       const stderr = Buffer.from(await new Response(proc.stderr).arrayBuffer());
-      const exitCode = await proc.exited;
+      const exitCode = await Promise.race([proc.exited, timeoutPromise]);
 
       return { exitCode, stdout, stderr };
     } finally {

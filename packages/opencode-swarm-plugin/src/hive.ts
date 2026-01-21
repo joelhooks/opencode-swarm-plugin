@@ -75,14 +75,19 @@ async function runGitCommand(
     stderr: "pipe",
   });
 
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
+  try {
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
 
-  const exitCode = await proc.exited;
+    const exitCode = await proc.exited;
 
-  return { exitCode, stdout, stderr };
+    return { exitCode, stdout, stderr };
+  } finally {
+    // Ensure process is killed if Promise.all or proc.exited fails
+    proc.kill();
+  }
 }
 
 import {
