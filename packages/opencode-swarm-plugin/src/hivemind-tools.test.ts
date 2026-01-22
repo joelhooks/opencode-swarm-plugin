@@ -749,6 +749,43 @@ describe("hivemind tools integration", () => {
 		});
 	});
 
+	describe("input validation", () => {
+		test("hivemind_find returns error when query is missing", async () => {
+			const findTool = hivemindTools["hivemind_find"];
+			const result = await findTool.execute(
+				{} as any,
+				{ sessionID: "test-session" } as any,
+			);
+
+			const parsed = JSON.parse(result);
+			expect(parsed.success).toBe(false);
+			expect(parsed.error).toBeDefined();
+			expect(parsed.error.message).toContain("query");
+		});
+
+		test("hivemind_find returns error when query is empty string", async () => {
+			const findTool = hivemindTools["hivemind_find"];
+			const result = await findTool.execute(
+				{ query: "" },
+				{ sessionID: "test-session" } as any,
+			);
+
+			const parsed = JSON.parse(result);
+			expect(parsed.success).toBe(false);
+		});
+
+		test("hivemind_find returns error when query is whitespace only", async () => {
+			const findTool = hivemindTools["hivemind_find"];
+			const result = await findTool.execute(
+				{ query: "   " },
+				{ sessionID: "test-session" } as any,
+			);
+
+			const parsed = JSON.parse(result);
+			expect(parsed.success).toBe(false);
+		});
+	});
+
 	describe("deprecation aliases", () => {
 		afterAll(async () => {
 			resetHivemindCache();

@@ -257,6 +257,17 @@ export const hivemind_find = tool({
 			.describe("Use full-text search instead of vector search (default: false)"),
 	},
 	async execute(args: FindArgs, ctx: ToolContext) {
+		// Validate query parameter
+		if (!args.query || typeof args.query !== 'string' || args.query.trim() === '') {
+			return JSON.stringify({
+				success: false,
+				error: {
+					code: "VALIDATION_ERROR",
+					message: "query parameter is required and must be a non-empty string"
+				}
+			});
+		}
+
 		const startTime = Date.now();
 		const adapter = await getMemoryAdapter();
 		const result = await adapter.find(args);
