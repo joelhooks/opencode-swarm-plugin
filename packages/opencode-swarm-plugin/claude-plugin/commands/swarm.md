@@ -260,12 +260,26 @@ Return a 3-5 bullet summary for shared_context."
 )
 ```
 
-### 3. Create Feature Branch (unless --to-main)
+### 3. Confirm Git Strategy with User
 
+**ALWAYS ask the user before creating branches or PRs.**
+
+Use AskUserQuestion:
+```
+"Should I create a feature branch for this swarm?"
+Options:
+- "Yes, create swarm/<task-name> branch" (Recommended)
+- "No, work on current branch"
+- "I'll handle branching myself"
+```
+
+If user approves branch:
 ```bash
 git checkout -b swarm/<short-task-name>
 git push -u origin HEAD
 ```
+
+**Never assume - always confirm git operations with the user.**
 
 ### 4. Decomposition (Delegate to Subagent)
 
@@ -461,11 +475,25 @@ swarm_complete({
 })
 ```
 
-### 11. Create PR (unless --to-main)
+### 11. Confirm PR Creation with User
 
+**ALWAYS ask before creating a PR.**
+
+Use AskUserQuestion:
+```
+"Swarm complete. Should I create a PR?"
+Options:
+- "Yes, create PR" (Recommended)
+- "No, I'll create it manually"
+- "No, commit to main directly"
+```
+
+If user approves PR:
 ```bash
 gh pr create --title "feat: <epic title>" --body "## Summary\n<bullets>\n\n## Subtasks\n<list>"
 ```
+
+**Return the PR URL when done.**
 
 ## Swarm Mail Quick Reference
 
