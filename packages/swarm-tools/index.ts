@@ -33,7 +33,7 @@ const SWARM_TOOLS = [
   {
     name: "hive_cells",
     label: "Hive Cells",
-    description: "Query cells from hive with filters (status, type, ready, parent_id)",
+    description: "Query cells from hive with filters (status, type, ready, parent_id). Supports cross-project queries via project_key.",
     parameters: {
       type: "object",
       properties: {
@@ -43,9 +43,16 @@ const SWARM_TOOLS = [
         parent_id: { type: "string", description: "Get children of an epic" },
         id: { type: "string", description: "Get specific cell by partial ID" },
         limit: { type: "number", description: "Max results" },
+        project_key: { type: "string", description: "Override project scope (use hive_projects to list available)" },
       },
       additionalProperties: false,
     },
+  },
+  {
+    name: "hive_projects",
+    label: "Hive Projects",
+    description: "List all projects with hive cells. Shows project_key, cell counts, and which is current.",
+    parameters: { type: "object", properties: {}, additionalProperties: false },
   },
   {
     name: "hive_create",
@@ -138,7 +145,13 @@ const SWARM_TOOLS = [
     name: "hivemind_stats",
     label: "Hivemind Stats",
     description: "Get hivemind memory statistics - counts, embeddings, health",
-    parameters: { type: "object", properties: {}, additionalProperties: false },
+    parameters: {
+      type: "object",
+      properties: {
+        project_key: { type: "string", description: "Override project scope (default: current working directory)" },
+      },
+      additionalProperties: false,
+    },
   },
   {
     name: "hivemind_find",
@@ -152,6 +165,7 @@ const SWARM_TOOLS = [
         fts: { type: "boolean", description: "Use full-text search instead of semantic" },
         expand: { type: "boolean", description: "Return expanded context" },
         collection: { type: "string", description: "Filter by collection" },
+        project_key: { type: "string", description: "Override project scope (default: current working directory)" },
       },
       required: ["query"],
       additionalProperties: false,
@@ -168,6 +182,7 @@ const SWARM_TOOLS = [
         tags: { type: "string", description: "Comma-separated tags" },
         collection: { type: "string", description: "Collection name (default: 'default')" },
         confidence: { type: "number", description: "Confidence score 0-1" },
+        project_key: { type: "string", description: "Override project scope (default: current working directory)" },
       },
       required: ["information"],
       additionalProperties: false,
@@ -181,6 +196,7 @@ const SWARM_TOOLS = [
       type: "object",
       properties: {
         id: { type: "string", description: "Memory ID (required)" },
+        project_key: { type: "string", description: "Override project scope (default: current working directory)" },
       },
       required: ["id"],
       additionalProperties: false,
@@ -421,13 +437,132 @@ const SWARM_TOOLS = [
   },
 ] as const;
 
+// ============================================================================
+// Hivemind Memory Hooks (auto-recall / auto-capture)
+// ============================================================================
+
+interface MemoryResult {
+  memory: {
+    id: string;
+    content: string;
+    metadata?: { tags?: string[] };
+    collection?: string;
+    createdAt?: string;
+    confidence?: number;
+  };
+  score: number;
+  matchType: string;
+}
+
+function swarmMemory(action: string, args: Record<string, unknown>): { success: boolean; data?: unknown; error?: string } {
+  try {
+    const cmdArgs = ["memory", action];
+    if (action === "store" && args.information) {
+      cmdArgs.push(String(args.information));
+      if (args.tags) cmdArgs.push("--tags", String(args.tags));
+    } else if (action === "find" && args.query) {
+      cmdArgs.push(String(args.query));
+      if (args.limit) cmdArgs.push("--limit", String(args.limit));
+    }
+    cmdArgs.push("--json");
+
+    const output = execFileSync("swarm", cmdArgs, {
+      encoding: "utf-8",
+      timeout: 30000,
+      env: { ...process.env, PATH: `${process.env.HOME}/.bun/bin:${process.env.PATH}` },
+    });
+    return JSON.parse(output);
+  } catch (error) {
+    const err = error as { stdout?: string; message?: string };
+    if (err.stdout) {
+      try { return JSON.parse(err.stdout); } catch { /* ignore */ }
+    }
+    return { success: false, error: err.message || String(error) };
+  }
+}
+
+// Patterns that indicate content worth storing
+const CAPTURE_PATTERNS = [
+  /\b(prefer|like|want|need|always|never|usually|remember)\b/i,
+  /\b(decision|decided|chose|choice|important|note)\b/i,
+  /\b(learned|discovered|found out|realized)\b/i,
+  /\b(project|task|todo|deadline|meeting)\b/i,
+];
+
+const SKIP_PATTERNS = [
+  /^(ok|okay|sure|yes|no|thanks|thank you|got it|understood)\.?$/i,
+  /^(hi|hello|hey|bye|goodbye)\.?$/i,
+  /<hivemind-context>[\s\S]*<\/hivemind-context>/,
+  /^\s*$/,
+];
+
+function shouldCapture(text: string): boolean {
+  if (text.length < 50) return false;
+  for (const pattern of SKIP_PATTERNS) {
+    if (pattern.test(text)) return false;
+  }
+  for (const pattern of CAPTURE_PATTERNS) {
+    if (pattern.test(text)) return true;
+  }
+  return text.length > 200;
+}
+
+function detectTags(text: string): string[] {
+  const tags: string[] = ["auto-captured"];
+  const lower = text.toLowerCase();
+  if (/\b(prefer|like|want)\b/.test(lower)) tags.push("preference");
+  if (/\b(decision|decided|chose)\b/.test(lower)) tags.push("decision");
+  if (/\b(learned|discovered|found)\b/.test(lower)) tags.push("learning");
+  if (/\b(project|task|todo)\b/.test(lower)) tags.push("task");
+  return tags;
+}
+
+function formatRecallContext(results: MemoryResult[]): string {
+  if (results.length === 0) return "";
+  const lines = results.map((r) => {
+    const tags = r.memory.metadata?.tags?.join(", ") || "general";
+    const score = Math.round(r.score * 100);
+    const content = r.memory.content.slice(0, 300);
+    return `- [${tags}] ${content}${content.length >= 300 ? "..." : ""} (${score}%)`;
+  });
+  return `<hivemind-context>
+Relevant memories:
+${lines.join("\n")}
+Use naturally when relevant.
+</hivemind-context>`;
+}
+
+// ============================================================================
+// Plugin Export
+// ============================================================================
+
 const swarmPlugin = {
   id: "swarm-tools",
   name: "Swarm Tools",
-  description: "Multi-agent swarm coordination with hivemind memory and cells",
-  configSchema: emptyPluginConfigSchema(),
+  description: "Multi-agent swarm coordination with hivemind memory (auto-recall/capture), cells, and workflows",
+  configSchema: {
+    type: "object",
+    properties: {
+      autoRecall: { type: "boolean", default: true, description: "Inject relevant memories before each turn" },
+      autoCapture: { type: "boolean", default: true, description: "Store important info after each turn" },
+      maxRecallResults: { type: "number", default: 5, description: "Max memories to inject" },
+      minScore: { type: "number", default: 0.3, description: "Min similarity score for recall" },
+      debug: { type: "boolean", default: false, description: "Debug logging" },
+    },
+    additionalProperties: false,
+  },
 
   register(api: ClawdbotPluginApi) {
+    const cfg = {
+      autoRecall: true,
+      autoCapture: true,
+      maxRecallResults: 5,
+      minScore: 0.3,
+      debug: false,
+      ...(api.pluginConfig as Record<string, unknown>),
+    };
+
+    // Register all swarm tools
     for (const tool of SWARM_TOOLS) {
       api.registerTool({
         name: tool.name,
@@ -444,6 +579,83 @@ const swarmPlugin = {
     }
 
     console.log(`[swarm-plugin] Registered ${SWARM_TOOLS.length} tools`);
+
+    // ========================================================================
+    // Auto-recall: inject relevant memories before agent starts
+    // ========================================================================
+    if (cfg.autoRecall) {
+      api.on("before_agent_start", async (event: Record<string, unknown>) => {
+        const prompt = event.prompt as string | undefined;
+        if (!prompt || prompt.length < 10) return;
+
+        try {
+          const result = swarmMemory("find", { query: prompt, limit: cfg.maxRecallResults });
+          if (!result.success || !result.data) return;
+
+          const data = result.data as { results?: MemoryResult[] };
+          const results = (data.results || []).filter((r) => r.score >= cfg.minScore);
+          if (results.length === 0) return;
+
+          const context = formatRecallContext(results);
+          if (cfg.debug) console.log(`[swarm-plugin] Injecting ${results.length} memories`);
+
+          return { prependContext: context };
+        } catch (err) {
+          if (cfg.debug) console.log(`[swarm-plugin] Recall error: ${err}`);
+        }
+      });
+    }
+
+    // ========================================================================
+    // Auto-capture: store important info after agent ends
+    // ========================================================================
+    if (cfg.autoCapture) {
+      api.on("agent_end", async (event: Record<string, unknown>) => {
+        if (!event.success || !Array.isArray(event.messages) || event.messages.length === 0) return;
+
+        try {
+          const texts: string[] = [];
+          for (const msg of event.messages) {
+            if (!msg || typeof msg !== "object") continue;
+            const msgObj = msg as Record<string, unknown>;
+            const role = msgObj.role;
+            if (role !== "user" && role !== "assistant") continue;
+
+            const content = msgObj.content;
+            if (typeof content === "string") {
+              texts.push(content);
+            } else if (Array.isArray(content)) {
+              for (const block of content) {
+                if (block && typeof block === "object" &&
+                    (block as Record<string, unknown>).type === "text" &&
+                    typeof (block as Record<string, unknown>).text === "string") {
+                  texts.push((block as Record<string, unknown>).text as string);
+                }
+              }
+            }
+          }
+
+          const toCapture = texts.filter((t) => shouldCapture(t) && !t.includes("<hivemind-context>"));
+          if (toCapture.length === 0) return;
+
+          let stored = 0;
+          for (const text of toCapture.slice(0, 2)) {
+            const tags = detectTags(text);
+            const truncated = text.slice(0, 500);
+            const result = swarmMemory("store", { information: truncated, tags: tags.join(",") });
+            if (result.success) stored++;
+          }
+
+          if (cfg.debug && stored > 0) console.log(`[swarm-plugin] Captured ${stored} memories`);
+        } catch (err) {
+          if (cfg.debug) console.log(`[swarm-plugin] Capture error: ${err}`);
+        }
+      });
+    }
+
+    if (cfg.autoRecall || cfg.autoCapture) {
+      console.log(`[swarm-plugin] Hivemind hooks: autoRecall=${cfg.autoRecall}, autoCapture=${cfg.autoCapture}`);
+    }
   },
 };
 
