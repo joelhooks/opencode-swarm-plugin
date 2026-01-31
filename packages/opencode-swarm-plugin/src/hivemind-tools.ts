@@ -214,9 +214,13 @@ export const hivemind_store = tool({
 			.boolean()
 			.optional()
 			.describe("Extract entities (people, places, technologies). Default false"),
+		project_key: tool.schema
+			.string()
+			.optional()
+			.describe("Override project scope (default: current working directory)"),
 	},
-	async execute(args: StoreArgs, ctx: ToolContext) {
-		const adapter = await getMemoryAdapter();
+	async execute(args: StoreArgs & { project_key?: string }, ctx: ToolContext) {
+		const adapter = await getMemoryAdapter(args.project_key);
 		const result = await adapter.store(args);
 
 		// Emit event
@@ -255,8 +259,12 @@ export const hivemind_find = tool({
 			.boolean()
 			.optional()
 			.describe("Use full-text search instead of vector search (default: false)"),
+		project_key: tool.schema
+			.string()
+			.optional()
+			.describe("Override project scope (default: current working directory)"),
 	},
-	async execute(args: FindArgs, ctx: ToolContext) {
+	async execute(args: FindArgs & { project_key?: string }, ctx: ToolContext) {
 		// Validate query parameter
 		if (!args.query || typeof args.query !== 'string' || args.query.trim() === '') {
 			return JSON.stringify({
@@ -269,7 +277,7 @@ export const hivemind_find = tool({
 		}
 
 		const startTime = Date.now();
-		const adapter = await getMemoryAdapter();
+		const adapter = await getMemoryAdapter(args.project_key);
 		const result = await adapter.find(args);
 		const duration = Date.now() - startTime;
 
@@ -293,9 +301,13 @@ export const hivemind_get = tool({
 	description: "Retrieve a specific memory by its ID. Works for both learnings and session memories.",
 	args: {
 		id: tool.schema.string().describe("Memory ID (required)"),
+		project_key: tool.schema
+			.string()
+			.optional()
+			.describe("Override project scope (default: current working directory)"),
 	},
-	async execute(args: IdArgs, ctx: ToolContext) {
-		const adapter = await getMemoryAdapter();
+	async execute(args: IdArgs & { project_key?: string }, ctx: ToolContext) {
+		const adapter = await getMemoryAdapter(args.project_key);
 		const memory = await adapter.get(args);
 		return memory ? JSON.stringify(memory, null, 2) : "Memory not found";
 	},
@@ -308,9 +320,13 @@ export const hivemind_remove = tool({
 	description: "Delete a memory by ID. Use this to remove outdated or incorrect memories.",
 	args: {
 		id: tool.schema.string().describe("Memory ID (required)"),
+		project_key: tool.schema
+			.string()
+			.optional()
+			.describe("Override project scope (default: current working directory)"),
 	},
-	async execute(args: IdArgs, ctx: ToolContext) {
-		const adapter = await getMemoryAdapter();
+	async execute(args: IdArgs & { project_key?: string }, ctx: ToolContext) {
+		const adapter = await getMemoryAdapter(args.project_key);
 		const result = await adapter.remove(args);
 
 		if (result.success) {
@@ -331,9 +347,13 @@ export const hivemind_validate = tool({
 		"Validate that a memory is still accurate and reset its decay timer (90-day half-life). Use when you confirm a memory is correct.",
 	args: {
 		id: tool.schema.string().describe("Memory ID (required)"),
+		project_key: tool.schema
+			.string()
+			.optional()
+			.describe("Override project scope (default: current working directory)"),
 	},
-	async execute(args: IdArgs, ctx: ToolContext) {
-		const adapter = await getMemoryAdapter();
+	async execute(args: IdArgs & { project_key?: string }, ctx: ToolContext) {
+		const adapter = await getMemoryAdapter(args.project_key);
 		const result = await adapter.validate(args);
 
 		if (result.success) {
@@ -353,16 +373,21 @@ export const hivemind_validate = tool({
 export const hivemind_stats = tool({
 	description:
 		"Get statistics about stored memories, embeddings, and system health. Shows counts by collection (learnings vs sessions) and Ollama availability.",
-	args: {},
-	async execute(args: {}, ctx: ToolContext) {
-		const adapter = await getMemoryAdapter();
+	args: {
+		project_key: tool.schema
+			.string()
+			.optional()
+			.describe("Override project scope (default: current working directory)"),
+	},
+	async execute(args: { project_key?: string }, ctx: ToolContext) {
+		const adapter = await getMemoryAdapter(args.project_key);
 		const stats = await adapter.stats();
 		const health = await adapter.checkHealth();
 
 		// Get session indexer stats too
 		let sessionStats = {};
 		try {
-			const indexer = await getSessionIndexer();
+			const indexer = await getSessionIndexer(args.project_key);
 			sessionStats = await Effect.runPromise(indexer.getStats());
 		} catch {
 			// SessionIndexer might not be available
@@ -388,12 +413,16 @@ export const hivemind_index = tool({
 			.boolean()
 			.optional()
 			.describe("Force full rebuild (default: incremental)"),
+		project_key: tool.schema
+			.string()
+			.optional()
+			.describe("Override project scope (default: current working directory)"),
 	},
-	async execute(args: { full?: boolean }, ctx: ToolContext) {
+	async execute(args: { full?: boolean; project_key?: string }, ctx: ToolContext) {
 		const startTime = Date.now();
 
 		try {
-			const indexer = await getSessionIndexer();
+			const indexer = await getSessionIndexer(args.project_key);
 			const allResults = [];
 
 			// Index all agent directories
@@ -450,10 +479,15 @@ export const hivemind_index = tool({
 export const hivemind_sync = tool({
 	description:
 		"Sync memories to .hive/memories.jsonl for git-based sharing. Team members can sync their local databases from the JSONL file.",
-	args: {},
-	async execute(args: {}, ctx: ToolContext) {
+	args: {
+		project_key: tool.schema
+			.string()
+			.optional()
+			.describe("Override project scope (default: current working directory)"),
+	},
+	async execute(args: { project_key?: string }, ctx: ToolContext) {
 		try {
-			const projectPath = cachedProjectPath || process.cwd();
+			const projectPath = args.project_key || cachedProjectPath || process.cwd();
 			const swarmMail = await getSwarmMailLibSQL(projectPath);
 			const dbAdapter = await swarmMail.getDatabase();
 			

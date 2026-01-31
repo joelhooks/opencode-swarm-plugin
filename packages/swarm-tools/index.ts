@@ -7,8 +7,7 @@
  * - Swarmmail: agent coordination
  * - Swarm: parallel workflow orchestration
  */
-import type { ClawdbotPluginApi } from "clawdbot/plugin-sdk";
-import { emptyPluginConfigSchema } from "clawdbot/plugin-sdk";
+import type { MoltbotPluginApi } from "clawdbot/plugin-sdk";
 import { execFileSync } from "child_process";
 
 function executeSwarmTool(name: string, args: Record<string, unknown>): string {
@@ -552,7 +551,7 @@ const swarmPlugin = {
     additionalProperties: false,
   },
 
-  register(api: ClawdbotPluginApi) {
+  register(api: MoltbotPluginApi) {
     const cfg = {
       autoRecall: true,
       autoCapture: true,
@@ -584,24 +583,32 @@ const swarmPlugin = {
     // Auto-recall: inject relevant memories before agent starts
     // ========================================================================
     if (cfg.autoRecall) {
+      console.log(`[swarm-plugin] Registering before_agent_start hook`);
       api.on("before_agent_start", async (event: Record<string, unknown>) => {
+        console.log(`[swarm-plugin] before_agent_start fired, prompt length: ${(event.prompt as string)?.length || 0}`);
         const prompt = event.prompt as string | undefined;
-        if (!prompt || prompt.length < 10) return;
+        if (!prompt || prompt.length < 10) {
+          console.log(`[swarm-plugin] Skipping recall: prompt too short`);
+          return;
+        }
 
         try {
+          console.log(`[swarm-plugin] Querying hivemind for: ${prompt.slice(0, 50)}...`);
           const result = swarmMemory("find", { query: prompt, limit: cfg.maxRecallResults });
+          console.log(`[swarm-plugin] Hivemind result: success=${result.success}`);
           if (!result.success || !result.data) return;
 
           const data = result.data as { results?: MemoryResult[] };
           const results = (data.results || []).filter((r) => r.score >= cfg.minScore);
+          console.log(`[swarm-plugin] Found ${results.length} memories above ${cfg.minScore} threshold`);
           if (results.length === 0) return;
 
           const context = formatRecallContext(results);
-          if (cfg.debug) console.log(`[swarm-plugin] Injecting ${results.length} memories`);
+          console.log(`[swarm-plugin] Injecting ${results.length} memories (${context.length} chars)`);
 
           return { prependContext: context };
         } catch (err) {
-          if (cfg.debug) console.log(`[swarm-plugin] Recall error: ${err}`);
+          console.log(`[swarm-plugin] Recall error: ${err}`);
         }
       });
     }

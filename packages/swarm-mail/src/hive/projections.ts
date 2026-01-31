@@ -89,6 +89,22 @@ export async function updateProjections(
 // ============================================================================
 
 /**
+ * List all projects with hive cells (cross-project query)
+ *
+ * This is the one query that spans all project_keys — no project_key filter.
+ * Use for cross-project awareness (e.g., showing other projects in hive_cells hint).
+ */
+export async function listProjects(
+  db: DatabaseAdapter,
+): Promise<{ project_key: string; cell_count: number }[]> {
+  const result = await db.query<{ project_key: string; cell_count: number }>(
+    `SELECT project_key, COUNT(*) as cell_count FROM beads WHERE deleted_at IS NULL GROUP BY project_key ORDER BY cell_count DESC`,
+    [],
+  );
+  return result.rows;
+}
+
+/**
  * Get a bead by ID
  */
 export async function getCell(

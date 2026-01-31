@@ -105,6 +105,7 @@ export {
   getLabels,
   getNextReadyCell,
   isBlocked,
+  listProjects,
   markBeadDirty,
   queryCells,
   updateProjections,

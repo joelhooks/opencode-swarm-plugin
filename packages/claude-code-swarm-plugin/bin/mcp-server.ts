@@ -31,6 +31,7 @@ const ALLOWED_TOOLS = new Set([
   "hive_query",
   "hive_ready",
   "hive_update",
+  "hive_projects",
 
   // Hivemind - unified memory
   "hivemind_find",

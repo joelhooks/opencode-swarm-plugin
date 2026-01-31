@@ -25,6 +25,7 @@ import {
   getSwarmMailLibSQL,
   resolvePartialId,
   findCellsByPartialId,
+  listProjects,
 } from "swarm-mail";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -1396,6 +1397,7 @@ USE THIS TOOL TO:
 - Get the next ready (unblocked) cell: hive_cells({ ready: true })
 - Get children of an epic: hive_cells({ parent_id: "epic-id" })
 - Combine filters: hive_cells({ status: "open", type: "task" })
+- Query another project: hive_cells({ project_key: "/home/joel/clawd" })
 
 RETURNS: Array of cells with id, title, status, priority, type, parent_id, created_at, updated_at
 
@@ -1411,50 +1413,67 @@ PREFER THIS OVER hive_query when you need to:
     parent_id: tool.schema.string().optional().describe("Filter by parent epic ID (returns children of an epic)"),
     ready: tool.schema.boolean().optional().describe("If true, return only the next unblocked cell"),
     limit: tool.schema.number().optional().describe("Max cells to return (default 20)"),
+    project_key: tool.schema.string().optional().describe("Override project scope (use hive_projects to list available)"),
   },
   async execute(args, ctx) {
-    const projectKey = getHiveWorkingDirectory();
-    const adapter = await getHiveAdapter(projectKey);
-    
+    const currentProjectKey = getHiveWorkingDirectory();
+    const effectiveProjectKey = args.project_key || currentProjectKey;
+    const adapter = await getHiveAdapter(effectiveProjectKey);
+
     try {
+      let formatted: Record<string, unknown>[];
+
       // If specific ID requested, find all matching cells (supports partial IDs)
       if (args.id) {
-        const matchingCells = await findCellsByPartialId(adapter, projectKey, args.id);
+        const matchingCells = await findCellsByPartialId(adapter, effectiveProjectKey, args.id);
         if (matchingCells.length === 0) {
           throw new HiveError(`No cell found matching ID '${args.id}'`, "hive_cells");
         }
-        const formatted = matchingCells.map(c => formatCellForOutput(c));
-        return JSON.stringify(formatted, null, 2);
-      }
-      
-      // If ready flag, return next unblocked cell
-      if (args.ready) {
-        const ready = await adapter.getNextReadyCell(projectKey);
+        formatted = matchingCells.map(c => formatCellForOutput(c));
+      } else if (args.ready) {
+        // If ready flag, return next unblocked cell
+        const ready = await adapter.getNextReadyCell(effectiveProjectKey);
         if (!ready) {
-          return JSON.stringify([], null, 2);
+          formatted = [];
+        } else {
+          formatted = [formatCellForOutput(ready)];
         }
-        const formatted = formatCellForOutput(ready);
-        return JSON.stringify([formatted], null, 2);
+      } else {
+        // Query with filters
+        const cells = await adapter.queryCells(effectiveProjectKey, {
+          status: args.status,
+          type: args.type,
+          parent_id: args.parent_id,
+          limit: args.limit || 20,
+        });
+        formatted = cells.map(c => formatCellForOutput(c));
       }
-      
-      // Query with filters
-      const cells = await adapter.queryCells(projectKey, {
-        status: args.status,
-        type: args.type,
-        parent_id: args.parent_id,
-        limit: args.limit || 20,
-      });
-      
-      const formatted = cells.map(c => formatCellForOutput(c));
-      return JSON.stringify(formatted, null, 2);
+
+      // Build cross-project hint
+      let crossProjectHint = "";
+      try {
+        const db = await adapter.getDatabase();
+        const allProjects = await listProjects(db);
+        const otherProjects = allProjects.filter(p => p.project_key !== effectiveProjectKey);
+        if (otherProjects.length > 0) {
+          const projectList = otherProjects
+            .map(p => `${p.project_key} (${p.cell_count})`)
+            .join(", ");
+          crossProjectHint = `\n---\nOther projects with cells: ${projectList}\nUse project_key param to query them.`;
+        }
+      } catch {
+        // Non-fatal — cross-project hint is nice-to-have
+      }
+
+      return JSON.stringify(formatted, null, 2) + crossProjectHint;
     } catch (error) {
       // Re-throw HiveErrors as-is
       if (error instanceof HiveError) {
         throw error;
       }
-      
+
       const message = error instanceof Error ? error.message : String(error);
-      
+
       // Provide helpful error messages
       if (message.includes("Bead not found") || message.includes("Cell not found")) {
         throw new HiveError(
@@ -1462,10 +1481,41 @@ PREFER THIS OVER hive_query when you need to:
           "hive_cells",
         );
       }
-      
+
       throw new HiveError(
         `Failed to query cells: ${message}`,
         "hive_cells",
+      );
+    }
+  },
+});
+
+/**
+ * List all projects with hive cells
+ */
+export const hive_projects = tool({
+  description: "List all projects with hive cells. Shows project_key and cell counts across the entire swarm database.",
+  args: {},
+  async execute(args, ctx) {
+    const currentProjectKey = getHiveWorkingDirectory();
+    const adapter = await getHiveAdapter(currentProjectKey);
+
+    try {
+      const db = await adapter.getDatabase();
+      const projects = await listProjects(db);
+
+      const result = projects.map(p => ({
+        project_key: p.project_key,
+        cell_count: p.cell_count,
+        is_current: p.project_key === currentProjectKey,
+      }));
+
+      return JSON.stringify(result, null, 2);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new HiveError(
+        `Failed to list projects: ${message}`,
+        "hive_projects",
       );
     }
   },
@@ -1839,6 +1889,7 @@ export const hiveTools = {
   hive_start,
   hive_ready,
   hive_cells,
+  hive_projects,
   hive_sync,
   hive_link_thread,
   hive_session_start,
